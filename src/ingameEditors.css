@@ -1,0 +1,373 @@
+/* SS13 game references and the corresponding evidence are in artifacts/ingame-details-*. */
+:root { --game-tooltip: #25272bf5; --game-node: clamp(38px,4vw,76px); --game-node-line: #cbdce7; --game-selected: #ead18c; --game-metal: #a8afb0; --game-card-gold: #ad9e6f; --game-gem: clamp(42px,4.1vw,82px); }
+.talent-editor-modal, .pact-editor-modal, .skill-editor-modal.skill-runtime-editor, .equipment-editor {
+  position: fixed; inset: 0; width: auto; max-width: none; height: auto; max-height: none; transform: none;
+  border: 1px solid #627e91; border-radius: 1px; color: var(--game-text);
+  background: radial-gradient(ellipse at 64% 60%, #34567388, transparent 70%), #122332;
+}
+.talent-editor-modal > .modal-close, .pact-editor-modal > .modal-close { position: fixed; top: 10px; left: auto; right: 12px; z-index: 10; margin: 0; }
+.talent-editor-modal button, .pact-editor-modal button, .skill-runtime-editor button, .equipment-editor button { border-radius: 1px; }
+.talent-editor-modal summary, .pact-editor-modal summary, .skill-runtime-editor summary { cursor: pointer; color: #d4e2ec; padding: 12px; }
+
+/* Talent trees: original 7 x 5 positions, circular nodes and prerequisite links. */
+.talent-editor-modal { overflow: auto; background: linear-gradient(110deg,#17212b 10%,#20232666 40%,#96743388),radial-gradient(ellipse at 90% 100%,#d8aa45,#2b2925 70%); }
+.talent-editor { display: grid; grid-template-columns: 16% minmax(0, 1fr); gap: 18px 5%; padding: 18px 7% 28px 2%; }
+.talent-editor-header { grid-column: 1; grid-row: 1 / span 5; position: sticky; top: 0; width: 100%; height: fit-content; padding-right: 0; background: transparent; display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+.talent-editor-header h1 { font-size: 18px; color: #e4e8eb; }
+.talent-editor-header > button { order: 3; background: #26313c; color: #bdc5ce; }
+.talent-board-tabs { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 23vh; }
+.talent-board-tabs button { min-height: 48px; display: grid; grid-template-columns: 38px 1fr; gap: 0 8px; align-items: center; text-align: left; padding: 2px 8px; border: 1px solid #8d8e83; background: linear-gradient(12deg,#b78337,#202226 68%); }
+.talent-board-tabs button[aria-selected="true"] { border-color: #fff2cd; box-shadow: 0 0 10px #ffedab, inset 0 0 12px #f7db8755; }
+.talent-board-icon { width: 38px; height: 38px; object-fit: contain; grid-row: 1 / 3; border-radius: 50%; padding: 5px; background: #28251d; box-shadow: 0 0 0 2px #5f4d32,0 0 0 3px #ad8b47; }
+.talent-board-tabs button span:not(.talent-board-icon) { font-size: 11px; color: #c2bcae; }
+.talent-board-tabs button small { font-size: 15px; color: #f0e3c6; white-space: normal; overflow: visible; }
+.talent-active-board { grid-column: 2; grid-template-columns: minmax(0,1fr); border: 0; padding: 13vh 0 0; background: none; gap: 4px; min-width: 0; }
+.talent-active-board > header { min-width: 0; padding-right: 42px; }
+.talent-tree-source { display: none; }
+.talent-tree-source img { width: 64px; height: 64px; }
+.talent-tree-select-label select { min-width: 180px; background: #28313a; border-color: #82755d; color: #eee4d2; }
+.talent-grid-viewport { overflow: auto; max-height: none; padding: 0 12px; border: 0; border-radius: 0; background: transparent; }
+.ingame-talent-thresholds { min-width: 630px; display: grid; grid-template-columns: repeat(7,1fr); border-bottom: 2px solid #d9d6c18f; margin: 12px 0 8px; }
+.ingame-talent-thresholds span { justify-self: center; background: #dce2df; color: #222b31; font-weight: 700; padding: 2px 6px; transform: translateY(50%); }
+.talent-node-grid { position: relative; min-width: 630px; height: clamp(250px,44vh,560px); grid-template-columns: repeat(7,minmax(90px,1fr)); grid-template-rows: repeat(5,minmax(0,1fr)); gap: 0; padding: 0; }
+.ingame-talent-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ingame-talent-links line { stroke: #090d13; stroke-width: 2.5; }
+.ingame-talent-links line[data-active="true"] { stroke: #f9e9ac; filter: drop-shadow(0 0 3px #e6c16c); }
+.talent-node-grid [data-role="talent-node-cell"] { position: relative; min-height: 0; width: var(--game-node); height: var(--game-node); align-self: center; justify-self: center; border: 0; padding: 0; border-radius: 50%; background: none; display: block; }
+.talent-node-grid [data-role="talent-node-cell"][aria-hidden="true"] { pointer-events: none; }
+.talent-node-grid [data-action="talent-node-add"] { border: 1px solid #bfc2bf; background: #464d51; box-shadow: 0 0 0 2px #1d2225,inset 0 0 0 2px #b2b5b2; }
+.talent-node-grid [data-available="false"] > .talent-node-icon { opacity: .42; filter: grayscale(1); }
+.talent-node-grid [data-allocated="true"] { border-color: #fff; box-shadow: 0 0 0 2px #babbb4; background: #fff; }
+.talent-node-grid [data-allocated="true"] > .talent-node-icon { filter: brightness(0); }
+.talent-node-grid [data-in-prism-area="true"] { box-shadow: 0 0 3px 5px #aa65f8, 0 0 22px #c58eff; }
+.talent-node-grid .talent-node-icon { width: 100%; height: 100%; border-radius: 50%; object-fit: contain; }
+.ingame-talent-rank { position: absolute; bottom: -3px; right: -3px; border-radius: 50%; min-width: 15px; padding: 0 2px; color: #bfc3c2; background: #10161d; border: 1px solid #8d9392; text-align: center; font-weight: 700; font-size: 12px; }
+.talent-node-grid [data-allocated="true"] .ingame-talent-rank { color: #e9cd72; }
+.ingame-talent-tooltip { position: absolute; z-index: 5; top: 52px; left: 40px; width: 275px; max-height: 210px; overflow: auto; padding: 14px; background: var(--game-tooltip); border: 1px solid #a3926c; color: #d7e1e5; box-shadow: 0 10px 28px #0009; display: none; text-align: left; }
+.talent-node-grid [data-role="talent-node-cell"]:is(:hover,:focus-within) { z-index: 6; }
+.talent-node-grid [data-role="talent-node-cell"]:is(:hover,:focus-within) .ingame-talent-tooltip { display: block; }
+.talent-node-grid [data-x="5"] .ingame-talent-tooltip, .talent-node-grid [data-x="6"] .ingame-talent-tooltip { left: auto; right: 40px; }
+.talent-node-grid [data-y="3"] .ingame-talent-tooltip, .talent-node-grid [data-y="4"] .ingame-talent-tooltip { top: auto; bottom: 48px; }
+.talent-node-grid [data-y="2"] .ingame-talent-tooltip { top: -65px; }
+.ingame-talent-tooltip > strong { display: block; color: #edd8a4; font-size: 15px; }
+.ingame-talent-tooltip > p { margin: 10px 0; font-size: 13px; line-height: 1.7; }
+.ingame-talent-tooltip > small { display: block; margin-top: 5px; color: #aebfce; font-size: 11px; }
+.ingame-talent-tooltip .talent-node-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ingame-talent-tooltip .talent-node-actions button { min-width: 34px; min-height: 30px; }
+.ingame-core-drawer, .ingame-talent-accessory, .talent-source-disclosure { background: #15222c88; border: 1px solid #7a756044; border-radius: 1px; }
+.ingame-talent-accessory, .talent-source-disclosure { grid-column: 2; }
+.talent-core-list { display: grid; grid-template-columns: minmax(0,1fr); gap: 28px; }
+.talent-core-list [data-role="talent-core-group"] { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; padding: 20px; }
+.talent-core-list h4 { grid-column: 1 / -1; margin: 0; }
+.talent-core-list [data-action="talent-core-toggle"] { display: flex; flex-direction: column; align-items: center; min-height: 310px; padding: 20px; border: 1px solid #b9aa7d; background: linear-gradient(#111b24,#243035); text-align: left; }
+.talent-core-list .talent-core-icon { width: 72px; height: 72px; margin: 0 0 20px; }
+.talent-core-list button > strong { width: 100%; font-size: 18px; border-bottom: 1px solid #8e8a7c66; padding-bottom: 12px; }
+.talent-core-list button > span { margin-top: 12px; font-size: 14px; line-height: 1.8; }
+.talent-core-list button[aria-pressed="true"] { border-color: #b5f079; box-shadow: 0 0 14px #9ee74377; background: linear-gradient(#162026,#334535); }
+
+/* Three contract branches share the same coordinate map in overview and editor. */
+.ingame-pact-summary, .ingame-pact-orbit { position: relative; width: min(100%,1000px); aspect-ratio: 1000 / 800; min-height: 0; margin: auto; background: radial-gradient(ellipse,#316d9b55,transparent 70%); }
+.ingame-pact-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ingame-pact-lines polyline { fill: none; stroke: #a6cbe2; stroke-width: 3; stroke-linejoin: bevel; opacity: .65; }
+.ingame-pact-emblem { fill: #09162488; stroke: #3e7197; stroke-width: 5; }
+.ingame-pact-summary .spirit-row-wrap, .ingame-pact-summary .pact-summary-rings { display: contents; }
+.ingame-pact-summary .spirit-row, .ingame-pact-spirit { position: absolute; transform: translate(-50%,-50%); width: 64px; height: 64px; min-height: 0; padding: 3px; border: 2px solid #c3aa75; border-radius: 50%; background: #122433; display: grid; place-items: center; }
+.ingame-pact-summary .spirit-row > img, .ingame-pact-spirit > img { width: 56px; height: 56px; object-fit: contain; border-radius: 50%; }
+.ingame-pact-summary .spirit-row > strong, .ingame-pact-spirit > strong { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); width: 155px; text-align: center; color: #f2e6c9; font-size: 12px; line-height: 1.5; }
+.ingame-pact-summary .spirit-row > small, .ingame-pact-spirit > small { position: absolute; bottom: 61px; font-size: 10px; white-space: nowrap; color: #ddcb8a; }
+.ingame-pact-summary .destiny-slot, .ingame-pact-node, .ingame-pact-summary .pact-summary-undetermined { position: absolute; transform: translate(-50%,-50%); width: 38px; height: 38px; min-height: 0; padding: 3px; border-radius: 50%; border: 2px solid #9bb9c8; background: #254967; box-shadow: 0 0 0 3px #12283888; color: #d8e8ee; }
+.ingame-pact-summary .destiny-slot.medium, .ingame-pact-node.medium, .ingame-pact-summary .pact-summary-undetermined { width: 50px; height: 50px; border-color: #dbba6c; background: #4d473e; }
+.ingame-pact-node > img, .ingame-pact-summary .destiny-icon { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }
+.ingame-pact-summary .destiny-slot > span, .ingame-pact-summary .destiny-slot > strong, .ingame-pact-summary .destiny-slot > small, .ingame-pact-summary .pact-summary-undetermined > * { display: none; }
+.ingame-pact-summary .destiny-slot:not(:has(img))::after { content: '+'; font-size: 20px; }
+.ingame-pact-summary .pact-summary-undetermined::after { content: '◇'; font-size: 25px; }
+.ingame-pact-node.undetermined { border-color: #ae9cd9; background: #4b3a75; }
+.ingame-pact-node:disabled { opacity: .25; }
+.ingame-pact-orbit button[aria-pressed="true"], .ingame-pact-summary button:hover { outline: 2px solid #fff1ad; box-shadow: 0 0 14px #ffe39988; }
+.ingame-pact-summary .pact-summary-source-only { position: relative; z-index: 2; max-width: 260px; background: #142331; }
+.spirit-section .destiny-counts { position: absolute; top: 70px; right: 28px; display: grid; gap: 12px; background: #12212be8; padding: 14px; }
+.spirit-section { position: relative; }
+.pact-editor-modal { overflow: auto; }
+.pact-editor { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 16px; padding: 24px; }
+.pact-editor-header { grid-column: 1 / -1; padding-right: 40px; }
+.pact-editor-header h2 { font-size: 25px; }
+.pact-editor-header > p { color: #b6c9d6; }
+.pact-source-searches { display: flex; gap: 16px; }
+.pact-source-searches label { width: 280px; font-size: 11px; }
+.pact-source-searches output { font-size: 10px; }
+.pact-capacity { justify-content: flex-end; position: absolute; right: 80px; top: 30px; }
+.pact-slot-tabs { grid-column: 1; grid-row: 2; position: static; padding: 0; background: transparent; }
+.pact-slot-tabs button { min-height: 40px; padding: 6px 12px; border: 1px solid #658193; background: #223b50; }
+.pact-slot-tabs button span { font-size: 10px; }
+.pact-slot-tabs button strong { font-size: 11px; }
+.pact-editor > .ingame-pact-orbit { grid-column: 1; grid-row: 3; align-self: start; }
+.pact-editor > .ingame-pact-orbit { width: min(100%,max(360px,calc((100dvh - 310px)*1.25))); }
+.ingame-pact-orbit { container-type: inline-size; }
+.pact-editor .ingame-pact-spirit, .pact-editor .ingame-pact-node { border-radius: 50%; padding: 3px; }
+.pact-editor .ingame-pact-spirit { width: clamp(40px,9cqw,64px); height: clamp(40px,9cqw,64px); }
+.pact-editor .ingame-pact-spirit > img { width: 100%; height: 100%; }
+.pact-editor .ingame-pact-spirit > strong, .pact-editor .ingame-pact-spirit > small { display: none; }
+.pact-editor .ingame-pact-node { width: clamp(24px,5.5cqw,38px); height: clamp(24px,5.5cqw,38px); min-height: 0; }
+.pact-editor .ingame-pact-node.medium, .pact-editor .ingame-pact-node.undetermined { width: clamp(32px,7cqw,50px); height: clamp(32px,7cqw,50px); }
+.pact-editor-section.ingame-pact-inspector { grid-column: 2; grid-row: 2 / span 2; background: #111f2bea; border: 1px solid #83919a; padding: 16px; max-height: calc(100dvh - 250px); overflow: auto; }
+.ingame-pact-inspector .pact-spirit-grid { display: block; }
+.ingame-pact-inspector .pact-spirit-slot, .ingame-pact-inspector .pact-ring-slot { padding: 0; border: 0; background: transparent; }
+.ingame-pact-inspector .pact-spirit-detail { display: block; }
+.ingame-pact-inspector .pact-spirit-detail > img { width: 80px; height: 80px; display: block; margin: 16px auto; }
+.ingame-pact-inspector .pact-spirit-detail > strong { display: block; color: #f0d4a2; font-size: 18px; text-align: center; }
+.ingame-pact-inspector .pact-spirit-detail > p, .ingame-pact-inspector .pact-source-affix { font-size: 13px; line-height: 1.8; }
+.ingame-pact-inspector .is-ring-grid { display: block; margin-top: 18px; }
+.ingame-pact-inspector .pact-ring-slot h5 { font-size: 17px; color: #ecd4a0; }
+.ingame-pact-inspector .pact-ring-slot p { font-size: 14px; line-height: 1.8; }
+.ingame-pact-inspector .pact-spirit-detail:has(.is-ring-grid:not([data-active-ring=""])) > :is(p,.pact-source-affix,.pact-source-affixes,[data-role="pact-spirit-calculation-partial"]) { display: none; }
+.ingame-pact-inspector .pact-spirit-slot:has(.is-ring-grid:not([data-active-ring=""])) > label,
+.ingame-pact-inspector .pact-spirit-detail:has(.is-ring-grid:not([data-active-ring=""])) > :is(img,label) { display: none; }
+.pact-editor > :is(.pact-source-only-destinies,.pact-legacy-unassigned) { grid-column: 1 / -1; }
+
+/* Equipment: inventory icon grid and the game's narrow, tall item tooltip. */
+.equipment-editor { display: flex; flex-direction: column; }
+.equipment-editor .editor-title { flex-basis: 52px; background: #0d1924bb; border-bottom: 1px solid #7691a044; }
+.equipment-editor .equipment-slots { padding: 8px 18px; gap: 8px; }
+.equipment-editor .equipment-slots button { flex: 0 0 68px; min-height: 62px; background: #203647; border-color: #8b9b9e; }
+.equipment-editor .equipment-slots button[aria-pressed="true"] { background: #8e683b; border-color: #f5d59b; }
+.equipment-editor .equipment-layout, .equipment-editor .equipment-layout.is-slot-scoped { flex: 1; min-height: 0; display: grid; grid-template-columns: 360px minmax(0,1fr) 150px; grid-template-rows: minmax(0,1fr); gap: 20px; padding: 18px 28px; }
+.equipment-editor .equipment-layout.is-slot-scoped { grid-template-columns: minmax(300px,420px) minmax(0,1fr); }
+.equipment-editor .equipment-cats { grid-column: 3; grid-row: 1; border: 0; background: #101e29; }
+.equipment-editor .equipment-list { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: repeat(auto-fill,minmax(90px,1fr)); grid-auto-rows: min-content; align-content: start; gap: 10px; padding: 12px; background: #b1bfbe17; border: 1px solid #82959d; overflow: auto; }
+.equipment-editor .equipment-list > .search-line, .equipment-editor .equipment-list > .equipment-list-heading, .equipment-editor .equipment-list > .catalog-results-footer { grid-column: 1 / -1; }
+.equipment-editor .equipment-list .editor-item { position: relative; display: block; height: 118px; padding: 0; border: 1px solid #9a9680; background: linear-gradient(140deg,#463a42,#182431 64%,#987039); }
+.equipment-editor .equipment-list .item-summary { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 7px; text-align: center; }
+.equipment-editor .equipment-list .item-summary img { width: 56px; height: 56px; object-fit: contain; }
+.equipment-editor .equipment-list .item-summary strong { font-size: 11px; line-height: 1.35; display: block; }
+.equipment-editor .equipment-list .item-summary small { display: none; }
+.equipment-editor .equipment-list .item-toggle { position: absolute; right: 2px; top: 2px; width: 24px; height: 24px; padding: 0; min-height: 0; background: #17242bcc; }
+.equipment-editor .equipment-layout .item-detail-panel { grid-column: 1; grid-row: 1; align-self: stretch; min-height: 0; height: auto; margin: 0; padding: 18px; border: 1px solid #9e8a69; background: linear-gradient(#4a392b,#17202b 190px); overflow: auto; }
+.equipment-editor .detail-title h3 { font-size: 21px; color: #f4b16c; line-height: 1.4; }
+.equipment-editor .detail-icon { width: 68px; height: 80px; object-fit: contain; }
+.equipment-editor .detail-copy { line-height: 1.75; color: #cdd2d3; }
+.equipment-editor .gear-affix-editor, .equipment-editor .gear-roll-editor { border-color: #716d6244; }
+.equipment-editor .inventory-save-button, .equipment-editor .detail-select { min-height: 40px; background: linear-gradient(#e8cd80,#b88a36); color: #17202a; border-color: #f0d694; }
+
+/* Skill detail keeps the selected radial loadout visible behind the replacement bag. */
+.skill-runtime-editor .skill-runtime-title { padding: 16px 54px 12px 24px; background: #10202b88; }
+.skill-runtime-editor .skill-runtime-title h2 { font-size: 24px; }
+.skill-runtime-editor .skill-runtime-layout { display: grid; grid-template-columns: 132px minmax(0,1fr); gap: 20px; min-height: 0; }
+.skill-runtime-editor .skill-runtime-layout.has-picker { grid-template-columns: 100px minmax(260px,1fr) minmax(610px,55%); }
+.ingame-editor-skill-rail { display: flex; flex-direction: column; padding: 12px 6px; gap: 4px; overflow: auto; border-right: 1px solid #557b9144; }
+.ingame-editor-skill-rail button { display: flex; align-items: center; gap: 8px; text-align: left; background: transparent; border: 0; min-height: 56px; padding: 4px; color: #c3d4df; font-size: 11px; }
+.ingame-editor-skill-rail button[aria-pressed="true"] { box-shadow: inset 2px 0 #efd08d; color: #efd08d; background: #81b3d522; }
+.ingame-editor-skill-rail img { width: 40px; height: 44px; object-fit: contain; clip-path: polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%); }
+.skill-runtime-editor .skill-runtime-content { min-height: 0; overflow: auto; padding: 12px 4px; }
+.skill-runtime-editor .skill-runtime-costs { display: none; }
+.skill-runtime-editor .skill-runtime-rows { display: block; padding: 0; }
+.skill-runtime-editor .skill-runtime-row { --skill-board-height: clamp(300px,calc(100dvh - 255px),540px); position: relative; display: block; min-width: 0; width: min(100%,650px); height: var(--skill-board-height); margin: auto; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.skill-runtime-editor .skill-runtime-row[hidden] { display: none; }
+.skill-runtime-editor .skill-runtime-row > .skill-link-lines { height: calc(var(--skill-board-height)*.8333); top: calc(var(--skill-board-height)*.037); }
+.skill-runtime-editor .skill-runtime-row-label { display: block; text-align: left; padding: 6px; }
+.skill-runtime-editor .skill-runtime-main { position: absolute; left: 50%; top: calc(var(--skill-board-height)*.47); transform: translate(-50%,-50%); width: 84px; height: 94px; padding: 0; border: 0; background: #3b6587; }
+.skill-runtime-editor .skill-runtime-main > img { width: 84px; height: 94px; object-fit: contain; clip-path: polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%); }
+.skill-runtime-editor .skill-runtime-main > small { position: absolute; top: 100px; bottom: auto; left: 50%; transform: translateX(-50%); width: 150px; height: auto; max-width: none; overflow: visible; text-align: center; font-size: 13px; line-height: 1.5; color: #e3edf3; background: none; }
+.skill-runtime-editor .skill-runtime-support-wrap { position: absolute; transform: translate(-50%,-50%); width: 62px; height: 70px; }
+.skill-runtime-editor [data-support-position="0"] { left: 50%; top: calc(var(--skill-board-height)*.14); }
+.skill-runtime-editor [data-support-position="1"] { left: 19.2%; top: calc(var(--skill-board-height)*.34); }
+.skill-runtime-editor [data-support-position="2"] { left: 80.8%; top: calc(var(--skill-board-height)*.34); }
+.skill-runtime-editor [data-support-position="3"] { left: 27.5%; top: calc(var(--skill-board-height)*.71); }
+.skill-runtime-editor [data-support-position="4"] { left: 72.5%; top: calc(var(--skill-board-height)*.71); }
+.skill-runtime-editor .skill-runtime-support { width: 62px; height: 70px; padding: 0; border: 0; border-radius: 0; background: #2e506e; }
+.skill-runtime-editor .skill-runtime-support > img { width: 62px; height: 70px; object-fit: contain; clip-path: polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%); }
+.skill-runtime-editor .skill-runtime-support > small { top: 74px; bottom: auto; left: 50%; transform: translateX(-50%); width: 130px; max-width: none; text-align: center; white-space: normal; font-size: 11px; background: none; }
+.skill-runtime-editor .skill-runtime-support > span { top: auto; bottom: 9px; background: #15202bd9; }
+.skill-runtime-editor .skill-runtime-unlock { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; }
+.skill-runtime-editor .skill-runtime-unlock::before { content: '보조 슬롯'; color: #c1d1de; font-size: 12px; white-space: nowrap; }
+.skill-runtime-editor .skill-runtime-remove-main { position: absolute; left: calc(50% + 38px); top: calc(var(--skill-board-height)*.47 - 44px); }
+.skill-runtime-editor .skill-runtime-row:has(.skill-runtime-spirit-host,.skill-runtime-modularization) { height: auto; min-height: var(--skill-board-height); padding-top: var(--skill-board-height); }
+.skill-runtime-editor .skill-runtime-row:has(.skill-runtime-spirit-host,.skill-runtime-modularization) > .skill-runtime-row-label { position: absolute; top: 0; left: 0; right: 0; }
+.skill-runtime-editor .skill-runtime-row:has(.skill-runtime-spirit-host,.skill-runtime-modularization) > .skill-runtime-unlock { top: calc(var(--skill-board-height) - 50px); bottom: auto; }
+.skill-runtime-editor .skill-runtime-picker { position: relative; display: grid; grid-template-columns: minmax(0,1fr) 92px; grid-template-rows: auto auto minmax(0,1fr); overflow: visible; border: 1px solid #728b9a; background: #193147f5; margin: 12px 16px 12px calc(var(--skill-detail-width) + 14px); }
+.skill-runtime-picker > header, .skill-runtime-picker > input { grid-column: 1 / -1; }
+.skill-runtime-picker .skill-runtime-tag-filters { grid-column: 2; grid-row: 3; display: flex; flex-direction: column; flex-wrap: nowrap; max-height: none; min-height: 0; overflow: auto; padding: 8px; background: #111f2a; }
+.skill-runtime-picker .skill-runtime-tag-filters button { flex: 0 0 auto; min-height: 36px; width: 100%; }
+.skill-runtime-picker .skill-runtime-results { grid-column: 1; grid-row: 3; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); grid-auto-rows: min-content; align-content: start; gap: 8px; padding: 12px; overflow: auto; }
+.skill-runtime-picker .skill-runtime-result { min-width: 0; border: 1px solid #7a98a9; background: #24465c; }
+.skill-runtime-picker .skill-runtime-result-summary { display: flex; flex-direction: column; min-height: 110px; padding: 8px 3px; gap: 5px; }
+.skill-runtime-picker .skill-runtime-card-icon { width: 52px; height: 52px; object-fit: contain; }
+.skill-runtime-picker .skill-runtime-result-summary strong { display: block; font-size: 11px; line-height: 1.4; }
+.skill-runtime-picker .skill-runtime-result-summary small, .skill-runtime-picker .skill-runtime-result-summary b { display: none; }
+.skill-runtime-picker .skill-runtime-result.is-expanded { border-color: #ffe1a0; background: #695135; }
+.skill-runtime-picker .skill-runtime-result-detail { position: absolute; top: 0; bottom: 0; right: calc(100% + 14px); width: 300px; padding: 18px; background: linear-gradient(#354b63,#131f2b 120px); border: 1px solid #a4b4bc; box-shadow: 0 10px 34px #0009; z-index: 8; overflow: auto; text-align: left; }
+.skill-runtime-picker .skill-runtime-result-detail > p { line-height: 1.8; font-size: 14px; color: #d7e2e9; text-align: left; }
+.ingame-skill-detail-title { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #92b1c766; }
+.ingame-skill-detail-title strong { font-size: 18px; color: #e7dfbd; }
+.ingame-skill-detail-title small { display: block; font-size: 12px; color: #b6cbd8; margin-top: 6px; }
+.skill-runtime-picker .skill-runtime-result-detail > .primary { width: 100%; min-height: 42px; color: #162330; background: linear-gradient(#f4da8e,#c29b40); border-color: #ffdd82; }
+.skill-runtime-picker .skill-runtime-preview-results { grid-column: 1 / -1; }
+.skill-runtime-editor .skill-runtime-footer { flex-wrap: wrap; min-height: 60px; background: #0e202de8; padding: 10px 20px; }
+.skill-runtime-editor .skill-runtime-footer > p { font-size: 11px; flex: 1; min-width: 180px; }
+.ingame-skill-extra { margin-top: 16px; border-top: 1px solid #6b8aa044; }
+.skill-runtime-editor .skill-runtime-main, .skill-runtime-editor .skill-runtime-support { isolation: isolate; overflow: visible; background: transparent; color: #d1e4ef; }
+.skill-runtime-editor .skill-runtime-support { position: relative; }
+.skill-runtime-editor .skill-runtime-main::before, .skill-runtime-editor .skill-runtime-support::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(135deg,#7395ab,#213b50 48%,#52738a); clip-path: polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%); }
+
+/* Details traced against the SS13 captures, rather than the overview cards. */
+.ingame-tree-emblem { width: 64px; height: 64px; flex: 0 0 64px; }
+.ingame-tree-emblem img { width: 100%; height: 100%; object-fit: contain; }
+.talent-active-board > header h2 { font-size: 16px; }
+.talent-active-board > header [data-role="talent-board-total-points"] { background: #171d21; color: #e2d5b0; border: 1px solid #9c9e94; border-radius: 50%; }
+.talent-board-help { font-size: 11px; color: #bcc0bb; }
+.talent-board-tabs button[aria-selected="true"] { background: linear-gradient(12deg,#a77d3f,#202226 68%); border-color: #fff; box-shadow: 0 0 4px 2px #fff9,inset 0 0 5px #fff8; }
+.talent-core-list [data-action="talent-core-toggle"] { position: relative; overflow: visible; min-height: clamp(280px,50vh,560px); padding: 64px 18px 44px; margin-top: 30px; border: 1px solid #817c64; background: linear-gradient(#20211f 20%,#20262ae6 60%,#39434a44); box-shadow: inset 0 0 18px #68716b22; }
+.ingame-core-ornament { position: absolute; top: 0; left: 0; width: 100%; height: 58px; fill: none; stroke: #c3baa788; stroke-width: 1; }
+.talent-core-list .talent-core-icon { position: absolute; width: 82px; height: 82px; margin: 0; top: -32px; left: calc(50% - 41px); filter: drop-shadow(0 0 2px #eee); }
+.talent-core-list button > strong { font-size: 14px; color: #e1e4df; }
+.talent-core-list button > span:not(.ingame-core-select) { color: #b8c1c0; font-size: 12px; font-weight: 400; white-space: pre-line; }
+.talent-core-list button > .ingame-core-select { position: absolute; bottom: 0; left: 14%; width: 72%; padding: 7px; text-align: center; font-size: 14px; color: #25292a; background: linear-gradient(165deg,#a2a1b5,#e2d8d1 60%,#9eabc3); border: 1px solid #bdbdcd; }
+.talent-core-list button[aria-pressed="true"] { border-color: #95ed44; box-shadow: 0 0 5px 2px #81de4766,inset 0 0 9px #81de4744; background: linear-gradient(#20211f 20%,#27352b 65%,#6b834e44); }
+.talent-core-list button[aria-pressed="true"]::after { content: '✓'; position: absolute; top: 38px; left: calc(50% - 13px); border: 1px solid #a3f15a; border-radius: 50%; width: 26px; height: 26px; color: #b7f175; background: #14271a; font-size: 20px; text-align: center; }
+.talent-core-list button[aria-pressed="true"] > .ingame-core-select { color: #b0db64; background: none; border-color: transparent; }
+.ingame-core-drawer[open] { position: fixed; inset: 44px 0 0; z-index: 9; background: #151e25f5; padding: 12px max(20px,22vw); overflow: auto; }
+.ingame-core-drawer[open] > summary { position: sticky; top: -12px; z-index: 2; background: #172028; }
+.ingame-core-drawer .talent-core-section { padding: 0; border: 0; border-radius: 0; background: none; }
+.ingame-core-drawer .talent-core-section > h3 { display: none; }
+.ingame-core-drawer [data-role="talent-core-group"] { background: none; border: 0; border-radius: 0; }
+.ingame-core-drawer .talent-core-list [data-role="talent-core-group"] { gap: 16px; padding: 14px 0; }
+
+.pact-editor-modal { background: linear-gradient(125deg,#233d9177 0 15%,transparent 15% 75%,#342c8e55 75%),linear-gradient(18deg,#464c9d,#458fe9 55%,#497acb); }
+.pact-editor { position: relative; grid-template-columns: minmax(0,1fr) 290px; grid-template-rows: 42px minmax(0,1fr) auto; gap: 10px 20px; padding: 10px 20px; min-height: 100%; }
+.pact-editor-header { padding: 0; background: transparent; }
+.pact-editor-header h2 { font-size: 18px; margin: 0; }
+.pact-editor-header > p { display: none; }
+.pact-capacity { top: 12px; right: 74px; gap: 12px; font-size: 12px; color: #f1f3f2; text-shadow: 0 1px 3px #12234b; }
+.pact-source-searches { position: absolute; top: 65px; right: 20px; width: 290px; gap: 8px; }
+.pact-source-searches label { width: calc(50% - 4px); color: #f4f7fc; }
+.pact-source-searches input { min-width: 0; padding: 8px; font-size: 11px; }
+.pact-editor > .ingame-pact-orbit { grid-row: 2; width: min(100%,calc((100dvh - 120px)*1.25)); align-self: center; background: none; }
+.pact-slot-tabs { grid-row: 3; justify-content: center; }
+.pact-slot-tabs button { background: #17396888; border-color: #b4c6e477; }
+.pact-editor-section.ingame-pact-inspector { grid-row: 2 / span 2; margin-top: 80px; max-height: calc(100dvh - 160px); border-radius: 0; border-color: #88929f; background: linear-gradient(#344359f0,#24262bf2 140px); padding: 14px; }
+.ingame-pact-track { fill: none; stroke: #f1f4e9; stroke-width: 4; stroke-linejoin: miter; filter: drop-shadow(0 0 1px #c6e3ff); }
+.ingame-pact-seal { fill: none; stroke: #184b9a; stroke-width: 16; stroke-dasharray: 100 18 50 12; opacity: .26; }
+.ingame-pact-rune { fill: #111b31; stroke: #285681; stroke-width: 3; }
+.ingame-pact-emblem { fill: #11263b; stroke: #3c77a7; stroke-width: 3; }
+.pact-editor .ingame-pact-spirit { width: clamp(34px,6.5cqw,62px); height: clamp(34px,6.5cqw,62px); padding: 2px; border: 2px solid #bca578; background: #222e3c; box-shadow: 0 0 0 2px #64685c; }
+.pact-editor .ingame-pact-spirit > strong { display: none; }
+.pact-editor .ingame-pact-spirit > small { display: block; top: -12px; bottom: auto; left: -2px; font-size: 9px; }
+.pact-editor .ingame-pact-node { width: clamp(22px,4.4cqw,40px); height: clamp(22px,4.4cqw,40px); padding: 0; border: 1px solid #c9c9a6; background: #24466c; box-shadow: 0 0 0 2px #46679a,0 0 6px #9cc0e8; }
+.pact-editor .ingame-pact-node.medium { width: clamp(30px,6cqw,56px); height: clamp(30px,6cqw,56px); padding: 2px; border: 2px solid #d1bb76; box-shadow: 0 0 0 2px #5c6187,0 0 6px #c7b66e; }
+.pact-editor .ingame-pact-node.undetermined { width: clamp(23px,4.5cqw,42px); height: clamp(23px,4.5cqw,42px); border: 2px solid #bea0e3; background: #534592; }
+.ingame-pact-main-affix { position: absolute; transform: translate(-50%,-50%); width: 10cqw; height: 10cqw; max-width: 84px; max-height: 84px; display: grid; place-items: center; }
+.ingame-pact-main-affix::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg,#faf9e0,#4f535a 55%,#babfb8); clip-path: polygon(50% 0,59% 11%,72% 5%,77% 20%,92% 22%,89% 39%,100% 50%,89% 61%,92% 78%,77% 80%,72% 95%,59% 89%,50% 100%,41% 89%,28% 95%,23% 80%,8% 78%,11% 61%,0 50%,11% 39%,8% 22%,23% 20%,28% 5%,41% 11%); }
+.ingame-pact-main-affix img { position: relative; width: 78%; height: 78%; border-radius: 50%; background: #132236; border: 2px solid #1a2333; }
+
+.equipment-editor .equipment-layout.is-slot-scoped { grid-template-columns: minmax(270px,31%) minmax(0,1fr); }
+.equipment-editor .equipment-list { background: #101a23; border-color: #49565d; gap: 7px; }
+.equipment-editor .equipment-list .editor-item { height: 112px; border-color: #949289; background: linear-gradient(130deg,#5c452e 0%,#282a2a 65%,#b56a18 100%); box-shadow: inset 0 0 0 2px #b6a17644; }
+.equipment-editor .equipment-list .item-summary img { width: 64px; height: 64px; border: 0; background: transparent; }
+.equipment-editor .equipment-layout .item-detail-panel { background: linear-gradient(115deg,#845024,#423328 130px,#27272a 230px); border-color: #6e6456; box-shadow: 0 6px 18px #0007; padding: 14px; }
+.equipment-editor .detail-title { display: flex; flex-direction: row-reverse; align-items: flex-start; gap: 8px; }
+.equipment-editor .detail-title > div { flex: 1; }
+.equipment-editor .detail-title h3 { font-size: 19px; font-weight: 500; color: #e6a054; }
+.equipment-editor .detail-title > div > span { display: none; }
+.equipment-editor .detail-icon { background: none; width: 62px; height: 78px; }
+.equipment-editor .detail-copy { margin-top: 14px; border-top: 1px solid #8d81734d; padding-top: 14px; font-size: 13px; line-height: 1.75; }
+.equipment-editor .detail-meta { color: #c7bda9; }
+
+.skill-runtime-editor { --skill-detail-width: 270px; padding: 0; background: radial-gradient(ellipse at 57% 65%,#254986aa,transparent 45%),linear-gradient(110deg,#172026,#1d3547); }
+.skill-runtime-editor .skill-runtime-title { padding: 12px 54px 12px 20px; background: #111a2288; }
+.skill-runtime-editor .skill-runtime-title h2 { font-size: 18px; }
+.skill-runtime-editor .skill-runtime-title p { font-size: 11px; }
+.skill-runtime-editor .skill-energy { border: 0; background: transparent; }
+.skill-runtime-editor .skill-energy strong { color: #dce9ef; font-size: 19px; }
+.ingame-skill-orbit-art { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: #6091ad; stroke-width: 1; opacity: .18; pointer-events: none; }
+.ingame-editor-skill-rail { border: 0; gap: 2px; padding-top: 8px; }
+.ingame-editor-skill-rail button { min-height: 42px; font-size: 10px; }
+.ingame-editor-skill-rail button[aria-pressed="true"] { box-shadow: none; background: linear-gradient(90deg,#6b80a655,transparent); }
+.ingame-editor-skill-rail img { width: 34px; height: 38px; }
+.skill-runtime-editor .skill-runtime-main { width: var(--game-gem); height: calc(var(--game-gem)*1.15); filter: drop-shadow(0 0 12px #85beff88); }
+.skill-runtime-editor .skill-runtime-main > img { width: 100%; height: 100%; padding: 2px; }
+.skill-runtime-editor .skill-runtime-main > small { top: calc(100% + 15px); font-size: 12px; }
+.skill-runtime-editor .skill-runtime-support-wrap,.skill-runtime-editor .skill-runtime-support { width: calc(var(--game-gem)*.9); height: calc(var(--game-gem)*1.04); }
+.skill-runtime-editor .skill-runtime-support > img { width: 100%; height: 100%; padding: 2px; }
+.skill-runtime-editor .skill-runtime-support > small { top: calc(100% + 10px); font-size: 11px; }
+.skill-runtime-editor .skill-runtime-support > span { bottom: -2px; font-size: 9px; }
+.skill-runtime-editor .skill-runtime-main::before,.skill-runtime-editor .skill-runtime-support::before { background: linear-gradient(140deg,#f1f7f5,#6a8092 38%,#27405b 62%,#c4dbec); }
+.skill-runtime-editor .skill-runtime-main::after,.skill-runtime-editor .skill-runtime-support::after { content: ''; position: absolute; inset: 4px; z-index: -1; background: #173654; clip-path: polygon(50% 0,95% 25%,95% 75%,50% 100%,5% 75%,5% 25%); }
+.skill-runtime-editor .skill-runtime-footer { min-height: 46px; padding: 6px 16px; }
+.skill-runtime-editor .skill-runtime-footer > p { font-size: 10px; margin: 0; }
+.skill-runtime-picker .skill-runtime-result-summary { min-height: 88px; padding: 5px 3px; }
+.skill-runtime-picker .skill-runtime-result { border-radius: 0; border-color: #8f9ca5; background: linear-gradient(140deg,#304558,#131f2a); }
+.skill-runtime-picker .skill-runtime-card-icon { border: 0; border-radius: 0; width: 46px; height: 50px; }
+.skill-runtime-picker .skill-runtime-result-detail { background: linear-gradient(#315c82,#292c32 115px); border-color: #737c80; padding: 12px; width: 270px; }
+.ingame-skill-detail-title { flex-direction: row-reverse; gap: 8px; }
+.ingame-skill-detail-title > div { flex: 1; }
+.ingame-skill-detail-title strong { color: #d1e7f3; font-size: 17px; }
+.skill-runtime-picker .skill-runtime-result-detail > p { font-size: 13px; line-height: 1.7; }
+
+@media (min-width: 950px) {
+  .talent-grid-viewport { overflow: visible; }
+}
+@media (max-width: 1100px) {
+  .talent-editor { grid-template-columns: 150px minmax(0,1fr); gap: 20px; padding: 14px 24px 20px; }
+  .pact-editor { grid-template-columns: minmax(0,1fr) 280px; padding: 10px 16px; }
+  .pact-source-searches { width: 280px; right: 16px; }
+  .ingame-pact-spirit, .ingame-pact-summary .spirit-row { width: 48px; height: 48px; }
+  .ingame-pact-spirit > img, .ingame-pact-summary .spirit-row > img { width: 40px; height: 40px; }
+  .ingame-pact-spirit > strong, .ingame-pact-summary .spirit-row > strong { top: 48px; width: 110px; font-size: 10px; }
+  .ingame-pact-spirit > small, .ingame-pact-summary .spirit-row > small { bottom: 46px; }
+  .ingame-pact-node { width: 30px; height: 30px; padding: 2px; }
+  .ingame-pact-node.medium { width: 38px; height: 38px; }
+  .skill-runtime-editor { --skill-detail-width: 250px; }
+  .skill-runtime-editor .skill-runtime-layout.has-picker { grid-template-columns: 70px minmax(220px,1fr) minmax(540px,56%); gap: 10px; }
+  .ingame-editor-skill-rail button { flex-direction: column; font-size: 9px; }
+  .skill-runtime-picker .skill-runtime-result-detail { width: 250px; }
+  .equipment-editor .equipment-layout.is-slot-scoped { grid-template-columns: minmax(270px,31%) minmax(0,1fr); padding: 12px; }
+}
+@media (max-width: 900px) {
+  .skill-runtime-editor .skill-runtime-layout.has-picker { grid-template-columns: 70px minmax(0,1fr); overflow: auto; }
+  .skill-runtime-editor .skill-runtime-layout.has-picker .skill-runtime-content { min-height: 450px; overflow: visible; }
+  .skill-runtime-editor .skill-runtime-layout.has-picker .skill-runtime-picker { grid-column: 1 / -1; min-height: 480px; margin: 0 12px 12px; overflow: visible; }
+  .skill-runtime-picker .skill-runtime-results { overflow: visible; }
+  .skill-runtime-picker .skill-runtime-result.is-expanded { grid-column: 1 / -1; }
+  .skill-runtime-picker .skill-runtime-result-detail { position: static; width: auto; max-height: none; }
+}
+@media (max-width: 700px) {
+  .pact-capacity { position: static; }
+  .talent-editor-modal, .pact-editor-modal, .skill-editor-modal.skill-runtime-editor, .equipment-editor { inset: 6px; }
+  .talent-editor { display: block; padding: 16px 10px; }
+  .talent-editor-header { position: static; gap: 10px; }
+  .talent-active-board { padding-top: 16px; }
+  .ingame-tree-emblem { display: none; }
+  .talent-board-tabs { margin-top: 0; }
+  .ingame-core-drawer[open] { padding: 12px 22px; }
+  .talent-board-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .talent-board-tabs button { min-height: 54px; }
+  .talent-core-list [data-role="talent-core-group"] { grid-template-columns: minmax(0,1fr); }
+  .pact-editor { display: flex; flex-direction: column; padding: 18px 10px; }
+  .pact-source-searches { flex-wrap: wrap; gap: 8px; }
+  .pact-source-searches { position: static; width: 100%; }
+  .pact-source-searches label { width: 100%; }
+  .pact-editor > .ingame-pact-orbit { order: 2; }
+  .pact-editor .ingame-pact-inspector { order: 3; max-height: none; overflow: visible; margin-top: 0; }
+  .pact-editor .pact-slot-tabs { order: 1; }
+  .ingame-pact-summary { min-width: 340px; }
+  .spirit-section .destiny-counts { position: static; }
+  .skill-runtime-editor .skill-runtime-layout, .skill-runtime-editor .skill-runtime-layout.has-picker { display: grid; grid-template-columns: 56px minmax(0,1fr); overflow: auto; gap: 8px; }
+  .skill-runtime-editor .skill-runtime-row { --skill-board-height: 420px; }
+  .skill-runtime-editor .skill-runtime-content { min-height: 450px; overflow: visible; }
+  .skill-runtime-editor .ingame-editor-skill-rail { max-height: 450px; }
+  .skill-runtime-editor .skill-runtime-picker { grid-column: 1 / -1; min-height: 480px; margin: 0 8px 12px; overflow: visible; }
+  .skill-runtime-picker .skill-runtime-results { overflow: visible; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .skill-runtime-picker .skill-runtime-result.is-expanded { grid-column: 1 / -1; }
+  .skill-runtime-picker .skill-runtime-result-detail { position: static; width: auto; max-height: none; }
+  .skill-runtime-editor .skill-runtime-title p { display: none; }
+  .skill-runtime-editor .skill-runtime-title { padding: 10px 42px 10px 10px; }
+  .skill-runtime-editor .skill-energy { font-size: 11px; }
+  .skill-runtime-editor .skill-runtime-main { width: 62px; height: 70px; }
+  .skill-runtime-editor .skill-runtime-main > img { width: 62px; height: 70px; }
+  .skill-runtime-editor .skill-runtime-main > small { top: 78px; width: 110px; font-size: 11px; }
+  .skill-runtime-editor .skill-runtime-support-wrap, .skill-runtime-editor .skill-runtime-support, .skill-runtime-editor .skill-runtime-support > img { width: 44px; height: 50px; }
+  .skill-runtime-editor .skill-runtime-support > small { top: 56px; width: 80px; font-size: 9px; }
+  .equipment-editor .equipment-layout, .equipment-editor .equipment-layout.is-slot-scoped { display: flex; flex-direction: column; overflow: auto; padding: 8px; }
+  .equipment-editor .equipment-layout .item-detail-panel { flex-shrink: 0; max-height: 55vh; order: 1; }
+  .equipment-editor .equipment-list { min-height: 320px; overflow: visible; flex-shrink: 0; order: 2; grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .equipment-editor .equipment-cats { order: 0; }
+}

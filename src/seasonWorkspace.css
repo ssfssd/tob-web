@@ -1,0 +1,81 @@
+.app-shell.is-current-season .planner-main { top: 0; }
+.app-shell.is-current-season .source-sidebar { top: 0; }
+.is-current-season .planner-canvas { padding: 12px 24px 40px; }
+.current-season { margin: 0; padding: 0; border: 0; background: transparent; gap: 12px; }
+.current-season h1 { margin: 0; font-size: 20px; }
+.current-season > details { margin: 0; }
+.current-season .season-workspace { border: 0; margin: 0; padding: 0; }
+.season-file-actions { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; margin-bottom: 12px; }
+.season-file-actions details[open] { flex-basis: 100%; }
+.season-file-actions details, .current-season > details { font-size: 13px; }
+.season-editor-header { margin-bottom: 18px; }
+.season-editor-header > label { margin: 0; color: #acc0cf; font-size: 12px; }
+.season-editor-header input { font-size: 18px; font-weight: 600; min-height: 44px; }
+.season-editor-header [role="status"] { margin: 6px 0 10px; font-size: 12px; color: #acc0cf; }
+.season-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.season-workspace { --season-toolbar-offset: 84px; }
+.season-workspace .season-editor-actions { position: sticky; top: 0; z-index: 4; padding: 10px 0; margin: 0 0 14px; background: #122330; border-bottom: 1px solid #52697c; }
+.season-workspace :is(summary, button, input, select):focus-visible { outline: 2px solid #f6dfa1; outline-offset: 3px; }
+.season-workspace :is(details[data-role], .season-editor-groups, .season-results) { scroll-margin-top: var(--season-toolbar-offset); }
+.season-workspace .season-slot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+.season-workspace .season-slot { min-width: 0; margin: 0; padding: 8px; border: 1px solid #445c70; background: #14212d; }
+.season-workspace .season-slot[open] { grid-column: 1 / -1; border-color: #cbb676; background: #1a2e3e; }
+.season-workspace .season-slot > summary { display: flex; align-items: center; gap: 10px; min-height: 48px; list-style: none; }
+.season-slot > summary::after { content: "+"; margin-left: auto; color: #d7c18b; }
+.season-slot[open] > summary::after { content: "−"; }
+.season-slot > summary::-webkit-details-marker { display: none; }
+.season-slot summary span { min-width: 0; }
+.season-slot summary small, .season-slot summary strong { display: block; overflow-wrap: anywhere; }
+.season-slot summary small { font-size: 11px; color: #b0c0cd; }
+.season-slot summary strong { margin-top: 4px; font-size: 13px; }
+.season-slot summary img, .season-slot-empty { flex: 0 0 40px; width: 40px; height: 40px; object-fit: contain; }
+.season-slot-empty { display: grid; place-items: center; border: 1px dashed #678093; color: #8fa9bd; }
+.season-workspace .season-selection-row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.season-selection-row > label { flex: 1 1 180px; min-width: 0; }
+.season-selection-row select { width: 100%; }
+.season-workspace .season-selection-row button { margin: 0 0 8px; }
+.season-workspace .season-search-count { margin: 0 0 8px; font-size: 12px; }
+.season-workspace input[type="search"] { width: 100%; min-height: 40px; }
+.season-workspace .season-editor-actions button { margin: 0; min-height: 40px; }
+.season-editor-actions [data-action="advisor-update-workspace"] { color: #12212a; background: #e7cd87; border-color: #f3df9d; font-weight: 700; }
+.season-editor-actions [data-action="advisor-save-workspace"] { background: #294359; }
+.season-workspace-grid { display: grid; gap: 16px; align-items: start; }
+.season-editor-groups, .season-results { min-width: 0; scroll-margin-top: 16px; }
+.season-editor-groups > h4 { margin: 0; font-size: 18px; }
+.season-selected-skills { color: #9acde7; margin: 6px 0 12px; font-size: 13px; }
+.season-editor-groups > details { margin-bottom: 8px; background: #101b25; border-color: #52697c; scroll-margin-top: 16px; }
+.season-editor-groups > details > summary { padding: 3px 0; }
+.season-workspace details > p, .season-workspace fieldset > p { color: #afc0cc; font-size: 13px; }
+.season-results { padding: 16px; border: 1px solid #9c8958; background: #101b25; border-radius: 6px; }
+.season-results [data-role="season-full-dps"] > h5 { margin: 0; color: #d9c58f; }
+.season-results .season-dps-value { margin: 8px 0 0; font-size: clamp(26px, 3vw, 38px); font-variant-numeric: tabular-nums; line-height: 1.3; overflow-wrap: anywhere; color: #f6dfa1; }
+.season-results .season-dps-value + p { margin: 4px 0 14px; font-size: 13px; color: #b8c6d0; }
+.season-results details { margin-top: 10px; font-size: 13px; border-color: #485d6c; }
+.season-results ul { padding-left: 20px; }
+.season-workspace [data-role="season-advisor"], .season-workspace [data-role="season-workspace-tools"] { margin-top: 12px; }
+.is-current-season .source-footer summary { font-size: 11px; cursor: pointer; padding: 8px 0; }
+.is-current-season .source-section-menu { flex: 1; }
+.is-current-season .source-section-item[aria-current="location"] { color: #f6dfa1; background: #e9c56b20; box-shadow: inset -2px 0 #d7c18b; }
+@media (min-width: 980px) {
+  .season-workspace-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); }
+  .season-editor-groups { grid-column: 1; grid-row: 1; }
+  .season-results { grid-column: 2; grid-row: 1; position: sticky; top: var(--season-toolbar-offset); max-height: calc(100dvh - 110px); overflow: auto; }
+}
+@media (max-width: 979px) {
+  .app-shell.is-current-season, .app-shell.is-current-season .planner-main { overflow: visible; }
+  .is-current-season .mobile-source-navigation { position: static; margin-top: 0; }
+  .is-current-season .planner-canvas { padding: 12px 14px 40px; }
+  .season-results { position: static; }
+}
+@media (max-width: 720px) {
+  .season-workspace { --season-toolbar-offset: 140px; }
+  .is-current-season .mobile-source-navigation { min-height: 52px; }
+  .season-editor-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .season-editor-actions button:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 440px) {
+  .season-workspace .season-slot-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.season-navigation button { min-height: 44px; padding: 8px 20px; border: 1px solid #52697c; border-radius: 4px; background: #14212d; color: #c8d4de; }
+.season-navigation [aria-pressed="true"] { color: #f6dfa1; border-color: #d7c18b; background: #2b2b27; font-weight: 700; }
+.season-navigation button:focus-visible { outline: 2px solid #f6dfa1; outline-offset: 3px; }

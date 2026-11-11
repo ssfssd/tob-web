@@ -1,0 +1,166 @@
+.native-slot-workspace { display:grid;grid-template-columns:210px minmax(0,1fr);gap:20px;align-items:start; }
+.native-edit-rail { position:sticky;top:0;display:flex;flex-direction:column;gap:5px;max-height:calc(100dvh - 230px);overflow:auto; }
+.native-edit-rail button { display:flex;align-items:center;text-align:left;gap:10px;padding:9px;min-height:60px;background:#10202cbd;border:1px solid #405968; }
+.native-edit-rail button>span { min-width:0;display:flex;flex-direction:column;gap:3px; }
+.native-edit-rail small { color:#adbec9; }.native-edit-rail strong { font-size:12px;overflow-wrap:anywhere; }
+.native-edit-rail img { width:36px;height:40px;object-fit:contain;flex-shrink:0; }
+.native-edit-rail [aria-hidden] { width:36px;text-align:center;font-size:24px; }
+.native-slot-detail { min-width:0;padding:20px;background:#152631e8 url('../assets/ingame-ui/game/tooltip-background.png') center/100% 100%;border:1px solid #516878; }
+.native-slot-detail>header { border-bottom:1px solid #405968;margin-bottom:16px;padding-bottom:10px; }
+.native-slot-detail h2 { margin:7px 0;font-size:20px; }.native-slot-detail>header small { color:#b2c8d6; }
+.native-slot-detail>label { margin:12px 0; }.native-slot-detail input[type=number] { max-width:220px; }
+.native-socket-strip { display:flex;gap:7px;flex-wrap:wrap;margin-bottom:18px; }
+.native-socket-strip button { display:flex;flex-direction:column;align-items:center;gap:4px;min-width:56px;padding:6px; }
+.native-socket-strip img,.native-socket-strip [aria-hidden] { width:36px;height:40px;object-fit:contain; }
+.native-socket-strip [aria-hidden] { display:grid;place-items:center;font-size:24px; }
+.native-option-source { padding:8px 12px;border:1px solid #3d5363;background:#101c25b8; }
+.native-option-source p { max-height:320px;overflow:auto;font-size:13px; }
+.native-option-source a { color:#b7d9f0;text-decoration:underline; }
+.native-edit-history { display:flex;gap:5px; }.native-edit-history button { font-size:12px; }
+.native-edit-history button:disabled { opacity:.4;cursor:default; }
+.native-log-preview { display:grid;gap:10px; }.native-log-row { padding:12px;border:1px solid #496271;background:#13212b; }
+.native-log-row>label { display:flex!important;flex-direction:row!important;align-items:center;gap:10px; }
+.native-log-row input[type=checkbox] { width:18px!important; }.native-log-row p { margin:6px 0;font-size:13px; }
+.native-log-status { color:#c6d5df; }.native-log-actions { display:flex;gap:8px;margin:12px 0; }
+.native-gear-doll { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
+.native-gear-doll button { flex-direction:column;text-align:center;min-height:102px;gap:5px; }
+.native-gear-doll button>span { width:100%; }.native-gear-doll img { height:42px;width:42px; }
+.native-slot-actions { display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap; }
+.native-item-picker>header { display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:12px; }
+.native-item-picker>header label { flex:1;min-width:120px; }
+.native-picker-columns { display:grid;grid-template-columns:minmax(130px,1fr) minmax(170px,1.2fr);gap:12px; }
+.native-picker-list { max-height:480px;overflow:auto;display:flex;flex-direction:column;gap:5px; }
+.native-picker-list button { display:flex;gap:8px;align-items:center;text-align:left;min-height:54px;flex-shrink:0;padding:7px; }
+.native-picker-list img { height:36px;width:36px;object-fit:contain; }.native-picker-list button span { overflow-wrap:anywhere; }
+.native-picker-card { border:1px solid #506776;background:#101d27;padding:14px;align-self:start;min-width:0;position:sticky;top:0; }
+.native-picker-card>img { width:64px;height:64px;object-fit:contain;display:block;margin:auto; }
+.native-picker-card h3 { text-align:center;font-size:16px; }.native-picker-card p { white-space:pre-line;max-height:330px;overflow:auto;font-size:13px; }
+.native-picker-card button { width:100%; }.native-picker-list [hidden],.native-effect-row[hidden] { display:none!important; }
+.native-effect-list { display:grid;gap:8px; }.native-effect-row { border:1px solid #3d5363;background:#10202be0;padding:10px; }
+.native-effect-row summary { display:flex;gap:12px;align-items:center;flex-wrap:wrap;cursor:pointer; }.native-effect-row summary strong { margin-left:auto; }
+.native-effect-row summary small { color:#b9cede; }.native-effect-owner { color:#f0cd82; }
+.native-effect-summary-owner { flex-basis:100%;font-size:12px;color:#c9b88e; }
+.native-effect-original { white-space:pre-line;font-size:13px; }.native-effect-row a { color:#b7d9f0;text-decoration:underline; }
+.native-slot-effects { margin:16px 0; }.native-log-history ol { max-height:200px;overflow:auto;padding-left:24px; }
+.native-log-history li { padding:4px; }.native-log-history small { color:#acbfcb;margin-left:12px; }
+@media(max-width:1100px) { .native-slot-workspace { grid-template-columns:160px minmax(0,1fr);gap:12px; }.native-slot-detail{padding:14px}.native-content{grid-template-columns:minmax(0,1fr) 250px} }
+@media(max-width:760px) { .native-slot-workspace{grid-template-columns:1fr}.native-edit-rail{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-height:220px}.native-slot-detail{padding:12px}.native-socket-strip{gap:4px}.native-socket-strip button{min-width:46px}.native-content{display:flex;flex-direction:column} }
+@media(max-width:520px) { .native-picker-columns { grid-template-columns:1fr; }.native-picker-list { max-height:190px; }.native-picker-card { position:static; } }
+
+/* Slate selection and editing share the board; geometry comes from installed data. */
+.native-slate-editor { min-width:0;container-type:inline-size; }
+.slate-editor-heading,.slate-socket-heading { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px; }
+.slate-editor-heading span,.slate-socket-heading span { color:#adbec9;font-size:12px; }
+.slate-palette { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px; }
+.season-native .slate-palette button { display:flex;align-items:center;gap:8px;min-height:48px;padding:8px 10px;background:#11212be6;border:1px solid #425967;font-size:12px; }
+.slate-palette button span { max-width:150px;text-align:left; }.slate-palette small { color:#a7b6bf; }
+.slate-palette button:disabled { opacity:.45;cursor:default; }
+.slate-shape-icon { width:30px;height:32px;flex-shrink:0; }
+.slate-editor-columns { display:grid;grid-template-columns:1fr;gap:16px;align-items:start; }
+.slate-board-panel,.slate-detail-panel { padding:16px;border:1px solid #405664;background:#101d27e6;min-width:0; }
+.slate-board-panel { position:sticky;top:0; }
+.slate-interactive-board { display:grid;grid-template-columns:repeat(var(--slate-columns,6),minmax(0,1fr));gap:4px;width:min(100%,310px);margin:auto; }
+.season-native .slate-board-cell { padding:0;aspect-ratio:1;min-height:0;background:#142633;border:1px solid #385063;border-radius:5px;color:#698495;font-size:16px; }
+.season-native .slate-board-cell.is-filled { color:#fff;background:color-mix(in srgb,var(--slate-color) 38%,#0f1e2a);border-color:var(--slate-color);font-weight:700;cursor:grab; }
+.season-native .slate-board-cell.is-selected { box-shadow:inset 0 0 0 2px #f4d28b;border-color:#f4d28b; }
+.season-native .slate-board-cell.can-place { border:2px dashed #dbbe80;color:#dbbe80; }
+.season-native .slate-board-cell.is-legacy { border-style:dashed; }
+.season-native .slate-board-cell:focus-visible { outline:2px solid #fff;outline-offset:1px; }
+.slate-board-void { aspect-ratio:1; }
+.season-native .slate-board-hint { text-align:center;font-size:12px;color:#cbbd9c;margin:14px 0; }
+.slate-placed-list { display:flex;flex-direction:column;gap:5px; }
+.season-native .slate-placed-list button { display:flex;gap:8px;align-items:center;text-align:left;background:#132431;font-size:12px;padding:8px; }
+.slate-placed-list b { color:#e8cf97; }.slate-placed-list small { margin-left:auto;color:#a8bbc6;white-space:nowrap; }
+.slate-detail-panel>header { display:flex;align-items:center;gap:10px;border-bottom:1px solid #405664;margin-bottom:12px;padding-bottom:12px; }
+.season-native .slate-detail-panel h2 { font-size:17px;margin:0; }.slate-detail-panel>header>span { margin-left:auto;font-size:12px;color:#a8bbc6;white-space:nowrap; }
+.season-native .slate-detail-panel h3 { font-size:14px;margin:6px 0; }
+.slate-sockets { display:grid;gap:8px; }.season-native .slate-socket { width:100%;text-align:left;display:flex;flex-direction:column;gap:6px;padding:12px;background:#172936;border:1px solid #496170; }
+.slate-socket small { color:#b8c9d3;font-size:12px; }.slate-socket span { font-size:13px;line-height:1.6;white-space:pre-line; }
+.slate-option-picker { margin-top:16px;padding-top:8px;border-top:1px solid #496170; }
+.slate-option-picker>header { display:flex;gap:8px;align-items:end;margin-bottom:8px; }.slate-option-picker>header label { flex:1; }.slate-option-picker>header button { font-size:12px;margin-bottom:8px;white-space:nowrap; }
+.slate-option-list { max-height:340px;overflow:auto;display:grid;gap:5px; }
+.season-native .slate-option-list button { text-align:left;background:#142633;display:flex;flex-direction:column;gap:5px;padding:10px; }
+.slate-option-list small { color:#b8c9d3; }.slate-option-list span { font-size:13px;line-height:1.6;white-space:pre-line; }
+.slate-option-list [hidden],.slate-option-picker [hidden] { display:none!important; }
+.slate-shapes { display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;max-height:220px;overflow:auto; }
+.season-native .slate-shapes button { display:flex;align-items:center;gap:8px;font-size:12px;padding:8px; }
+.native-slate-editor button[aria-pressed=true] { background:#34424a;border-color:#ddc180;color:#fff1cf; }
+.season-native-scroll:has(.native-slate-editor)>section>h1 { margin-bottom:12px; }
+.slate-combat-conditions { border:1px solid #405664;padding:10px 16px;background:#101d27e6; }
+.season-native:has(.native-slate-editor) .native-dps-dock { display:flex;flex-direction:column; }
+.season-native:has(.native-slate-editor) [data-role="native-numeric-result"] { margin-top:0; }
+@container(min-width:620px) { .slate-editor-columns { grid-template-columns:minmax(240px,.9fr) minmax(280px,1.1fr); } }
+@media(max-width:1100px) { .slate-board-panel { position:static; }.slate-placed-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px; }.slate-interactive-board { max-width:320px; } }
+@media(max-width:760px) {
+  .season-native:has(.native-slate-editor) .native-content { display:block;overflow:auto; }
+  .season-native:has(.native-slate-editor) .season-native-scroll { overflow:visible;min-height:0; }
+  .season-native:has(.native-slate-editor) .native-dps-dock { overflow:visible;max-height:none;border-top:1px solid #405664; }
+  .slate-board-panel,.slate-detail-panel { padding:12px; }
+  .slate-palette { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding-bottom:6px; }
+  .slate-palette button { width:100%;max-width:100%;white-space:normal; }
+  .slate-placed-list { grid-template-columns:1fr; }
+}
+
+/* Keep controls inside their own panels, including long localized names. */
+.season-native,.season-native-modal { font-family:"Malgun Gothic",system-ui,sans-serif;font-size:14px;line-height:1.55; }
+.season-native button,.season-native-modal button { box-sizing:border-box;max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.45; }
+.native-content,.native-dps-dock,.native-slot-workspace>* { min-width:0;min-height:0; }
+.native-result-summary>strong { display:block;font-size:clamp(24px,2.3vw,32px);color:#f2d18f;overflow-wrap:anywhere;font-variant-numeric:tabular-nums; }
+.native-result-summary>p { margin:6px 0 10px;color:#c9d1d8;font-size:12px; }
+.native-result-tabs { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;margin:16px 0;border-bottom:1px solid #5c6c77;padding-bottom:8px; }
+.season-native .native-result-tabs button { min-width:0;padding:8px 2px;font-size:13px; }
+.native-result-tabs button[aria-pressed=true] { border-color:#dbc58e;background:#364652;color:#fff1cf; }
+.native-result-actions { display:flex;flex-wrap:wrap;gap:6px; }
+.native-result-actions button { flex:1 1 90px; }
+.native-result-panel { min-width:0;overflow-wrap:anywhere; }
+.native-result-panel h2 { font-size:16px;line-height:1.5;margin:16px 0 10px; }
+.native-result-panel h3 { font-size:14px;line-height:1.5; }
+.native-result-panel label { display:grid;gap:6px;min-width:0; }
+.native-result-panel select { width:100%;min-width:0; }
+.native-result-conditions>button { display:block;width:100%;margin:8px 0;text-align:left; }
+.native-condition-values { margin:0 0 12px;font-size:13px; }
+.native-condition-values>div { display:flex;gap:10px;justify-content:space-between;padding:7px 0;border-bottom:1px solid #354652; }
+.native-condition-values dd { margin:0;white-space:nowrap;font-variant-numeric:tabular-nums; }
+.native-comparison-row { border:1px solid #4b6070;border-radius:6px;margin:12px 0;padding:12px; }
+.native-comparison-row h3 { margin:0 0 8px; }
+.native-comparison-row>strong { font-size:20px;color:#f2d18f; }
+.native-comparison-delta { font-variant-numeric:tabular-nums; }
+.native-edit-comparison { padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid #4b6070;overflow-wrap:anywhere; }
+.native-edit-comparison.is-compact { padding:8px 0;margin:0 0 8px;font-size:13px; }
+.native-edit-comparison p { margin:5px 0; }
+.native-edit-comparison strong { display:inline-block;font-variant-numeric:tabular-nums; }
+.native-edit-comparison .is-increase { color:#a4ddc8; }
+.native-edit-comparison .is-decrease { color:#ffb7a9; }
+.native-slot-detail { container-type:inline-size;background:#152631; }
+.native-slot-detail :is(button,select,input),.season-native-modal :is(button,select,input) { min-width:0; }
+.native-picker-list button { min-width:0;flex-shrink:0; }
+.native-picker-list button span,.native-slot>span,.native-edit-history { min-width:0; }
+.native-picker-list img,.native-slot img { flex-shrink:0; }
+.native-edit-history,.native-log-actions,.native-save-row,.season-native-modal>header,.season-native-modal>footer,
+.slate-editor-heading,.slate-socket-heading,.slate-detail-panel>header,.slate-option-picker>header { flex-wrap:wrap; }
+.native-save-row>div { min-width:0;display:flex;flex-wrap:wrap;gap:6px; }
+.slate-placed-list button { flex-wrap:wrap; }
+.slate-palette button span,.slate-placed-list button span { min-width:0;overflow-wrap:anywhere; }
+.season-native .native-dps-dock>button { margin:4px 0; }
+.season-native .native-edit-rail strong,.season-native .native-edit-history button,
+.season-native .slate-palette button,.season-native .slate-placed-list button,.season-native .slate-shapes button { font-size:13px; }
+.native-slot-detail p,.slate-socket span,.slate-option-list span { color:#e0e8ed;line-height:1.7; }
+.native-slot-detail small,.slate-socket small,.slate-option-list small,.slate-palette small { color:#bccbd5; }
+.slate-palette small { white-space:nowrap;flex-shrink:0; }
+.native-picker-columns { grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); }
+@container(max-width:430px) {
+  .native-picker-columns { grid-template-columns:1fr; }
+  .native-picker-list { max-height:240px; }
+  .native-picker-card { position:static; }
+}
+@media(max-width:760px) {
+  .season-native .native-content { display:block;overflow:auto; }
+  .season-native .season-native-scroll { overflow:visible;min-height:0; }
+  .season-native .native-dps-dock { overflow:visible;max-height:none;border-left:0;border-top:1px solid #405664; }
+  .season-native .build-chip { flex-basis:calc(100% - 120px);min-width:0; }
+  .season-native .quick-category-menu { gap:4px; }
+  .season-native .quick-category-menu button { padding:8px 10px; }
+  .season-native-modal { max-height:calc(100dvh - 16px);min-width:0; }
+  .season-native-modal>header,.season-native-modal>footer,.season-native-modal-body { padding-inline:14px; }
+  .season-native-modal>header h2 { min-width:0;overflow-wrap:anywhere; }
+}

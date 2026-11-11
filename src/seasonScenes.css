@@ -1,0 +1,190 @@
+/* SS14 editor scenes. The build controls and DPS inspector share the remaining space. */
+html:has(.season-native),body:has(.season-native) { min-width: 0; }
+.season-native[data-role="ss14-main-editor"] {
+  --scene-gold: #e9c982;
+  --scene-line: #505451;
+  --scene-muted: #bac5ca;
+  font-family: "Torchlight UI", "Malgun Gothic", sans-serif;
+  background: #19252d url("../assets/ingame-ui/game/common-background.png") center / cover;
+}
+.season-native .planner-header {
+  min-height: 46px;
+  padding: 5px clamp(12px, 2vw, 28px);
+  gap: 10px;
+  background: #10171bf5;
+  border-bottom: 1px solid #343b3d;
+}
+.season-native .planner-header .build-chip { border: 0; border-radius: 0; padding: 0; min-width: 120px; }
+.season-native .planner-header .build-chip input { min-height: 34px; border: 0; border-bottom: 1px solid #64615a; background: #1d2428; }
+.season-native .planner-header button { min-height: 32px; padding: 4px 11px; border-radius: 1px; }
+.season-native .header-primary-actions button:first-child { color: #f7dea7; border-color: #776543; }
+.season-native .planner-header .header-primary-actions { flex: none; }
+.scene-dps-jump { display: none; }
+.season-native .native-brand { color: #ece7d9; font-size: 22px; }
+.season-native .native-brand small { color: var(--scene-gold); }
+.season-native .quick-category-menu {
+  flex: none; padding: 0 clamp(12px, 2vw, 28px); margin: 0; gap: 4px;
+  background: linear-gradient(90deg,#242d32,#172024); border: 0; border-bottom: 1px solid #66604e; border-radius: 0;
+}
+.season-native .quick-category-menu button { padding: 7px 13px; margin: 0; min-height: 40px; border: 0; border-bottom: 3px solid transparent; }
+.season-native .quick-category-menu button[aria-pressed="true"] {
+  color: #fff1ce; background: linear-gradient(0deg,#a98c463c,transparent); border-bottom-color: var(--scene-gold);
+}
+.season-native .season-native-scroll { padding: clamp(12px,1.8vw,24px); }
+.season-native .planner-section { max-width: none; padding: 0; border: 0; background: none; box-shadow: none; }
+.season-native .planner-section > h1 {
+  margin: 0 0 14px; padding-left: 10px; border-left: 3px solid var(--scene-gold); color: #f0ece1;
+  font-size: clamp(17px,1.45vw,22px); line-height: 1.2;
+}
+.season-native .native-dps-dock { padding: 14px; background: linear-gradient(150deg,#202a30,#121c22 65%); border-left-color: var(--scene-line); }
+.season-native .native-result-summary > strong { font-size: clamp(19px,1.75vw,27px); line-height: 1.25; word-break: keep-all; }
+.season-native .native-result-summary > small { color: var(--scene-gold); }
+.season-native .native-result-actions button,.season-native .native-result-tabs button { padding-inline: 5px; }
+.season-native .native-result-tabs button[aria-pressed="true"] { color: #fff1cc; border-bottom-color: var(--scene-gold); }
+.season-native :is(.hunter-gallery [hidden], .hunter-gallery + [hidden]) { display: none; }
+
+.hunter-scene {
+  display: grid; grid-template-columns: minmax(0,.95fr) minmax(0,1.05fr); align-items: center;
+  min-height: clamp(350px,calc(100dvh - 180px),680px); overflow: hidden; isolation: isolate;
+  background: radial-gradient(ellipse at 27% 44%,#738fa53d,transparent 47%), url("../assets/ingame-ui/game/common-background.png") center / cover;
+  border-block: 1px solid #62717a65;
+}
+.hunter-showcase { min-height: inherit; align-self: stretch; position: relative; }
+.hunter-portrait,.hunter-preview { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hunter-portrait { object-fit: contain; object-position: center 20%; filter: drop-shadow(2px 5px 16px #080c10); }
+.hunter-preview { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.hunter-preview img { width: 45%; height: 88%; object-fit: contain; margin-inline: -7%; opacity: .62; }
+.hunter-preview img:nth-child(2) { z-index: 1; opacity: 1; }
+.hunter-caption { position: absolute; inset: auto 0 0; padding: 40px 18px 18px; background: linear-gradient(transparent,#101b23ec 46%); }
+.season-native .hunter-caption h2 { margin: 0; font-size: clamp(22px,2.3vw,38px); color: #fff6db; }
+.season-native .hunter-caption p { margin: 2px 0 8px; color: var(--scene-gold); }
+.hunter-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.season-native .hunter-controls label { flex-direction: row; align-items: center; font-size: 13px; }
+.season-native .hunter-controls input { width: 62px; min-height: 30px; padding: 4px 7px; }
+.season-native .hunter-controls button { min-height: 32px; padding: 4px 14px; color: #f4e4be; border-color: #897753; background: #34332c; }
+.hunter-path { padding: 18px clamp(10px,1.6vw,26px) 18px 8px; }
+.season-native .hunter-path h2 { color: var(--scene-gold); font-size: 16px; margin: 0 0 10px; }
+.hunter-stage { position: relative; display: flex; align-items: stretch; gap: 6px; margin: 5px 0; }
+.hunter-stage:not(:last-child)::after { content: ""; position: absolute; z-index: -1; left: 24px; top: 50%; height: 100%; width: 1px; background: #a99873; }
+.season-native .hunter-trait {
+  flex: 1; min-width: 0; display: flex; gap: 10px; align-items: center; min-height: 62px; padding: 6px 5px;
+  text-align: left; border: 0; border-bottom: 1px solid #76818565; border-radius: 0; background: linear-gradient(90deg,#3a4c5770,#1c2d376b);
+}
+.hunter-trait > span:nth-child(2) { display: grid; }
+.hunter-trait small,.hunter-memory small { color: var(--scene-muted); font-size: 11px; }
+.stage-emblem,.board-emblem { display: grid; flex: none; place-items: center; background: url("../assets/ingame-ui/game/core-icon-frame.png") center / contain no-repeat; }
+.stage-emblem { height: 40px; width: 40px; color: #efd798; }
+.stage-emblem i { width: 75%; height: 75%; background-image: url("../assets/ingame-ui/hero-traits.webp"); border-radius: 50%; }
+.season-native .hunter-memory { display: grid; align-content: center; justify-items: center; gap: 2px; width: clamp(76px,8vw,110px); padding: 4px; font-size: 12px; background: #19232c; border: 1px solid #535b61; }
+.hunter-memory img,.hunter-memory [aria-hidden] { width: 25px; height: 25px; object-fit: contain; color: #b9a57e; }
+.hunter-gallery { display: grid; grid-template-columns: repeat(auto-fill,minmax(110px,1fr)); gap: 8px; }
+.season-native .hunter-gallery button { display: grid; align-content: end; padding: 0; overflow: hidden; min-height: 126px; background: #17232c; }
+.hunter-gallery img { width: 100%; height: 80px; object-fit: cover; object-position: 50% 18%; }
+.hunter-gallery button span { display: grid; padding: 5px; }
+.hunter-gallery small { font-size: 11px; color: #c9bd9d; }
+.trait-deck { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,155px),1fr)); gap: 10px; }
+.trait-deck article { display: flex; flex-direction: column; min-width: 0; }
+.trait-deck article .trait-choice { flex: 1; width: 100%; }
+.trait-deck article details { margin: 2px 0; }
+.season-native .trait-choice {
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start; padding: 14px 12px; text-align: left;
+  background: #212729 url("../assets/ingame-ui/game/core-card.png") center / 100% 100%; border: 1px solid #6a665e;
+}
+.trait-choice .stage-emblem { align-self: center; }
+.trait-choice > span:last-child { font-size: 13px; line-height: 1.55; color: #cdd7dc; white-space: pre-line; }
+.season-native .trait-choice[aria-pressed="true"] { border: 2px solid #a1da73; padding: 13px 11px; background-image: url("../assets/ingame-ui/game/core-card-selected.png"); }
+.trait-clear { display: flex; gap: 6px; margin-top: 10px; }
+.season-native .trait-clear button { min-height: 32px; padding: 4px 10px; }
+
+.loadout-scene { display: grid; gap: 12px; align-items: start; grid-template-columns: minmax(0,1.05fr) minmax(0,1fr); }
+.loadout-stage {
+  position: sticky; top: 0; min-width: 0; isolation: isolate; overflow: hidden; border: 1px solid #49555b;
+  background: #1e2b34 url("../assets/ingame-ui/game/common-background.png") center / cover;
+}
+.gear-scene .loadout-stage { grid-column: 2; grid-row: 1; background: radial-gradient(ellipse at 52% 40%,#374958,#131c23 72%); }
+.gear-scene .native-slot-detail { grid-column: 1; grid-row: 1; }
+.gear-scene:has(.native-slot-actions) { position: relative; isolation: isolate; padding: 12px; background: #172026; }
+.gear-scene:has(.native-slot-actions)::before {
+  content: ""; position: absolute; inset: 0 49% 0 0; z-index: -1;
+  /* HUD-free rectangle in the preserved 2048 × 1152 equipment capture. */
+  background: linear-gradient(90deg,#20190d33,#1a1b1c44), url("../assets/ingame-ui/gear-world-reference.jpg") 20.72% 49.75% / 341.33% 153.6% no-repeat;
+}
+.gear-scene:has(.native-slot-actions) .native-slot-detail { width: min(100%,380px); justify-self: end; align-self: center; }
+.loadout-portrait { position: absolute; inset: 3% 0; width: 100%; height: 94%; object-fit: contain; z-index: -1; pointer-events: none; }
+.equipment-sockets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px; padding: 10px; }
+.season-native .equipment-sockets button {
+  display: grid; grid-template-rows: 1fr auto; justify-items: center; align-items: center; width: clamp(52px,4.7vw,72px); height: clamp(57px,9.8vh,85px);
+  padding: 3px; border: 1px solid #66737b; border-radius: 0; background: linear-gradient(150deg,#333e43db,#141b21ed);
+}
+.equipment-sockets button:nth-child(even) { justify-self: end; }
+.equipment-sockets img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.slot-label { font-size: 11px; line-height: 1.2; }
+.equipment-sockets [aria-hidden],.skill-rail [aria-hidden] { color: #a8b4b7; }
+.season-native .equipment-sockets button[aria-pressed="true"],.season-native .hunter-gallery button[aria-pressed="true"] { border-color: var(--scene-gold); box-shadow: inset 0 0 0 1px var(--scene-gold); }
+.skill-scene .loadout-stage { display: grid; grid-template-columns: 54px minmax(0,1fr); align-items: center; padding: 8px 4px; }
+.skill-rail { display: grid; gap: 2px; }
+.season-native .skill-rail button { display: grid; justify-items: center; gap: 1px; min-height: 34px; padding: 1px 2px; background: none; border: 0; color: #b2c1ca; }
+.skill-rail button > :first-child { width: 28px; height: 28px; object-fit: contain; background: #324554; clip-path: polygon(50% 0,94% 24%,94% 76%,50% 100%,6% 76%,6% 24%); }
+.season-native .skill-rail button[aria-pressed="true"] { color: #ffe3a0; background: linear-gradient(90deg,#846e4388,transparent); }
+.socket-constellation { position: relative; aspect-ratio: 1 / 1.12; width: 100%; background: radial-gradient(ellipse at center,#49689770,transparent 69%); }
+.socket-constellation svg { position: absolute; width: 100%; height: 100%; inset: 0; fill: none; stroke: #88aaca; stroke-opacity: .55; stroke-width: .4; }
+.socket-constellation::before { content: ""; position: absolute; inset: 0; background: url("../assets/ingame-ui/game/skill-rays.png") center / contain no-repeat; opacity: .18; mix-blend-mode: screen; pointer-events: none; }
+.socket-constellation .open-link { stroke: #a7d6ff; stroke-width: .65; stroke-opacity: .95; }
+.socket-constellation .closed-link { stroke-dasharray: 1.4 1.4; stroke-opacity: .28; }
+.season-native .link-node { position: absolute; display: grid; justify-items: center; align-content: center; width: 32%; transform: translate(-50%,-50%); border: 0; padding: 0; background: none; gap: 3px; }
+.link-node > :first-child {
+  display: grid; place-items: center; width: clamp(28px,3.9vw,56px); aspect-ratio: 1; object-fit: contain;
+  background: radial-gradient(#3b536d,#1c2b39); clip-path: polygon(50% 0,94% 24%,94% 76%,50% 100%,6% 76%,6% 24%);
+}
+.link-node small { color: #dbe5eb; font-size: 11px; line-height: 1.25; text-align: center; }
+.link-node.locked { opacity: .72; }
+.season-native .socket-constellation button.link-node[aria-pressed="true"] { background: none; border: 0; filter: drop-shadow(0 0 5px #9dcaf2); }
+.link-node.main-node { left: 50%; top: 50%; }.link-node.main-node small { color: #ffe3a4; }
+.link-node[data-position="0"] { left: 50%; top: 16%; }.link-node[data-position="1"] { left: 82%; top: 37%; }
+.link-node[data-position="2"] { left: 82%; top: 72%; }.link-node[data-position="3"] { left: 18%; top: 72%; }
+.link-node[data-position="4"] { left: 18%; top: 37%; }
+.loadout-scene .native-slot-detail { padding: 10px; background: #192126 url("../assets/ingame-ui/game/tooltip-background.png") center / 100% 100%; }
+.loadout-scene .native-slot-detail > header { padding: 9px 12px; margin: -10px -10px 8px; background: #2c4e69 url("../assets/ingame-ui/game/tooltip-blue.png") center / 100% 100%; }
+.gear-scene .native-slot-detail > header { background: #634123 url("../assets/ingame-ui/game/tooltip-orange.png") center / 100% 100%; }
+.loadout-scene .native-slot-detail > header small { color: #eee7d6; }
+.loadout-scene .detail-icon { float: right; width: 42px; height: 42px; display: grid; place-items: center; }
+.loadout-scene .detail-icon img { width: 100%; height: 100%; object-fit: contain; }
+.loadout-scene .native-slot-detail h2 { margin: 0; font-size: 17px; }
+.loadout-scene .native-picker-list { gap: 1px; background: #10181f; }
+.season-native .native-picker-list button { min-height: 36px; padding: 3px 6px; border: 0; border-bottom: 1px solid #39454b; border-radius: 0; background: #202b32; }
+.native-picker-list img { width: 30px; height: 30px; }.season-native .native-picker-list button[aria-pressed="true"] { background: #514938; }
+.season-native .talent-deck .native-board { min-height: 230px !important; color: #e6dfcb; border: 0; background: url("../assets/ingame-ui/game/core-card.png") center / 100% 100%; }
+.board-emblem { width: 68px; height: 68px; }.native-board .board-emblem img { width: 76%; height: 76%; object-fit: contain; }
+.pact-circle { position: relative; isolation: isolate; padding: 48px 12px; background: #233850 url("../assets/ingame-ui/game/pact-background.png") center / cover; }
+.pact-circle::before { content: ""; position: absolute; inset: 2%; z-index: -1; background: url("../assets/ingame-ui/game/pact-wheel.png") center / contain no-repeat; }
+.season-native .pact-circle .native-board { width: min(100%,140px); justify-self: center; min-height: 118px !important; border-radius: 50%; background: #172631dd; border: 2px solid #888575; }
+.season-native .pact-circle .native-board img { height: 40px; width: 40px; }
+
+@media (max-width: 1000px) {
+  .season-native .planner-header { gap: 6px; }
+  .season-native .quick-category-menu button { padding-inline: 10px; }
+  .loadout-scene { grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+}
+@media (max-width: 760px) {
+  .season-native .planner-header { padding: 5px 10px; }
+  .season-native .planner-header .build-chip { flex-basis: 45%; }
+  .season-native .quick-category-menu { display: flex; flex-wrap: nowrap; overflow-x: auto; padding: 0 8px; }
+  .season-native .quick-category-menu button { flex: none; padding: 5px 9px; white-space: nowrap; }
+  .season-native .season-native-scroll { padding: 12px; }
+  .scene-dps-jump { display: block; float: right; color: var(--scene-gold); font-size: 13px; padding-inline: 8px; }
+  .season-native .native-board-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+  .season-native .talent-deck .native-board { min-height: 154px !important; gap: 6px; padding-inline: 4px; }
+  .board-emblem { width: 45px; height: 45px; }
+}
+@media (max-width: 600px) {
+  .hunter-scene { display: block; }.hunter-showcase { min-height: 265px; }
+  .hunter-caption { left: 0; right: auto; width: 52%; padding: 20px 8px 12px; background: linear-gradient(0deg,#17232bab,transparent); }
+  .hunter-portrait,.hunter-preview { left: 26%; width: 74%; }
+  .hunter-path { padding: 8px 10px; }.season-native .hunter-trait { min-height: 48px; }
+  .loadout-scene { display: flex; flex-direction: column; }.loadout-stage,.native-slot-detail { width: 100%; }
+  .loadout-stage { position: relative; top: auto; box-sizing: border-box; }
+  .equipment-sockets { grid-template-rows: repeat(5,46px); }.season-native .equipment-sockets button { width: 52px; height: 46px; }
+  .skill-rail { grid-template-columns: repeat(2,minmax(0,1fr)); }.skill-scene .loadout-stage { grid-template-columns: 82px minmax(0,1fr); }
+  .socket-constellation { max-width: 310px; margin-inline: auto; aspect-ratio: 1.1; }
+  .season-native .pact-circle .native-board { min-height: 90px !important; gap: 3px; padding: 4px; }
+}

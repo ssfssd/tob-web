@@ -1,0 +1,62 @@
+/* Layout measured against the preserved 2048 x 1152 game skill capture.
+   The permanent DPS dock is a planner control, separate from the game scene. */
+.season-native { font-family:"Torchlight UI","Malgun Gothic",sans-serif; background-color:#152631; color:#dbe4e9; }
+.season-native .planner-header { min-height:58px;padding:8px 22px;background:#0c151ce8;border-color:#426073; }
+.season-native .quick-category-menu { padding:6px 22px;background:#111e27c9;border-bottom:1px solid #344c5b; }
+.season-native .quick-category-menu button { background:transparent;border-color:transparent;border-radius:0;color:#aebec8; }
+.season-native .quick-category-menu button[aria-pressed=true] { background:#34506680;border-color:#6c899b;color:#eef7fa; }
+.season-native input,.season-native select,.season-native textarea { box-sizing:border-box;max-width:100%;border-radius:0;background:#101d26;border-color:#405968;color:#e1e8eb; }
+.season-native .native-dps-dock { background:#101a22e8;border-color:#3d5463; }
+.season-native .native-dps-dock>strong { font-size:clamp(21px,2.3vw,30px);word-break:keep-all; }
+.season-native-scroll:has(.native-skill-scene) { padding:0;overflow:hidden; }
+.season-native-scroll:has(.native-skill-scene) .planner-section { max-width:none;height:100%;position:relative; }
+.season-native-scroll:has(.native-skill-scene) h1 { position:absolute;left:25px;top:22px;z-index:1;color:#cedde6;font-size:19px; }
+.native-skill-scene { position:relative;height:100%;min-height:520px;background:url('../assets/ingame-ui/game/common-background.png') center/cover; }
+.native-skill-scene::before { content:"";position:absolute;inset:0;background:url('../assets/ingame-ui/game/skill-pattern.png') center/420px auto;opacity:.035;mix-blend-mode:screen;pointer-events:none; }
+.native-skill-rail { position:absolute;top:11%;bottom:6%;left:2.5%;display:flex;flex-direction:column;justify-content:center;gap:8px;width:110px;z-index:2; }
+.season-native .native-skill-rail button { display:flex;align-items:center;gap:8px;padding:0;min-height:45px;background:transparent;border:0;text-align:left;color:#b7cbd7;font-size:11px; }
+.native-skill-rail img { width:46px;height:46px;object-fit:contain;clip-path:polygon(50% 0,94% 25%,94% 75%,50% 100%,6% 75%,6% 25%); }
+.season-native .native-skill-rail button[aria-pressed=true] { color:#fff;background:linear-gradient(90deg,#6f96b255,transparent);filter:drop-shadow(0 0 7px #79bdff); }
+.native-skill-orbit { position:absolute;width:min(50vw,calc(100dvh - 165px),620px);aspect-ratio:1;left:47%;top:49%;transform:translate(-50%,-50%); }
+.native-skill-orbit::before { content:"";position:absolute;inset:0;background:#92baff;mask:url('../assets/ingame-ui/game/skill-rays.png') center/contain no-repeat;mask-mode:luminance;opacity:.55;pointer-events:none; }
+.native-skill-orbit svg { position:absolute;inset:0;width:100%;height:100%;fill:none;stroke:#699fbd66;stroke-width:1; }
+.season-native .native-skill-node { position:absolute;transform:translate(-50%,-50%);background:none;border:0;padding:0;display:flex;align-items:center;flex-direction:column;width:150px;gap:7px;color:#d6e6f0;font-size:12px;text-shadow:0 1px 3px #000; }
+.season-native .native-skill-node:hover { background:none;filter:drop-shadow(0 0 8px #6fbafe); }
+.native-skill-node img,.native-skill-node>span[aria-hidden] { width:70px;height:78px;object-fit:contain;background:url('../assets/ingame-ui/game/skill-hexagon.png') center/contain no-repeat; }
+.native-skill-node>span[aria-hidden] { display:grid;place-items:center;color:#6c8aa1;font-size:26px; }
+.native-skill-node>span[aria-hidden] { position:relative;background:none; }
+.native-skill-node>span[aria-hidden]::before { content:"";position:absolute;inset:0;background:#b4c6d2;mask:url('../assets/ingame-ui/game/skill-hexagon.png') center/contain no-repeat;mask-mode:luminance;pointer-events:none; }
+.native-skill-node img { clip-path:polygon(50% 0,94% 25%,94% 75%,50% 100%,6% 75%,6% 25%); }
+.native-skill-node small { color:#8baec7;background:#102535;border-radius:20px;padding:2px 12px; }
+.native-skill-main { left:50%;top:52%; }
+.native-skill-main img { width:80px;height:90px;filter:drop-shadow(0 0 9px #519ef9); }
+.native-link-0 { left:50%;top:18%; }.native-link-1 { left:82%;top:41%; }.native-link-2 { left:70%;top:78%; }.native-link-3 { left:30%;top:78%; }.native-link-4 { left:18%;top:41%; }
+.native-game-tooltip { position:absolute;left:73%;top:23%;width:24%;max-height:71%;overflow:auto;background:#17232c url('../assets/ingame-ui/game/tooltip-background.png') center/100% 100%;border:1px solid #526473;box-shadow:0 4px 14px #0009;font-size:12px; }
+.native-game-tooltip header { padding:12px;background:url('../assets/ingame-ui/game/tooltip-blue.png') top/100% 100%;min-height:74px; }
+.native-game-tooltip header img { width:45px;height:45px;float:right; }.season-native .native-game-tooltip h2 { margin:0 0 5px;font-size:15px;color:#d7e9f5; }
+.native-game-tooltip>p { padding:10px 13px;margin:0;line-height:1.75; }.native-game-tooltip footer { display:flex;flex-direction:column;gap:7px;padding:10px; }
+.native-skill-meta { padding:10px 13px;border-bottom:1px solid #334859;color:#97b4c8;font-size:11px;line-height:1.7; }
+.season-native .native-game-tooltip button,.season-native-modal>footer button { background:url('../assets/ingame-ui/game/metal-button.png') center/100% 100%;color:#202a32;border:0;border-radius:0; }
+.season-native-modal { background:#14242f url('../assets/ingame-ui/game/common-background.png') center/cover;border-color:#607786;border-radius:0;font-family:"Torchlight UI","Malgun Gothic",sans-serif; }
+.season-native-modal>header { background:#101a24d9;border-bottom:1px solid #41596b; }
+.season-native fieldset { border-radius:0;background:#10202c55;border-color:#4b6375; }
+.native-extension-selection { display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start; }
+.native-extension-selection>section { min-width:0; }
+.native-extension-selection fieldset,.native-extension-selection details { background:#172733 url('../assets/ingame-ui/game/tooltip-background.png') center/100% 100%;padding:14px;border:1px solid #485e70; }
+.native-extension-selection p { color:#bfced7;font-size:12px;line-height:1.7; }
+.native-extension-selection h3 { border-bottom:1px solid #5c778b;padding-bottom:12px;color:#d5e6ef; }
+.native-extension-conditions { border-top:1px solid #496277;padding-top:8px; }
+.native-gear-grid { position:relative;min-height:clamp(420px,calc(100dvh - 260px),600px);width:min(100%,620px);margin-inline:auto;grid-template-columns:80px minmax(150px,1fr) 80px;gap:10px 8px;align-content:center;background:#111c24b3;border:1px solid #425564;padding:14px; }
+.native-gear-hero { position:absolute;left:8%;top:0;width:84%;height:100%;object-fit:contain;pointer-events:none;opacity:.95; }
+.native-gear-grid article { position:relative;z-index:1;grid-column:1; }
+.native-gear-grid article[data-slot-position="3"],.native-gear-grid article[data-slot-position="5"],.native-gear-grid article[data-slot-position="9"],.native-gear-grid article[data-slot-position="8"],.native-gear-grid article[data-slot-position="1"] { grid-column:3; }
+.native-gear-grid article[data-slot-position="2"],.native-gear-grid article[data-slot-position="3"] { grid-row:1; }
+.native-gear-grid article[data-slot-position="4"],.native-gear-grid article[data-slot-position="5"] { grid-row:2; }
+.native-gear-grid article[data-slot-position="6"],.native-gear-grid article[data-slot-position="9"] { grid-row:3; }
+.native-gear-grid article[data-slot-position="7"],.native-gear-grid article[data-slot-position="8"] { grid-row:4; }
+.native-gear-grid article[data-slot-position="0"],.native-gear-grid article[data-slot-position="1"] { grid-row:5; }
+.season-native .native-gear-grid .native-slot { position:relative;display:flex;flex-direction:column;justify-content:center;text-align:center;background:linear-gradient(160deg,#293641ee,#101920ee);border:2px solid #60717b;box-shadow:inset 0 0 0 1px #10161c;border-radius:0;height:78px;min-height:78px!important;padding:4px;gap:2px; }
+.native-gear-grid .native-slot img { width:45px;height:48px; }.native-gear-grid .native-slot>span{gap:0;max-width:100%}.native-gear-grid .native-slot strong{position:absolute;left:0;right:0;bottom:-15px;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e3dbb9;background:#111c24}.native-gear-grid .native-slot:not(.is-filled) strong{display:none}.native-gear-grid .native-slot small{color:#bed0dc;font-size:10px}
+@media(max-width:700px) { .native-extension-selection{grid-template-columns:1fr;gap:8px} }
+@media(max-width:1050px) { .native-skill-orbit{width:460px;left:45%}.native-game-tooltip{left:73%;width:25%;font-size:11px}.native-skill-node{width:110px!important}.native-skill-rail{width:70px;left:10px}.native-skill-rail button>span:not([aria-hidden]){display:none} }
+@media(max-width:1000px) { .season-native-scroll:has(.native-skill-scene){overflow:auto}.native-skill-scene{min-height:950px}.native-skill-rail{top:55px;bottom:auto;left:4%;width:92%;flex-direction:row;flex-wrap:wrap}.native-skill-rail button{width:40px}.native-skill-orbit{top:360px;left:50%;width:min(94%,480px)}.native-game-tooltip{position:relative;left:4%;top:610px;width:92%;max-height:310px}.native-skill-node img{width:52px;height:60px}.native-skill-node{font-size:10px!important} }
