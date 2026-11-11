@@ -4,9 +4,10 @@ import "./seasonCurrentDatabase.js";
 import { inspectSeasonAllocation } from "./seasonAllocation.js";
 import { boundBlessingStacks, blessingConditionValue } from "./seasonBlessings.js";
 import { seasonMemoryRows } from "./seasonMemories.js";
-import { seasonDestinyRow, pactNodeActive } from "./seasonDestiny.js";
+import { seasonDestinyRow, pactNodeActive, validFateLayout, activeExtraSlot } from "./seasonDestiny.js";
+import { SS14_DESTINY } from "./data/ss14Destiny.generated.js";
 import { seasonExtensionRows } from "./seasonExtensions.js";
-import { EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty } from "./seasonHeroSelection.js";
+import { EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlots, traitSlotCount } from "./seasonHeroSelection.js";
 import { parseSeasonHeroMechanics } from "./seasonHeroMechanics.js";
 import { resolveSeasonSlates, seasonSlateEntry } from "./seasonDivinity.js";
 import { netherTalent, netherPage, netherTopology, parseNetherTalent, netherJudgmentScale, netherTalentId, scaleNetherRow, parseNetherBanishment, applyNetherAggression } from './seasonNether.js';
@@ -313,7 +314,10 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     if (!(hero.traitSelections ?? []).length) add("hero", "hero", item, en, "", "", null, 1, "선택한 히어로의 특성이 없습니다.");
     if (build.ss14Inputs?.heroSelection) for (const level of [1, 45, 60, 75]) {
       const choice = build.ss14Inputs.heroSelection.choices[level];
-      if (level <= (hero.level ?? build.heroLevel) && (!choice || (choice === EMPTY_TRAIT_MEMORY && !canMarkTraitMemoryEmpty(build, level)))) {
+      const selected=traitSlots(choice).filter(k=>k && (k!==EMPTY_TRAIT_MEMORY || canMarkTraitMemoryEmpty(build,level)));
+      // Older documents explicitly marked the entire stage as unequipped.
+      const emptyStage=choice===EMPTY_TRAIT_MEMORY && canMarkTraitMemoryEmpty(build,level);
+      if (!emptyStage && level <= (hero.level ?? build.heroLevel) && selected.length < traitSlotCount(hero.branchId,level)) {
         add("hero", `hero.traitSelections.missing.${level}`, item, en, "", "", null, 1, `${level}레벨 히어로 특성을 선택하세요.`);
       }
     }
@@ -369,9 +373,12 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
           entry?.detail, koEntry, points[0] ?? 1, points.length > 1 ? "석판 포인트 입력이 서로 충돌합니다."
             : modified ? "석판 추가 배율·설정의 SS14 효과 미검증" : slate.slateId !== "six_gods" && !resolved.special.some(r => r.slate.instanceId === instanceId) ? "SS14 특수 석판 원문 미확보" : !item || item.categoryId !== "slates" ? "석판 옵션 ID 연결 미확보" : "");
         if (copiedFrom) rows.at(-1).copiedFrom = copiedFrom;
-        if(topology.active&&topology.type==='nether_judgment'&&topology.line.includes(instanceId)) {
-          const factor=netherJudgmentScale(topology,slate.slateId,topology.selectedIds);
-          scaleNetherRow(rows.at(-1),factor);
+        if(topology.active&&topology.type==='nether_judgment') {
+          const row=rows.at(-1), ownBrand=topology.owner===instanceId && netherTalent(row.netherTalentId)?.typeLabel==='Ultimate Nether King Talent Node';
+          if(ownBrand || topology.line.includes(instanceId)) {
+            scaleNetherRow(row,ownBrand ? .7 : netherJudgmentScale(topology,slate.slateId));
+            row.judgmentSource='https://torchlight.xd.com/ss14pn/';
+          }
         }
     }
     if(topology.active&&topology.type==='nether_contamination') {
@@ -399,6 +406,13 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     }
   }
   for (const [index, slot] of (build?.pact?.slots ?? []).entries()) {
+    const shell = slot?.undeterminedFate;
+    const layoutOK = validFateLayout(shell) && !!slot.spirit && index < 3;
+    if (shell) {
+      add('pact', `pact.slots.${index}.undeterminedFate`, {id:'destiny-undetermined-fate'}, SS14_DESTINY.pages.en,
+        'Undetermined_Fate', '', {name:'미정 숙명'}, 1, layoutOK ? '' : '정령과 미정 숙명의 슬롯 구성을 확인하세요.',
+        null, null, '추가 슬롯을 제공하며 장착한 운명의 효과를 적용합니다.');
+    }
     if (!slot?.spirit) continue;
     const id = slot.spirit.spiritId;
     const identity = data.spiritIdentities?.find((row) => [row.id, row.catalogId, ...(row.aliases ?? [])].includes(id));
@@ -409,15 +423,20 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     const inactiveOuter = entry && !pactNodeActive(slot, 'outer') ? '외환 포인트 회수' : '';
     add("pact", `pact.slots.${index}.spirit`, item, en, `level:${level}`, entry?.affixes.join("\n"), { detail: koEntry?.affixes.join("\n") }, 1, '', null, null, inactiveOuter);
     if (!entry || en?.parsed.duplicateDataLevels.length) continue;
-    for (const ring of en?.parsed.rings ?? []) {
-      const inactiveRing = !pactNodeActive(slot, ring.slotId) ? '링 포인트 회수' : '';
-      const replacement = slot.rings?.[ring.slotId]?.installedDestiny;
-      if (replacement) {
-        const destiny = seasonDestinyRow(build, index, ring);
+    const addDestiny = (destiny, inactiveRing = '') => {
         const reason = inactiveRing && destiny.destinyRollControls.length ? '' : destiny.reason;
         add("pact", destiny.path, destiny.item, destiny.page, destiny.record, destiny.text, destiny.koText, 1, reason, null, null, inactiveRing || destiny.activation?.inactiveReason);
         rows.at(-1).destinyRollControls = destiny.destinyRollControls;
         rows.at(-1).destinyActivation = destiny.activation;
+    };
+    if (layoutOK) shell.slots.forEach((child, extraIndex) => {
+      if (child.installedDestiny || child.destiny) addDestiny(seasonDestinyRow(build, index, null, { extraIndex }),
+        activeExtraSlot(slot,extraIndex)?'':'계약 경로의 선행 포인트 미투자');
+    });
+    for (const ring of en?.parsed.rings ?? []) {
+      const inactiveRing = !pactNodeActive(slot, ring.slotId) ? '링 포인트 회수' : '';
+      if (slot.rings?.[ring.slotId]?.installedDestiny) {
+        addDestiny(seasonDestinyRow(build, index, ring), inactiveRing);
         continue;
       }
       const translated = ko?.parsed.rings.find((row) => row.slotId === ring.slotId && row.dataId === ring.dataId);

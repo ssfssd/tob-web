@@ -186,7 +186,7 @@ function componentResults(report) {
 function destinyControls(report, formValues) {
   const rows = report.componentProjection.rows.filter((r) => r.destinyRollControls?.length);
   if (!rows.length) return "";
-  return `<fieldset><legend>SS14 운명 수치 확인</legend><p id="season-destiny-scope">정령의 기본 링 대신 적용할 운명 수치를 직접 확인하세요. 이전 시즌 값은 자동 적용하지 않으며 미정·쌍둥이 운명과 미해석 특수 효과는 미지원입니다.</p>${rows.map((r, index) =>
+  return `<fieldset><legend>SS14 운명 수치 확인</legend><p id="season-destiny-scope">기본 링과 미정 숙명 추가 슬롯에 장착한 운명의 수치를 입력하세요.</p>${rows.map((r, index) =>
     `<p>${escape(r.name)} · ${escape(r.detail)} ${sourceLink(r.receipt)}</p>${r.destinyRollControls.map((c, n) => {
       const label = `SS14 정령 ${c.index + 1} 운명 ${index + 1} 수치 ${n + 1}`;
       return `<label>${label} (${c.min}~${c.max})<input type="number" min="${c.min}" max="${c.max}" step="any" data-season-edit="destiny-roll" data-key="${escape(c.key)}" aria-label="${label}" aria-describedby="season-destiny-scope" value="${escape(formValues[`destiny-roll:${c.key}`] ?? c.value)}" /></label>`;

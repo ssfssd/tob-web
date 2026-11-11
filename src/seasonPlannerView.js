@@ -5,7 +5,7 @@ import { renderTalentScene, renderPactScene } from "./seasonBoardScenes.js";
 import { spriteKeys, columns, rows as spriteRows } from "./data/heroTraitArtwork.generated.js";
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
-import { seasonHeroOptions, seasonHeroTraitOptions, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty } from "./seasonHeroSelection.js";
+import { seasonHeroOptions, seasonHeroTraitOptions, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlotCount, buildTraitSlots } from "./seasonHeroSelection.js";
 import { seasonMemoryOptions, seasonTalentBoards, seasonTalentNodes, seasonSpiritOptions } from "./seasonNativeSelections.js";
 import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { seasonSupportOptions } from "./seasonSupport.js";
@@ -54,12 +54,16 @@ function heroPanel(s) {
   return `<div class="hunter-scene"><div class="hunter-showcase">${portraits}<div class="hunter-caption"><h2>${esc(hero?.name ?? "히어로 선택")}</h2>${hero ? `<p>${esc(hero.title)}</p>` : ""}
     <div class="hunter-controls">${field("레벨", "hero-level", b.heroLevel ?? 90, 'min="1" max="100" step="1" aria-label="히어로 레벨"')}${button(hero ? "히어로 변경" : "히어로 선택", "edit-slot", 'data-type="hero"')}</div></div></div>
     <div class="hunter-path"><h2>히어로 특성</h2>${[1, 45, 60, 75].map((level, i) => {
-      const key = b.ss14Inputs.heroSelection?.choices?.[level];
-      const trait = choices.find(t => t.key === key) ?? choices.find(t => b.hero?.traitSelections?.some(s => s.choiceIds.includes(t.key)) && t.level === level);
+      const slots=buildTraitSlots(b,level), count=traitSlotCount(id,level);
+      const buttons=Array.from({length:count},(_,slot)=>{
+      const key=slots[slot],trait=choices.find(t=>t.key===key);
       const tier = key && b.ss14Inputs.heroTiers?.[key]?.tier;
       const label = key === EMPTY_TRAIT_MEMORY ? "추억 미장착" : trait?.name ?? "특성 선택";
+      const caption=`${level}레벨${count>1?` · 특성 ${slot+1}`:""}`;
+      return button(`${traitEmblem(id,trait,level)}<span><small>${caption}</small><strong>${esc(label)}</strong></span>${tier?`<small>${tier}단계</small>`:""}`,"edit-slot",`data-type="traits" data-index="${level}" data-choice-index="${slot}" class="hunter-trait" aria-label="${caption} 특성 편집"`);
+      }).join("");
       const memory = i ? b.hero?.memories?.[i - 1] : null;
-      return `<div class="hunter-stage">${button(`${traitEmblem(id, trait, level)}<span><small>${level}레벨</small><strong>${esc(label)}</strong></span>${tier ? `<small>${tier}단계</small>` : ""}`, "edit-slot", `data-type="traits" data-index="${level}" class="hunter-trait" aria-label="${level}레벨 특성 편집"`)}${i ? button(`${icon(memory?.memoryTypeId)}<span>${esc(seasonMemoryOptions(i - 1).name)}</span>${memory ? `<small>+${memory.enhancement}</small>` : ""}`, "edit-slot", `data-type="memory" data-index="${i - 1}" class="hunter-memory"`) : ""}</div>`;
+      return `<div class="hunter-stage"><div class="hunter-stage-choices">${buttons}</div>${i ? button(`${icon(memory?.memoryTypeId)}<span>${esc(seasonMemoryOptions(i - 1).name)}</span>${memory ? `<small>+${memory.enhancement}</small>` : ""}`, "edit-slot", `data-type="memory" data-index="${i - 1}" class="hunter-memory"`) : ""}</div>`;
     }).join("")}</div></div>`;
 }
 function itemSource(id, label) {
@@ -197,12 +201,12 @@ function slotEditor(s) {
     const id = s.document.targetBuild.hero?.branchId;
     const choices = seasonHeroTraitOptions(id);
     const stages = [1, 45, 60, 75];
-    return `${!s.document.targetBuild.ss14Inputs.heroSelection ? `<p>히어로를 선택하면 SS14 특성으로 편집할 수 있습니다.</p>${select("SS14 히어로", "native-hero", "hero-selection", "", seasonHeroOptions().map(h => ({ id: h.id, name: `${h.name} · ${h.title}` })))}` : (stages.includes(index) ? [index] : stages).map(level => {
-      const key = s.document.targetBuild.ss14Inputs.heroSelection.choices[level];
+    return `${!s.document.targetBuild.ss14Inputs.heroSelection && !(traitSlotCount(id,45)===2 && b.hero?.traitSelections?.length) ? `<p>히어로를 선택하면 SS14 특성으로 편집할 수 있습니다.</p>${select("SS14 히어로", "native-hero", "hero-selection", "", seasonHeroOptions().map(h => ({ id: h.id, name: `${h.name} · ${h.title}` })))}` : (stages.includes(index) ? [index] : stages).map(level => {
+      const slot=Math.min(s.overlay.choiceIndex??0,traitSlotCount(id,level)-1), slots=buildTraitSlots(s.document.targetBuild,level), key=slots[slot];
       const options = choices.filter(t => t.level === level);
       const choose = (value, content, className) => button(content, "pick-trait",
-        `class="${className}" data-level="${level}" data-value="${esc(value)}" aria-pressed="${(key ?? "") === value}"`);
-      return `<fieldset><legend>${level}레벨 특성</legend><div class="trait-deck">${options.map(t => {
+        `class="${className}" data-level="${level}" data-choice-index="${slot}" data-value="${esc(value)}" aria-pressed="${(key ?? "") === value}" ${value && slots.some((k,i)=>i!==slot && k===value)?"disabled":""}`);
+      return `<fieldset><legend>${level}레벨 특성${traitSlotCount(id,level)>1?` · ${slot+1}번 칸`:""}</legend><div class="trait-deck">${options.map(t => {
         const tiers = t.description.split(/\n(?=레벨 \d+\s*\n)/u);
         const tier = s.document.targetBuild.ss14Inputs.heroTiers?.[t.key]?.tier;
         const preview = tiers.find(text => tier && text.startsWith(`레벨 ${tier}\n`)) ?? tiers[0];
@@ -318,6 +322,7 @@ export function renderNativeDps(s) {
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
     <div class="native-result-summary"><small>SS14 전체 DPS</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
     <p>${s.pending.size ? '변경한 입력을 확인하세요.' : tie ? `기존 투사체 우선 추정 · 새 시전 우선 ${tie.newCastFirstDps === null ? '계산 불가' : tie.newCastFirstDps.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + ' DPS'}` : dps.supported ? '현재 빌드·전투 조건 기준' : '수치 탭에서 계산 가능한 항목을 확인하세요.'}</p>
+    ${dps.heroMechanics?.some(m=>m.kind==='burst-essence')?'<p>입력한 매직 버스트·오버로드 빈도 기준입니다. 기발 에센스 유지와 회복의 1초 제한 적용 범위는 미검증입니다.</p>':''}
     ${renderEditDpsComparison(s, true)}
     ${requirements.length ? `<details data-role="numeric-dps-requirements"><summary>전체 DPS 확인 항목</summary><div class="native-requirements" aria-label="계산에 필요한 입력">${requirements.map(r => button(esc(r.label), 'requirement', `data-type="${r.type ?? ''}" data-section="${r.section ?? 'hero'}" data-focus-role="${r.role ?? ''}"`)).join('')}</div></details>` : ''}
     <div class="native-result-actions">${button('다시 계산', 'apply')}${button('효과별 출처', 'effect-sources')}</div></div>

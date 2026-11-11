@@ -84,8 +84,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const contentScroll = globalThis.document.querySelector?.('.native-content')?.scrollTop ?? 0;
       const resultScroll = globalThis.document.querySelector?.('.native-dps-dock')?.scrollTop ?? 0;
       const modalScroll = globalThis.document.querySelector?.(".season-native-modal-body")?.scrollTop ?? 0;
+      const cardScroll = root.querySelector?.('.pact-cards')?.scrollTop ?? 0;
       const open = [...(globalThis.document.querySelectorAll?.(".season-native details[open][data-role], .season-native-backdrop details[open][data-role]") ?? [])].map(el => el.dataset.role);
       setPlannerHtml(root, renderSeasonPlanner(state));
+      const cards=root.querySelector?.('.pact-cards');
+      if(cards)cards.scrollTop=cardScroll;
       for (const field of globalThis.document.querySelectorAll?.("[data-season-edit]") ?? []) {
         const pending = state.pending.get(editKey(readSeasonPlannerEdit(field)));
         if (pending) field.value = pending.value;
@@ -356,7 +359,24 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'talent-slot') { state.talentIndex=Number(d.index); state.talentNode=null; return; }
         if (action === 'talent-inspect') { state.talentNode=d.id; return; }
         if (action === 'pact-inspect') {
-          state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
+          state.pactRoster=null; state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
+        }
+        if (action === 'pact-roster') { state.pactRoster={index:Number(d.index),id:d.id||null}; return; }
+        if (action === 'pact-roster-apply') {
+          if (state.pactRoster?.id) api.edit({kind:'spirit-selection',slotIndex:state.pactRoster.index,value:state.pactRoster.id});
+          state.pactRoster=null; state.pactRing=null; return;
+        }
+        if (action === 'pact-spend') {
+          api.edit({kind:'pact-allocation',slotIndex:Number(d.index),key:'sequence',value:Number(globalThis.document.getElementById('pact-spend-count').value)});
+          return;
+        }
+        if (action === 'fate-slot') {
+          const index=Number(d.index);
+          api.edit({kind:'fate-slot',slotIndex:index,value:d.value});
+          const count=state.document.targetBuild.pact.slots[index].undeterminedFate?.slots?.length ?? 0;
+          state.pactRing=count ? 'extra-'+(count-1) : 'undetermined';
+          state.focusRole='pact-inspector';
+          return;
         }
         if (action === 'pact-allocation' || action === 'pact-remove-destiny') {
           api.edit({kind:action==='pact-allocation'?action:'destiny-selection',slotIndex:Number(d.index),key:d.key,value:action==='pact-allocation'?Number(d.value):''});
@@ -382,15 +402,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.overlay = null;
         }
         else if (action === "pick-trait") {
-          const current = state.document.targetBuild.ss14Inputs.heroSelection?.choices?.[d.level] ?? "";
-          if (current !== d.value) api.edit({ kind: "hero-choice", key: d.level, value: d.value });
+          api.edit({ kind: "hero-choice", key: d.level, choiceIndex:Number(d.choiceIndex??0), value: d.value });
         }
         else if (action === "inspect-skill") { const i = Number(d.index); if (Number.isInteger(i) && i >= 0 && i < 9) { state.skillIndex = i; state.supportIndex = null; } }
         else if (action === "inspect-gear") { const i = Number(d.index); if (Number.isInteger(i) && i >= 0 && i < 10) state.gearIndex = i; }
         else if (action === "inspect-socket") { const i = Number(d.index); state.supportIndex = Number.isInteger(i) && i >= 0 && i < 5 ? i : null; }
         else if (action === "edit-slot") {
           if (["skills", "gear"].includes(d.type)) { state.section = d.type; state[d.type === "skills" ? "skillIndex" : "gearIndex"] = Number(d.index); state.supportIndex = null; state.overlay = null; }
-          else state.overlay = { type: d.type, index: Number(d.index) };
+          else state.overlay = { type: d.type, index: Number(d.index), ...(d.choiceIndex!==undefined?{choiceIndex:Number(d.choiceIndex)}:{}) };
         }
         else if (action === "requirement") {
           state.section = d.section;

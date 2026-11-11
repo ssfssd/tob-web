@@ -37,8 +37,8 @@ export function validPactAllocations(pact) {
   if (pact?.slots === undefined) return true;
   return Array.isArray(pact.slots) && pact.slots.every(slot => {
     const keys = slot?.inactiveNodes;
-    return keys === undefined || (Array.isArray(keys) && keys.length <= 10 && new Set(keys).size === keys.length
-      && keys.every(key => typeof key === 'string' && /^(outer|innerRing[1-6]|midRing[1-3])$/u.test(key)));
+    return keys === undefined || (Array.isArray(keys) && keys.length <= 16 && new Set(keys).size === keys.length
+      && keys.every(key => typeof key === 'string' && /^(outer|innerRing[1-6]|midRing[1-3]|undetermined|extra-[0-4])$/u.test(key)));
   });
 }
 

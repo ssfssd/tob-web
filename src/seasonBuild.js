@@ -73,7 +73,7 @@ export function inspectSeasonBuildInputs(build) {
   }
   if (nonempty(build?.divinity?.boards)) block("divinity", "신격의 석판", "확인된 일반 석판 수치는 별도 내역에 반영하며 SS14 명왕·복제·배치 검증은 미완료입니다.");
   if ((build?.pact?.slots ?? []).some((slot) => slot.spirit || slot.undeterminedFate
-    || Object.values(slot.rings ?? {}).some((ring) => ring.installedDestiny))) block("pact", "정령·운명", "확인된 정령 레벨·기본 링·운명 수치는 별도 내역에 반영하며 SS14 미정·쌍둥이 운명·특수 효과 검증은 미완료입니다.");
+    || Object.values(slot.rings ?? {}).some((ring) => ring.installedDestiny))) block("pact", "정령·운명", "정령 레벨, 링과 추가 슬롯에 장착한 운명은 효과별 계산 내역에서 확인할 수 있습니다.");
   if (build?.customAffixes?.trim()) block("customAffixes", "사용자 옵션", "SS14 사용자 효과 연결 미완료");
   if (nonempty(build?.conditions)) block("conditions", "전투 조건", "SS14 조건과 적 방어 계산 미검증");
   if (build?.skillSeals?.life || build?.skillSeals?.mana) block("skillSeals", "자원 봉인", "SS14 자원 봉인 계산 미검증");

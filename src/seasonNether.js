@@ -59,7 +59,8 @@ export function netherTopology(board, template, selections) {
     for(let n=1;n<distance;n++) lines.push({x:a.x+Math.sign(b.x-a.x)*n,y:a.y+Math.sign(b.y-a.y)*n});
   }
   const line=others.filter(id=>board.cells.some(c=>c.slateInstanceId===id&&lines.some(p=>p.x===c.x&&p.y===c.y)));
-  return {active:true,type:template.slate.slateId,adjacent,line,others,lines,selectedIds};
+  return {active:true,type:template.slate.slateId,owner:template.slate.instanceId,adjacent,line,others,lines,selectedIds,
+    talents:selections.map(s=>({id:s.nativeId??netherTalent(s.selection.valueId)?.id,owner:s.slate.instanceId}))};
 }
 
 // Parse the current source text, never the historical Hades numeric registry.
@@ -189,19 +190,21 @@ export function parseNetherBanishment(template, context) {
   return parseNetherTalent({id:`banish${variant}`,detail:data.banishmentRules[variant-1].detail,ko:{detail:template.name}},context);
 }
 
-export function netherJudgmentScale(topology, templateId, ids) {
+export function netherJudgmentScale(topology, templateId) {
   if(!topology.active||topology.type!=='nether_judgment')return 1;
-  let increased=70;
-  for(const id of ids){ if(id==='90000215')increased+=5;
-    if(id==='92300004'&&['corner_of_divinity','stars_fall'].includes(templateId))increased+=10;
-    if(id==='92300005'&&templateId==='six_gods')increased+=10; }
+  // XD SS14 October 14 supplement supersedes the 70% in the general TLIDB guide.
+  let increased=40;
+  for(const {id,owner} of topology.talents){ const factor=owner===topology.owner && netherTalent(id)?.typeLabel===tiers[3] ? .7 : 1;
+    if(id==='90000215')increased+=5*factor;
+    if(id==='92300004'&&['corner_of_divinity','stars_fall'].includes(templateId))increased+=10*factor;
+    if(id==='92300005'&&templateId==='six_gods')increased+=10*factor; }
   return 1+increased/100;
 }
 
 export function scaleNetherRow(row, factor) {
   if(row.effects.some(e=>e.operation==='set'||e.stat.endsWith('_skill_levels')&&!Number.isInteger(e.value*factor))
-    ||row.mechanics?.some(m=>m.kind!=='nether-topology')) {
-    row.effects=[];row.blockers.push({reason:'명왕 증폭·투영 대상의 고정·레벨·특수 효과 환산 규칙을 확인하지 못했습니다.'});row.status='partial';return;
+    ||row.mechanics?.some(m=>!['nether-topology','nether-aggression','nether-defensive-immunity'].includes(m.kind))) {
+    row.effects=[];row.mechanics=[];row.blockers.push({reason:'명왕 증폭·투영 대상의 고정·레벨·특수 효과 환산 규칙을 확인하지 못했습니다.'});row.status='partial';return;
   }
   row.effects=row.effects.map(e=>({...e,value:e.value*factor,netherMultiplier:factor}));
 }

@@ -6,7 +6,7 @@ import { getCatalogItems, findItemById } from "./catalog.js";
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
-import { seasonDestinyOptions, pactNodeActive } from './seasonDestiny.js';
+import { seasonDestinyOptions, pactNodeActive, validFateLayout, pactAllocationKeys } from './seasonDestiny.js';
 import { EMPTY_TRAIT_MEMORY } from "./seasonHeroSelection.js";
 
 const ko = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
@@ -88,6 +88,10 @@ export function editNativeSeasonSelection(target, edit) {
       const choices = target.ss14Inputs.heroSelection?.choices;
       const level = [45, 60, 75][index];
       if (edit.value && choices?.[level] === EMPTY_TRAIT_MEMORY) delete choices[level];
+      if(edit.value && Array.isArray(choices?.[level]) && choices[level].includes(EMPTY_TRAIT_MEMORY)) {
+        choices[level]=choices[level].map(k=>k===EMPTY_TRAIT_MEMORY?"":k);
+        if(!choices[level].some(Boolean))delete choices[level];
+      }
     } else {
       if (!memory) throw new Error("추억 기본 옵션을 먼저 선택하세요.");
       if (edit.kind === "memory-enhancement") {
@@ -131,13 +135,49 @@ export function editNativeSeasonSelection(target, edit) {
     target.selections = { ...target.selections, talents: ids };
     target.selectionProjection = { ...target.selectionProjection, talents: ids };
     capture(target, "talents");
+  } else if (edit.kind === 'fate-slot' || edit.kind === 'destiny-selection' && /^extra-/.test(edit.key)) {
+    const slot = target.pact?.slots?.[index], spirit = selectedSeasonSpirit(slot?.spirit?.spiritId);
+    if (!Number.isInteger(index) || index < 0 || index > 2 || !spirit || spirit.drop) throw new Error('전투 정령을 선택하세요.');
+    let shell = slot.undeterminedFate;
+    if (shell && !validFateLayout(shell)) throw new Error('기존 미정 숙명의 배치를 확인하세요.');
+    const prefix = `pact.slots.${index}.undeterminedFate.slots.`;
+    let cleared;
+    if (edit.kind === 'fate-slot' && ['micro','medium'].includes(edit.value)) {
+      if (!shell) {
+        const id = `ss14-fate-${index}`;
+        shell = slot.undeterminedFate = {instanceId:id, destiny:{instanceId:id+'-item',destinyId:'destiny-undetermined-fate'},slots:[]};
+      }
+      if (shell.slots.length >= 5) throw new Error('추가 슬롯은 최대 5칸입니다.');
+      shell.slots.push({slotType:edit.value,slotId:`${shell.instanceId}:slot:${shell.slots.length}`,installedDestiny:null});
+    } else if (edit.kind === 'fate-slot' && edit.value === 'remove' && shell) {
+      cleared = shell.slots.length - 1;
+      shell.slots.pop();
+      if (!shell.slots.length) slot.undeterminedFate = null;
+      if(slot.inactiveNodes)slot.inactiveNodes=slot.inactiveNodes.filter(key=>pactAllocationKeys(slot).includes(key));
+    } else if (edit.kind === 'destiny-selection' && /^extra-[0-4]$/u.test(edit.key)) {
+      const n = Number(edit.key.at(-1)), child = shell?.slots[n];
+      if (!child || edit.value && !seasonDestinyOptions(child.slotType === 'micro' ? 'innerRing1' : 'midRing1').some(o=>o.id===edit.value)) throw new Error('슬롯 크기에 맞는 운명을 선택하세요.');
+      if ((child.installedDestiny?.destinyId ?? child.destiny?.destinyId ?? '') === edit.value) return true;
+      delete child.destiny;
+      child.installedDestiny = edit.value ? {instanceId:`ss14-extra-${index}-${n}`,destinyId:edit.value} : null;
+      cleared = n;
+    } else throw new Error('미정 숙명의 추가 슬롯을 확인하세요.');
+    if (cleared !== undefined) for (const key of Object.keys(target.ss14Inputs.destinyRolls ?? {}))
+      if (key.startsWith(prefix+cleared+':')) delete target.ss14Inputs.destinyRolls[key];
+    capture(target,'pact');
   } else if (edit.kind === 'pact-allocation') {
     const slot=target.pact?.slots?.[index];
     const spirit=selectedSeasonSpirit(slot?.spirit?.spiritId);
-    if (!spirit || spirit.drop || ![0,1].includes(edit.value)) throw new Error('전투 정령의 활성 노드를 선택하세요.');
-    const keys=[...spirit.page.parsed.rings.map(r=>r.slotId),'outer'];
-    if(edit.key!=='all' && !keys.includes(edit.key))throw new Error('정령의 노드를 확인하세요.');
-    slot.inactiveNodes=keys.filter(k=>edit.key==='all'||edit.key===k ? !edit.value : !pactNodeActive(slot,k));
+    if (!spirit || spirit.drop) throw new Error('전투 정령의 활성 노드를 선택하세요.');
+    const keys=pactAllocationKeys(slot);
+    if(edit.key==='sequence'){
+      const available=keys.filter(key=>!pactNodeActive(slot,key));
+      if(!Number.isInteger(edit.value)||edit.value<1||edit.value>available.length)throw new Error('이 정령에 투자할 포인트 수를 확인하세요.');
+      slot.inactiveNodes=available.slice(edit.value);
+    } else {
+      if(![0,1].includes(edit.value)||edit.key!=='all' && !keys.includes(edit.key))throw new Error('정령의 노드를 확인하세요.');
+      slot.inactiveNodes=keys.filter(k=>edit.key==='all'||edit.key===k ? !edit.value : !pactNodeActive(slot,k));
+    }
     if(!slot.inactiveNodes.length)delete slot.inactiveNodes;
     capture(target,'pact');
   } else if (edit.kind === 'destiny-selection') {
@@ -159,8 +199,9 @@ export function editNativeSeasonSelection(target, edit) {
     if (edit.kind === "spirit-selection") {
       const option = seasonSpiritOptions().find(row => row.id === edit.value);
       if (edit.value && !option) throw new Error("SS14 정령을 선택하세요.");
-      if((target.pact.slots[index]?.spirit?.spiritId??'')===edit.value)return true;
-      for(const key of Object.keys(target.ss14Inputs.destinyRolls??{}))if(key.startsWith(`pact.slots.${index}.rings.`))delete target.ss14Inputs.destinyRolls[key];
+      const currentId=target.pact.slots[index]?.spirit?.spiritId;
+      if((currentId??'')===edit.value || option && option.aliases.includes(currentId))return true;
+      for(const key of Object.keys(target.ss14Inputs.destinyRolls??{}))if(key.startsWith(`pact.slots.${index}.`))delete target.ss14Inputs.destinyRolls[key];
       target.pact.slots[index] = { spirit: option ? { spiritId: option.id, level: option.levels[0] } : null, rings: {} };
     } else {
       const slot = target.pact.slots[index];
