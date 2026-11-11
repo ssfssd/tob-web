@@ -53,7 +53,7 @@ export function parseSeasonHeroMechanics(text, { build, recordKey, parseLines })
     let match;
     if (line === "Gains 2 Inspiration Machines that can be powered by Whimsy Essence and Ingenuity Essence respectively. Starts with 0 Whimsy Essence and Ingenuity Essence with an upper limit of 100. Restores 20 Whimsy Essence per second"
       || line === "When Whimsy Essence reaches 100, dealing Spell Damage to an enemy causes Inspiration Machines to use a Whimsy Explosion , inflicting Whimsy Signal on affected enemies") {
-      result.mechanics.push({ kind: "essence-cycle", sourceText: line });
+      result.mechanics.push({ kind: "essence-cycle", ...(line.startsWith("Gains 2")?{cap:100}:{}), sourceText: line });
       if (line.startsWith("When")) {
         const signal = need("signal"); const r = rule("Whimsy_Signal", /^\+([\d.]+)% additional Spell Damage taken for 5s$/u);
         rule("Whimsy_Explosion", /consuming 100 Whimsy Essence while restoring 25 Ingenuity Essence/u);
@@ -66,7 +66,7 @@ export function parseSeasonHeroMechanics(text, { build, recordKey, parseLines })
     } else if (line === "Bing's ingenious ideas allow him to possess more Traits. In addition to Base Traits, an additional Trait can be selected at each level threshold.") {
       result.mechanics.push({ kind: "extra-trait-choice", sourceText: line });
     } else if ((match = line.match(/^Instantly restores (\d+) Whimsy Essence when activating Spell Burst , and restores (\d+) additional Whimsy Essence for every (\d+) stacks of Spell Burst Charge consumed\. Interval: 1s$/u))) {
-      result.mechanics.push({ kind: "burst-essence", base: Number(match[1]), perGroup: Number(match[2]), group: Number(match[3]), sourceText: line });
+      result.mechanics.push({ kind: "burst-essence", base: Number(match[1]), perGroup: Number(match[2]), group: Number(match[3]), intervalMs:1000, sourceText: line });
     } else if ((match = line.match(/^Instantly restores (\d+) Ingenuity Essence after entering a stage or reviving$/u))) {
       result.mechanics.push({ kind: "initial-essence", value: Number(match[1]), sourceText: line });
     } else if ((match = line.match(/^Whimsy Explosion spawns an energy field\. Gains 1 stack of Whimsy for every 0\.5s staying in the energy field\. Stacks up to (\d+) time\(s\)$/u))) {

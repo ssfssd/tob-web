@@ -57,7 +57,7 @@ function heroPanel(s) {
       const slots=buildTraitSlots(b,level), count=traitSlotCount(id,level);
       const buttons=Array.from({length:count},(_,slot)=>{
       const key=slots[slot],trait=choices.find(t=>t.key===key);
-      const tier = key && b.ss14Inputs.heroTiers?.[key]?.tier;
+      const tier = key && s.report.componentProjection.rows.find(r=>r.control?.recordKey===key)?.control.tier;
       const label = key === EMPTY_TRAIT_MEMORY ? "추억 미장착" : trait?.name ?? "특성 선택";
       const caption=`${level}레벨${count>1?` · 특성 ${slot+1}`:""}`;
       return button(`${traitEmblem(id,trait,level)}<span><small>${caption}</small><strong>${esc(label)}</strong></span>${tier?`<small>${tier}단계</small>`:""}`,"edit-slot",`data-type="traits" data-index="${level}" data-choice-index="${slot}" class="hunter-trait" aria-label="${caption} 특성 편집"`);
@@ -165,7 +165,22 @@ function pactPanel(s) {
   return renderPactScene(s,{button,esc,select,icon});
 }
 function combatPanel(s) {
-  return `${dpsControls(s.document, s.report, {})}<details data-role="native-critical-input"><summary>스킬 기본 크리티컬</summary>${offenseControls(s.document, s.report, {})}</details><details data-role="season-character-input"><summary>캐릭터 기본 수치·효과 조건</summary>${characterControls(s.document, s.report, {})}</details><details data-role="native-blessing-input"><summary>축복 중첩</summary>${blessingControls(s.document, s.report, {})}</details>${theaControls(s.document, s.report, {})}<details data-role="native-extension-input"><summary>영약·특수 효과 조건</summary>${extensionControls(s.report, {})}</details>`;
+  const recovery=s.report.fullDps.burstRecovery;
+  const editor=recovery?`<fieldset><legend>크리에이티브 대폭발 · 기발 회복</legend>
+    <p>관측 시작을 0ms로 두고 실제 매직 버스트 발동을 빠짐없이 순서대로 기록하세요. 오버로드 시전 자체나 장벽 폭발 적중은 발동으로 세지 않습니다.</p>
+    ${(s.document.targetBuild.ss14Inputs.bingBurstEvents??[]).map((e,i)=>{
+      const field=(key,label,max)=>`<label>${label}<input type="number" min="0" max="${max}" step="1" aria-label="${i+1}번 ${label}" data-season-edit="bing-event" data-row="${i}" data-key="${key}" value="${e[key]??''}"></label>`;
+      const r=recovery.rows[i], unit=n=>n==null?'미확인':n;
+      return `<fieldset><legend>발동 ${i+1}</legend>${field('ms','시각 (ms)',86400000)}
+        <label>발동 종류<select aria-label="${i+1}번 발동 종류" data-season-edit="bing-event-source" data-key="source" data-row="${i}"><option value="">선택</option>${[['normal','일반 시전'],['overload','창의 오버로드']].map(([id,label])=>`<option value="${id}"${e.source===id?' selected':''}>${label}</option>`).join('')}</select></label>
+        ${field('charges','실제 소모 충전',1000)}${field('before','발동 직전 기발 (선택)',100)}
+        ${r?`<p>기본 ${unit(r.base)} · 추가 ${unit(r.extra)} · 실제 회복 ${unit(r.credited)}${r.extra===null && r.groupAmount?' · 제한 적용 전 추가량 '+r.groupAmount:''}${r.reason?' · '+esc(r.reason):''}</p>`:''}
+        ${button('발동 삭제','bing-event-remove',`data-row="${i}"`)}</fieldset>`;
+    }).join('')}${button('발동 추가','bing-event-add')}${button('회복 계산','apply')}
+    ${recovery.problem?`<p>${esc(recovery.problem)}</p>`:''}
+    ${recovery.total!==null?`<p>기본·추가 합계 ${recovery.total} · 실제 회복 합계 ${recovery.credited??'직전 기발 확인 필요'}</p>`:''}
+    <small>1초 제한의 기본 회복 적용 범위와 일반·오버로드 공유 여부는 미확인입니다. 회복을 추가 대미지나 발동 횟수로 환산하지 않습니다.</small></fieldset>`:'';
+  return `${editor}${dpsControls(s.document, s.report, {})}<details data-role="native-critical-input"><summary>스킬 기본 크리티컬</summary>${offenseControls(s.document, s.report, {})}</details><details data-role="season-character-input"><summary>캐릭터 기본 수치·효과 조건</summary>${characterControls(s.document, s.report, {})}</details><details data-role="native-blessing-input"><summary>축복 중첩</summary>${blessingControls(s.document, s.report, {})}</details>${theaControls(s.document, s.report, {})}<details data-role="native-extension-input"><summary>영약·특수 효과 조건</summary>${extensionControls(s.report, {})}</details>`;
 }
 function divinityPanel(s) {
   const conditions=netherConditions(s.report);
@@ -208,7 +223,7 @@ function slotEditor(s) {
         `class="${className}" data-level="${level}" data-choice-index="${slot}" data-value="${esc(value)}" aria-pressed="${(key ?? "") === value}" ${value && slots.some((k,i)=>i!==slot && k===value)?"disabled":""}`);
       return `<fieldset><legend>${level}레벨 특성${traitSlotCount(id,level)>1?` · ${slot+1}번 칸`:""}</legend><div class="trait-deck">${options.map(t => {
         const tiers = t.description.split(/\n(?=레벨 \d+\s*\n)/u);
-        const tier = s.document.targetBuild.ss14Inputs.heroTiers?.[t.key]?.tier;
+        const tier = s.report.componentProjection.rows.find(r=>r.control?.recordKey===t.key)?.control.tier;
         const preview = tiers.find(text => tier && text.startsWith(`레벨 ${tier}\n`)) ?? tiers[0];
         return `<article>${choose(t.key, `${traitEmblem(id, t, level)}<strong>${esc(t.name)}</strong><span>${esc(preview)}</span>`, "trait-choice")}
           ${tiers.length > 1 ? `<details><summary>단계별 효과</summary><p>${esc(t.description)}</p></details>` : ""}</article>`;
@@ -322,7 +337,7 @@ export function renderNativeDps(s) {
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
     <div class="native-result-summary"><small>SS14 전체 DPS</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
     <p>${s.pending.size ? '변경한 입력을 확인하세요.' : tie ? `기존 투사체 우선 추정 · 새 시전 우선 ${tie.newCastFirstDps === null ? '계산 불가' : tie.newCastFirstDps.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + ' DPS'}` : dps.supported ? '현재 빌드·전투 조건 기준' : '수치 탭에서 계산 가능한 항목을 확인하세요.'}</p>
-    ${dps.heroMechanics?.some(m=>m.kind==='burst-essence')?'<p>입력한 매직 버스트·오버로드 빈도 기준입니다. 기발 에센스 유지와 회복의 1초 제한 적용 범위는 미검증입니다.</p>':''}
+    ${dps.burstRecovery?`<p>크리에이티브 대폭발 · ${dps.burstRecovery.total!==null?`기발 회복 ${dps.burstRecovery.total} (상한 적용 전)`:dps.burstRecovery.rows.length?'회복 미확정 · 전투 조건에서 발동별 결과 확인':'전투 조건에서 매직 버스트 발동 기록 입력'}</p>`:''}
     ${renderEditDpsComparison(s, true)}
     ${requirements.length ? `<details data-role="numeric-dps-requirements"><summary>전체 DPS 확인 항목</summary><div class="native-requirements" aria-label="계산에 필요한 입력">${requirements.map(r => button(esc(r.label), 'requirement', `data-type="${r.type ?? ''}" data-section="${r.section ?? 'hero'}" data-focus-role="${r.role ?? ''}"`)).join('')}</div></details>` : ''}
     <div class="native-result-actions">${button('다시 계산', 'apply')}${button('효과별 출처', 'effect-sources')}</div></div>

@@ -24,6 +24,7 @@ import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
 import { validSeasonDpsInputs, editSeasonDpsInput } from "./seasonDps.js";
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
+import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
 import { applySeasonSlateSelections, validSeasonSlateSelections, seasonSlateTemplates, seasonSlateOptions } from "./seasonDivinity.js";
 import { applySeasonHeroSelection, validSeasonHeroSelection, editSeasonHeroSelection } from "./seasonHeroSelection.js";
 import { editNativeSeasonSelection } from "./seasonNativeSelections.js";
@@ -82,6 +83,8 @@ function validDocument(document) {
   if (!validSeasonHeroSelection(target.ss14Inputs)) return false;
   if (!validSeasonDpsInputs(target.ss14Inputs)) return false;
   if (!validHeroCombatInputs(target.ss14Inputs)) return false;
+  if (!validBingEvents(target.ss14Inputs.bingBurstEvents)) return false;
+  if(target.ss14Inputs.equippedTraitLevels!==undefined && (!Number.isInteger(target.ss14Inputs.equippedTraitLevels)||target.ss14Inputs.equippedTraitLevels<0||target.ss14Inputs.equippedTraitLevels>7))return false;
   if (!validTheaInputs(target.ss14Inputs)) return false;
   if (!validSeasonSlateSelections(target)) return false;
   if (!validSeasonMemoryBases(target)) return false;
@@ -214,10 +217,14 @@ export function editSeasonWorkspace(document, edit) {
   } else if (edit.kind === "log-review") {
     editLogReview(target, edit.key, edit.value);
   } else if (["hero-selection", "hero-choice"].includes(edit.kind)) {
+    if(edit.kind==='hero-selection' && edit.value!==target.hero?.branchId)delete target.ss14Inputs.bingBurstEvents;
     editSeasonHeroSelection(target, edit);
     applySeasonHeroSelection(target, target.ss14Inputs);
     target.ss14Inputs.configurations ??= {};
     target.ss14Inputs.configurations.hero = captureSeasonConfiguration(target, "hero");
+  } else if (['bing-event-add','bing-event','bing-event-source','bing-event-remove'].includes(edit.kind)) {
+    if(!projectSeasonComponents(target).rows.some(r=>r.mechanics?.some(m=>m.kind==='burst-essence')))throw Error('크리에이티브 대폭발을 활성화하세요.');
+    editBingEvents(target.ss14Inputs,edit);
   } else if (edit.kind === "thea-event") {
     if (!isThea(target) || edit.value !== "" && !validTheaEventValue(edit.key, edit.value)
       || edit.value === "" && !Object.hasOwn(THEA_EVENT_FIELDS, edit.key)) throw new Error("축복 발동 조건의 입력 범위를 확인하세요.");

@@ -3,7 +3,7 @@ import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import "./seasonCurrentDatabase.js";
 import { inspectSeasonAllocation } from "./seasonAllocation.js";
 import { boundBlessingStacks, blessingConditionValue } from "./seasonBlessings.js";
-import { seasonMemoryRows } from "./seasonMemories.js";
+import { seasonMemoryRows, memoryTraitTier } from "./seasonMemories.js";
 import { seasonDestinyRow, pactNodeActive, validFateLayout, activeExtraSlot } from "./seasonDestiny.js";
 import { SS14_DESTINY } from "./data/ss14Destiny.generated.js";
 import { seasonExtensionRows } from "./seasonExtensions.js";
@@ -284,8 +284,10 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
       status: parsed.blockers.length ? "partial" : "mapped" });
   };
   const hero = build?.hero;
-  for (const memory of seasonMemoryRows(build)) {
-    add("hero", memory.path, memory.item, memory.page, memory.record, memory.text, memory.koText, 1, memory.reason);
+  const memoryRows=seasonMemoryRows(build);
+  for (const memory of memoryRows) {
+    const tierOption=memory.text==='+2 to Hero Trait Level'&&!memory.reason;
+    add("hero", memory.path, memory.item, memory.page, memory.record, memory.text, memory.koText, 1, memory.reason,null,null,tierOption?'해당 추억 슬롯의 특성 단계에 반영':'');
     rows.at(-1).memoryControl = memory.memoryControl ?? null;
     rows.at(-1).memoryRollControls = memory.memoryRollControls ?? [];
   }
@@ -300,16 +302,18 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
       const trait = en?.parsed.traits.find((row) => row.key === key);
       const koTrait = ko?.parsed.traits.find((row) => row.key === key);
       const binding = build.ss14Inputs?.heroTiers?.[id];
-      const tier = binding?.tier ?? selection.choiceTiers?.[id];
+      const resolvedTier=memoryTraitTier(build,trait?.requiredLevel,binding?.tier ?? selection.choiceTiers?.[id],memoryRows);
+      const tier=resolvedTier.tier;
       const path = `hero.traitSelections.${index}.${id}`;
       const maxTier = Math.max(0, ...(trait?.detailBlocks ?? []).filter(b => b.kind === "tier").map(b => Number(b.text.match(/^Level (\d+)$/u)?.[1]) || 0));
-      const control = trait ? { choiceId: id, name: safeKo(koTrait?.name), maxTier, tier: Number.isInteger(tier) ? tier : "", sourcePageSha256: en.sourcePageSha256 } : null;
+      const control = trait ? { choiceId: id, recordKey:key, name: safeKo(koTrait?.name), maxTier, tier: Number.isInteger(tier) ? tier : "", tierLabel:resolvedTier.source??resolvedTier.reason, sourcePageSha256: en.sourcePageSha256 } : null;
       const duplicate = seen.has(key); seen.add(key);
       const reason = !trait ? "SS14 특성 ID 연결 미확보" : duplicate ? "중복 선택 특성은 합산하지 않습니다."
         : trait.requiredLevel > (hero.level ?? build.heroLevel) ? "히어로 레벨보다 높은 특성입니다."
-          : binding && binding.sourcePageSha256 !== en.sourcePageSha256 ? "SS14 특성 원문이 변경되어 단계 재선택이 필요합니다."
-            : !Number.isInteger(tier) || tier < 1 || tier > maxTier ? "SS14 특성 단계를 직접 선택하세요. SS13 입력에 없는 단계는 추정하지 않습니다." : "";
-      add("hero", path, item, en, key, heroTier(trait, tier, "en"), { name: koTrait?.name, detail: heroTier(koTrait, tier, "ko") }, 1, reason, control);
+          : resolvedTier.source==='기존 사본의 단계' && binding && binding.sourcePageSha256 !== en.sourcePageSha256 ? "저장된 특성 단계의 SS14 원문이 변경되었습니다."
+            : !Number.isInteger(tier) || tier < 1 || tier > maxTier ? resolvedTier.reason??"추억에서 결정되는 특성 단계의 SS14 원문 확인 필요" : "";
+      const inactive=resolvedTier.inactive && reason===resolvedTier.reason;
+      add("hero", path, item, en, key, heroTier(trait, tier, "en"), { name: koTrait?.name, detail: heroTier(koTrait, tier, "ko") }, 1, inactive?'':reason, control,null,inactive?reason:'');
     }
     if (!(hero.traitSelections ?? []).length) add("hero", "hero", item, en, "", "", null, 1, "선택한 히어로의 특성이 없습니다.");
     if (build.ss14Inputs?.heroSelection) for (const level of [1, 45, 60, 75]) {

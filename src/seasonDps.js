@@ -2,6 +2,7 @@ import { SS14_DPS_RULES } from "./data/ss14DpsRules.generated.js";
 import { logReviewRows } from "./seasonLogReview.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
+import { bingRecovery } from "./seasonBingRecovery.js";
 import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_STATS, SEASON_DEFENSIVE_STATS } from "./seasonGearEffects.js";
 import { SS14_GEAR_EN } from './data/ss14Gear.en.generated.js';
 import { SEASON_BLESSING_CAP_STATS } from './seasonBlessings.js';
@@ -231,7 +232,9 @@ function coverage(build, report, effects) {
     ? replacement.detail?.split("\n").find(line => line === "메인 스킬을 20레벨 장벽 폭발 로 교체합니다.") : null;
   if (replacementLine && report.components.some(c => c.id === replacement.itemId)
     && build.skills?.active?.[0]?.skillId !== "skills-tlidb-com-cn-barrier-burst")
-    blockers.unshift(`${replacement.name}: ${replacementLine} 현재 주력 스킬과 충돌하므로 전체 DPS를 계산할 수 없습니다.`);
+    blockers.unshift(`${replacement.name}: 주력 스킬은 일반 장벽 폭발로 교체됩니다. 다른 주력 스킬의 대미지를 대신 합산하지 않습니다.`);
+  if(report.components.some(c=>c.id===replacement?.itemId) || ['active-barrier-burst-firebird','skills-tlidb-com-cn-barrier-burst'].includes(build.skills?.active?.[0]?.skillId))
+    blockers.push('일반 장벽 폭발: SS14 장벽 계수와 장벽량을 읽는 시점 미확인. 고급 장벽 폭발의 400%는 적용하지 않습니다.');
   return blockers;
 }
 
@@ -250,6 +253,8 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const consumed = new Set();
   const special = effects.filter(e => seasonDpsSpecialStat(e.stat));
   const heroMechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
+  const recoveryRule=heroMechanics.find(m=>m.kind==='burst-essence');
+  const burstRecovery=bingRecovery(recoveryRule && {...recoveryRule,cap:heroMechanics.find(m=>m.kind==='essence-cycle'&&m.cap)?.cap}, build.ss14Inputs?.bingBurstEvents);
   const overload = heroMechanics.find(m => m.kind === "ingenuity-overload");
   const hero = build.ss14Inputs?.heroCombat;
   const simple = (stat, operation, fallback = 0) => {
@@ -474,7 +479,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const unique = [...new Set(blockers)];
   const supported = rows.length > 0 && unique.length === 0;
   return { supported, scope: "ss14-fixed-scenario-full-dps", dps: supported ? round(rows.reduce((n, r) => n + r.values.dps, 0)) : null,
-    rows, blockers: unique, heroMechanics, receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
+    rows, blockers: unique, heroMechanics, burstRecovery, receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
       ...["Damage_Form", "Amplified_Damage_Over_Time", "Whimsy", "Whimsy_Signal", "Whimsy_Explosion", "Ingenuity_Overload"].map(slug => mechanicPage(build, slug)).filter(Boolean)],
     limitation: "입력한 적 1명·시전 시간 배분·적중률·현재 효과 상태에서 선택된 공격을 합산합니다. 자원 지속 가능성이나 실전 유지율은 자동 예측하지 않습니다. 적중률·발동 횟수·지속 대미지 유지율은 관측값이며, 미해석 효과가 남으면 전체 DPS를 표시하지 않습니다." };
 }

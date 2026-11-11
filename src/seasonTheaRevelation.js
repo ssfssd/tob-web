@@ -3,13 +3,14 @@ import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { getCatalogItems } from "./catalog.js";
 import { theaState } from "./seasonTheaState.js";
+import { memoryTraitTier } from "./seasonMemories.js";
 import { boundBlessingStacks } from "./seasonBlessings.js";
 import { parseTheaSpecial } from "./seasonTheaSpecials.js";
 
 export const theaRulePin = () => rules.receiptSha256;
 export const isThea = build => build?.hero?.branchId === "hero-tlidb-com-cn-wisdom-of-the-gods";
 export const hasRevelation = build => isThea(build) && (build.hero.traitSelections ?? []).some(s => s.choiceIds?.some(id => id.includes("ui_yuenv062")
-  && Number.isInteger(build.ss14Inputs?.heroTiers?.[id]?.tier) && build.ss14Inputs.heroTiers[id].tier >= 1 && build.ss14Inputs.heroTiers[id].tier <= 5));
+  && [1,2,3,4,5].includes(memoryTraitTier(build,60,build.ss14Inputs?.heroTiers?.[id]?.tier).tier)));
 export function revelationReplacement(build, boardIndex, treeSlug, sourceId) {
   return hasRevelation(build) && boardIndex === 3 ? rules.replacements.find(r => r.treeSlug === treeSlug && r.sourceId === sourceId) : null;
 }

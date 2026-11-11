@@ -1,4 +1,5 @@
 import { boundBlessingStacks } from "./seasonBlessings.js";
+import { memoryTraitTier } from "./seasonMemories.js";
 import { SEASON_HERO_COMBAT_FIELDS, validCombatValue } from "./seasonMechanicInputs.js";
 import { theaState } from "./seasonTheaState.js";
 import { theaRulePin, revelationBoardOptions } from "./seasonTheaRevelation.js";
@@ -24,7 +25,7 @@ export function parseSeasonTheaMechanics(text, { build, recordKey, parseLines })
     return stacks;
   };
   const purity = (build.hero?.traitSelections ?? []).some(s => s.choiceIds?.some(id => id.includes("ui_yuenv061")
-    && Number.isInteger(build.ss14Inputs?.heroTiers?.[id]?.tier)));
+    && Number.isInteger(memoryTraitTier(build,75,build.ss14Inputs?.heroTiers?.[id]?.tier).tier)));
   const boon = () => {
     if (theaState(build)) return theaState(build).boons;
     const instances = [];

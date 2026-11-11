@@ -78,6 +78,7 @@ export function editNativeSeasonSelection(target, edit) {
     const options = Number.isInteger(index) && index >= 0 && index < 3 && seasonMemoryOptions(index);
     if (!options) throw new Error("추억 칸을 확인하세요.");
     target.ss14Inputs.heroMemoryMode = "configured-v1";
+    target.ss14Inputs.equippedTraitLevels=(target.ss14Inputs.equippedTraitLevels??0)|(1<<index);
     target.hero ??= {}; target.hero.memories ??= [];
     while(target.hero.memories.length<index)target.hero.memories.push(null);
     const memory = target.hero.memories[index];
@@ -108,8 +109,9 @@ export function editNativeSeasonSelection(target, edit) {
         else delete memory.affixRolls[option.groupId];
       }
     }
-    if (target.ss14Inputs.memoryBases) delete target.ss14Inputs.memoryBases[index];
-    for (const key of Object.keys(target.ss14Inputs.memoryRolls ?? {})) if (key.startsWith(`hero.memories.${index}.`)) delete target.ss14Inputs.memoryRolls[key];
+    if (edit.kind!=='memory-affix' && target.ss14Inputs.memoryBases) delete target.ss14Inputs.memoryBases[index];
+    const prefix=edit.kind==='memory-affix'?`hero.memories.${index}.${options.affixes.find(o=>o.id===edit.key).kind}.${options.affixes.find(o=>o.id===edit.key).groupId}:`:`hero.memories.${index}.`;
+    for (const key of Object.keys(target.ss14Inputs.memoryRolls ?? {})) if (key.startsWith(prefix)) delete target.ss14Inputs.memoryRolls[key];
     capture(target, "hero");
   } else if (["talent-board", "talent-node"].includes(edit.kind)) {
     if (!Number.isInteger(index) || index < 0 || index > 2) throw new Error("재능 패널을 확인하세요. 4번째 패널은 계시의 예언에서 편집하세요.");

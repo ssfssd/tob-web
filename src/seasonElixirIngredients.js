@@ -1,5 +1,6 @@
 import { getTlidbLicoriceIngredientAuthority } from "./tlidbLicoriceIngredientAuthority.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
+import { memoryTraitTier } from "./seasonMemories.js";
 
 // Historical records supply only stable ingredient/trait identities. Every
 // number and displayed name below comes from the current SS14 detailed tier.
@@ -24,14 +25,16 @@ export function addSeasonIngredients(build, slot, index, state, data, { make, co
     const fingerprint = JSON.stringify({ slot, hero: build.hero });
     row.comparisonFingerprint = JSON.stringify({ fingerprint, inputs: Object.entries(build.ss14Inputs?.extensionInputs ?? {}).filter(([k]) => k.startsWith(`ingredient:${index}:`)) });
     if (!legal || row.blockers.length) continue;
-    const tier = control(row, `ingredient:${index}:${id}:tier`, `영약 ${index + 1} 재료 ${n + 1} 확인한 특성 단계`, "tier", fingerprint, 5, 1);
+    const memorySlot=[45,60,75].indexOf(trait.requiredLevel);
+    const fromMemory=!!build.hero?.memories?.[memorySlot];
+    const tier = fromMemory ? memoryTraitTier(build,trait.requiredLevel).tier : control(row, `ingredient:${index}:${id}:tier`, `영약 ${index + 1} 재료 ${n + 1} 확인한 특성 단계`, "tier", fingerprint, 5, 1);
     const get = (page) => page.parsed.traits[alt]?.tiers.find(t => t.key === String(tier))?.categories
       .find(c => c.ordinal === Number(category))?.ingredients.find(i => i.ordinal === Number(ordinal));
     const entry = get(en); const kr = get(ko);
     if (!entry) { row.blockers.push({ reason: "재료가 속한 SS14 특성의 단계를 확인하세요. 이전 시즌 단계를 자동 적용하지 않습니다." }); continue; }
     row.ingredientTraitState = { alt, tier };
     const confirmedHeroTier = build.ss14Inputs?.heroTiers?.[choice.id] ?? build.ss14Inputs?.heroTiers?.[choice.sourceId];
-    if (confirmedHeroTier && confirmedHeroTier.tier !== tier) { row.blockers.push({ reason: "히어로 특성과 재료의 확인 단계가 서로 다릅니다." }); continue; }
+    if (!fromMemory && confirmedHeroTier && confirmedHeroTier.tier !== tier) { row.blockers.push({ reason: "히어로 특성과 재료의 확인 단계가 서로 다릅니다." }); continue; }
     row.name = kr?.name && !/\p{Script=Han}/u.test(kr.name) ? kr.name : "한국어 원문 미제공";
     row.detail = kr?.text && !/\p{Script=Han}/u.test(kr.text) ? kr.text : "한국어 원문 미제공";
     const text = entry.text;

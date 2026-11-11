@@ -146,17 +146,15 @@ function rollControls(row, entry, formValues) {
 
 function componentControls(report, formValues) {
   const rows = report.componentProjection.rows.filter((row) => row.control);
-  return rows.length ? `<fieldset><legend>SS14 히어로 특성 단계</legend><p>새 단계는 자동 추정하지 않습니다. 원문에 있는 최종 적용 단계를 선택한 뒤 다시 계산하세요.</p>${rows.map((row, index) => {
-    const control = row.control; const value = formValues[`hero-tier:${control.choiceId}`] ?? control.tier;
-    return `<label>${escape(control.name)} · 특성 ${index + 1}<select data-season-edit="hero-tier" data-choice="${escape(control.choiceId)}" aria-label="SS14 특성 ${index + 1} 단계">
-      <option value=""${value === "" ? " selected" : ""}>단계 선택 필요</option>${Array.from({ length: control.maxTier }, (_, i) => i + 1).map((tier) => `<option value="${tier}"${Number(value) === tier ? " selected" : ""}>${tier}단계</option>`).join("")}</select></label>`;
+  return rows.length ? `<fieldset><legend>히어로 특성 단계</legend>${rows.map(({control}) => {
+    return `<p>${escape(control.name)} · ${control.tier?`${control.tier}단계 · `:''}${escape(control.tierLabel??'추억 확인 필요')}</p>`;
   }).join("")}</fieldset>` : "";
 }
 
 function memoryControls(report, formValues) {
   const rows = report.componentProjection.rows.filter((r) => r.memoryControl);
   const ranges = report.componentProjection.rows.filter((r) => r.memoryRollControls?.length);
-  return rows.length || ranges.length ? `<fieldset><legend>SS14 추억 수치 확인</legend><p id="season-memory-scope">강화 단계의 자동 환산은 미검증입니다. 현재 게임 카드에서 확인한 기본 옵션을 선택하세요. 목록에 없으면 미확인으로 남기세요. 고정·랜덤 일반 옵션은 동일 ID의 SS14 표를 사용하며 부활 배율은 지원하지 않습니다. 범위 옵션은 현재 값을 직접 입력해야 하며 SS13 저장 수치를 자동 대입하지 않습니다.</p>${rows.map((r) => {
+  return rows.length || ranges.length ? `<fieldset><legend>SS14 추억 수치 확인</legend><p id="season-memory-scope">특성 단계는 장착한 추억의 강화와 옵션으로 계산합니다. 기본 옵션은 게임 카드에 표시된 수치를 선택하세요. 목록에 없으면 미확인으로 남기세요. 부활 추억의 보정은 미확인입니다.</p>${rows.map((r) => {
     const c = r.memoryControl; const value = formValues[`memory-base:${c.key}`] ?? c.value;
     return `<label>${escape(r.name)}<select data-season-edit="memory-base" data-key="${escape(c.key)}" aria-label="SS14 추억 ${Number(c.key) + 1} 기본 수치" aria-describedby="season-memory-scope"><option value=""${value === "" ? " selected" : ""}>수치 확인 필요</option>${c.options.map((o) => `<option value="${o.value}"${Number(value) === o.value ? " selected" : ""}>${escape(o.label)}</option>`).join("")}</select></label>`;
   }).join("")}${ranges.map((r, optionIndex) => `<p>${escape(r.name)} · ${escape(r.detail)} ${sourceLink(r.receipt)}</p>${r.memoryRollControls.map((c, index) => {

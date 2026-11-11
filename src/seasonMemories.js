@@ -64,10 +64,28 @@ export function seasonMemoryRows(build, data = SS14_MEMORIES) {
           koText: { name: item.tlidbText.ko.name, detail: bound.koText } });
       } else push(`${kind}.${id}`, tier?.ref, Object.keys(config?.rolls ?? {}).length ? "추억 범위 선택값의 SS14 수치 연결 미검증" : "");
     }
-    if (memory.traitLevelBonus) push("trait-level", null, "추억의 히어로 특성 레벨 보정은 자동 가산하지 않습니다. SS14 특성의 최종 단계를 별도로 확인하세요.");
   }
   if (build?.hero?.revivalMemory) result.push({ path: "hero.revivalMemory", reason: "SS14 부활 추가 칸과 배율 계산 미검증" });
   return result;
+}
+
+// SS14 installed localizations hero_item_enhance|desc|81 and |144:
+// enhancement 30 and 50 each increase the provided trait level once.
+// Basic_Rules assigns this level to the corresponding slot, not every trait.
+export function memoryTraitTier(build, level, legacyTier, rows=seasonMemoryRows(build)) {
+  const slot=[45,60,75].indexOf(level), memory=build.hero?.memories?.[slot];
+  if(build.hero?.revivalMemory)return {reason:'부활 추억의 특성 단계 보정 미확인'};
+  if(!build.ss14Inputs)return {tier:legacyTier};
+  if(!memory){
+    if(legacyTier && !(build.ss14Inputs.equippedTraitLevels & (1<<slot)))return {tier:legacyTier,source:'기존 사본의 단계'};
+    if(level===1)return {tier:1,source:'기본 특성'};
+    return {reason:'해당 단계에 장착한 추억이 없습니다.',inactive:build.ss14Inputs.heroMemoryMode==='configured-v1' && slot>=0};
+  }
+  const own=rows.filter(r=>r.path.startsWith(`hero.memories.${slot}.`));
+  if(!own.length || own.some(r=>r.path.endsWith('.unsupported') || (r.path.includes('.fixed.')||r.path.includes('.random.'))&&(!r.record||r.reason&&r.text.includes('Trait Level'))))
+    return {reason:'추억 종류 또는 옵션 원문 확인 필요'};
+  const bonus=own.filter(r=>!r.reason && r.text==='+2 to Hero Trait Level').length*2;
+  return {tier:1+Number(memory.enhancement>=30)+Number(memory.enhancement>=50)+bonus,source:'장착 추억',slot};
 }
 
 export function validSeasonMemoryRolls(build) {
