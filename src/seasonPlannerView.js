@@ -17,6 +17,9 @@ import { seasonEffectSources, effectSourceLabel } from "./seasonEffectSources.js
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
+import { gearFilters } from './seasonGearPicker.js';
+import { renderReasons } from './seasonResultPanels.js';
+import { renderGearPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
 import { renderSlateEditor } from './seasonSlateEditor.js';
 import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison } from './seasonResultPanels.js';
 import { RUNTIME_POLICY, LOCAL_LOG_ONLY_MESSAGE } from "./runtimePolicy.js";
@@ -108,18 +111,20 @@ export function renderEffectSources(s, path = null) {
 }
 function itemPicker(s, category, index, supportIndex, current) {
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";
-  const options = support ? seasonSupportOptions() : getSeasonSelectionOptions(category, index);
+  const all = support ? seasonSupportOptions() : getSeasonSelectionOptions(category, index);
+  const filters=category==="gear"?[...new Set(all.flatMap(o=>gearFilters(o.id)))]:[];
+  const options=s.picker?.filter?all.filter(o=>gearFilters(o.id).includes(s.picker.filter)):all;
   const selected = s.picker?.candidate ?? current ?? "";
   const query = s.picker?.query ?? "";
   const key = value => String(value).normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
   const match = option => key(`${option.name} ${(SS14_CARDS.records[option.id] ?? SS14_SUPPORTS.records[option.id])?.detail ?? ""}`).includes(key(query));
   const card = SS14_CARDS.records[selected] ?? SS14_SUPPORTS.records[selected];
   return `<div class="native-item-picker" aria-label="슬롯 아이템 선택">
-    <header><label>이름·효과 검색<input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" /></label>${current ? button("고른 아이템 보기", "cancel-picker") : ""}<small data-picker-count>${options.filter(match).length}개</small></header>
+    <header>${filters.length?`<label>장비 분류<select data-gear-filter aria-label="장비 분류"><option value="">전체</option>${filters.map(f=>`<option${f===s.picker?.filter?' selected':''}>${esc(f)}</option>`).join('')}</select></label>`:''}<label>이름·효과 검색<input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" /></label>${current ? button("고른 아이템 보기", "cancel-picker") : ""}<small data-picker-count>${options.filter(match).length}개</small></header>
     <div class="native-picker-columns"><div class="native-picker-list" aria-label="아이템 후보">${options.map(o => button(`${icon(o.id)}<span>${esc(o.name)}</span>`, "preview-item",
       `data-id="${esc(o.id)}" data-picker-option data-search="${esc(`${o.name} ${(SS14_CARDS.records[o.id] ?? SS14_SUPPORTS.records[o.id])?.detail ?? ""}`)}" aria-pressed="${selected === o.id}"${match(o) ? "" : " hidden"}`)).join("")}</div>
     <article class="native-picker-card" aria-label="아이템 미리보기">${card ? `${icon(selected)}<h3>${esc(title(selected))}</h3><p>${card.koreanTextVerified ? esc(card.detail) : "한국어 원문 미제공"}</p>
-      ${button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`)}`
+      ${category==="gear"&&s.picker?.preview?renderGearPreview(s.picker.preview,sourceStats):""}${button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`)}`
       : "<p>후보를 선택하면 효과와 설명을 확인할 수 있습니다.</p>"}</article></div></div>`;
 }
 function equipmentPanel(s, category) {
@@ -141,7 +146,7 @@ function equipmentPanel(s, category) {
     }).join("")}</nav>${!gear ? skillSockets(row, id, support) : ""}</div>
     <section class="native-slot-detail" aria-label="선택 슬롯 편집">
       <header>${selectedId ? `<span class="detail-icon" aria-hidden="true">${icon(selectedId)}</span>` : ""}<small>${esc(label(selected))}</small><h2>${selectedId ? esc(title(selectedId)) : gear ? "장비 선택" : support === null ? "스킬 선택" : `보조 ${support + 1} 선택`}</h2></header>
-      ${slotEditor({ ...s, overlay: { type: category, index: selected, supportIndex: support } })}
+      ${gear?shelfTools("gear",selected,!!selectedId,button):""}${slotEditor({ ...s, overlay: { type: category, index: selected, supportIndex: support } })}
       ${selectedId && !s.picker ? `<details class="native-slot-effects" data-role="selected-slot-effects"><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s, gear ? `gear.slots.${selected}` : `skills.rows.${selected}${support === null ? "" : `.supports.${support}`}`)}</details>` : ""}
       ${itemSource(selectedId, support === null ? label(selected) : `${label(selected)} · 보조 ${support + 1}`)}
       ${!gear ? button("영약·모듈화 편집", "edit-slot", 'data-type="extensions"') : ""}
@@ -159,7 +164,7 @@ function skillSockets(row, id, selectedSupport) {
     ${button(`${icon(id)}<small>${id ? esc(title(id)) : "메인"}</small>`, "inspect-socket", `class="link-node main-node" data-index="-1" aria-label="메인 스킬 편집" aria-pressed="${selectedSupport === null}"`)}${sockets.join("")}</nav>`;
 }
 function talentPanel(s) {
-  return renderTalentScene(s,{button,esc,select,icon})+theaControls(s.document,s.report,{});
+  return renderTalentScene(s,{button,esc,select,icon})+shelfTools("prism",s.talentIndex??0,s.document.targetBuild.talents?.placedPrism?.boardIndex===(s.talentIndex??0),button)+theaControls(s.document,s.report,{});
 }
 function pactPanel(s) {
   return renderPactScene(s,{button,esc,select,icon});
@@ -313,15 +318,17 @@ function overlay(s) {
   const type = s.overlay.type;
   let content;
   if (type === "saves") content = s.documents.map(d => `<article class="native-save-row"><span>${esc(d.targetBuild.name)}</span>${button("열기", "open", `data-id="${esc(d.id)}" aria-label="${esc(d.targetBuild.name)} 열기"`)}</article>`).join("") || "저장된 SS14 빌드가 없습니다.";
+  else if(type==="shelf") content=s.shelfRows.length?s.shelfRows.map(v=>`<article class="native-save-row"><strong>${esc(v.name)}</strong>${button("적용","shelf-use",`data-id="${esc(v.id)}"`)}${button("보관 해제","shelf-remove",`data-id="${esc(v.id)}"`)}</article>`).join(""):"이곳에 적용할 수 있는 보관 항목이 없습니다.";
   else if (type === "files") content = `${button("사본 저장", "copy")}${RUNTIME_POLICY.allowGameLogs ? button("게임 로그 가져오기", "local-log") : `<p>${esc(LOCAL_LOG_ONLY_MESSAGE)}</p><p>빌드는 이 브라우저에 저장됩니다. 다른 기기로 옮기거나 작업을 종료하기 전 빌드 JSON을 보관하세요.</p>`}<label>TOB SS14 빌드 내보내기<textarea readonly aria-label="TOB SS14 빌드 내보내기">${esc(exportSeasonWorkspace(s.document))}</textarea></label><label>TOB SS14 빌드 가져오기<textarea id="native-import" aria-label="TOB SS14 빌드 가져오기"></textarea></label>${button("가져오기", "import")}<details><summary>이전 시즌 보관함</summary><button type="button" data-action="open-preserved-build">이전 시즌 빌드 열기</button></details>`;
   else if (type === "share") content = `<div class="build-share-panel"><label>공유 링크<input type="text" id="share-link" aria-label="공유 링크" readonly value="${esc(s.overlay.link)}" /></label>${button("공유 링크 복사","copy-link",s.overlay.link?"":"disabled")}<p>받은 사람이 링크를 열면 이 빌드의 사본이 열립니다.</p><p id="share-status" role="status">${esc(s.overlay.message)}</p></div>
     <details data-role="share-code-tools"><summary>빌드 코드로 공유하거나 가져오기</summary><label>내 빌드 코드<textarea id="share-code" readonly spellcheck="false" aria-label="내 빌드 코드">${esc(s.overlay.code)}</textarea></label>${button("코드 복사","copy-code",s.overlay.code?"":"disabled")}<label>받은 빌드 코드<textarea id="share-paste" spellcheck="false" placeholder="TOB14-1.…" aria-label="받은 빌드 코드">${esc(s.overlay.paste)}</textarea></label>${button("새 사본으로 열기","import-code")}</details>`;
   else if (type === "local-log") content = localLogPanel(s);
   else if (type === "effects") content = renderEffectSources(s);
   else content = slotEditor(s);
-  const titles = { share: "빌드 공유", saves: "저장 빌드", files: "빌드 파일", "local-log": "게임 로그 가져오기", effects: "효과별 출처", hero: "히어로 선택", traits: "히어로 특성", memory: "히어로 추억", talents: "재능 편집", pact: "정령 편집", extensions: "영약·모듈화" };
+  if(type==="memory")content=shelfTools("memory",s.overlay.index,!!s.document.targetBuild.hero?.memories?.[s.overlay.index],button)+content;
+  const titles = { shelf:"보관함", share: "빌드 공유", saves: "저장 빌드", files: "빌드 파일", "local-log": "게임 로그 가져오기", effects: "효과별 출처", hero: "히어로 선택", traits: "히어로 특성", memory: "히어로 추억", talents: "재능 편집", pact: "정령 편집", extensions: "영약·모듈화" };
   const heading = titles[type] ?? "빌드 편집";
-  return `<div class="season-native-backdrop"><section role="dialog" aria-modal="true" aria-label="SS14 ${heading}" class="season-native-modal"><header><h2>${heading}</h2>${button("닫기", "close", 'aria-label="편집 닫기"')}</header>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}<div class="season-native-modal-body">${content}</div><footer>${!["share","local-log", "files", "saves", "effects", "hero"].includes(type) ? button("적용", "apply") : ""}${button("닫기", "close")}</footer></section></div>`;
+  return `<div class="season-native-backdrop"><section role="dialog" aria-modal="true" aria-label="SS14 ${heading}" class="season-native-modal"><header><h2>${heading}</h2>${button("닫기", "close", 'aria-label="편집 닫기"')}</header>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}<div class="season-native-modal-body">${content}</div><footer>${!["shelf","share","local-log", "files", "saves", "effects", "hero"].includes(type) ? button("적용", "apply") : ""}${button("닫기", "close")}</footer></section></div>`;
 }
 export function renderNativeDps(s) {
   const dps = s.report.fullDps;
@@ -330,16 +337,16 @@ export function renderNativeDps(s) {
   const active = s.resultTab ?? 'stats';
   const panels = {
     stats: () => `<div data-role="native-numeric-result"${s.pending.size ? ' hidden' : ''}>${renderSeasonNumericStats(s.report)}</div>`,
-    calculation: () => `<div data-role="native-calculation-detail"${s.pending.size ? ' hidden' : ''}>${dpsResults(s.report)}<details data-role="native-defense-detail"><summary>자원·방어</summary>${characterResults(s.report)}</details><details data-role="native-effect-detail"><summary>효과별 근거</summary>${componentResults(s.report)}</details></div>`,
+    calculation: () => `<div data-role="native-calculation-detail"${s.pending.size ? ' hidden' : ''}>${dpsResults(s.report,reasons=>renderReasons(s,reasons))}<details data-role="native-defense-detail"><summary>자원·방어</summary>${characterResults(s.report)}</details><details data-role="native-effect-detail"><summary>효과별 근거</summary>${componentResults(s.report)}</details></div>`,
     conditions: () => renderResultConditions(s),
     analysis: () => renderResultAnalysis(s),
   };
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
-    <div class="native-result-summary"><small>SS14 전체 DPS</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
+    ${mobileDpsBar(s)}<div class="native-result-summary"><small>SS14 전체 DPS</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
     <p>${s.pending.size ? '변경한 입력을 확인하세요.' : tie ? `기존 투사체 우선 추정 · 새 시전 우선 ${tie.newCastFirstDps === null ? '계산 불가' : tie.newCastFirstDps.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + ' DPS'}` : dps.supported ? '현재 빌드·전투 조건 기준' : '수치 탭에서 계산 가능한 항목을 확인하세요.'}</p>
     ${dps.burstRecovery?`<p>크리에이티브 대폭발 · ${dps.burstRecovery.total!==null?`기발 회복 ${dps.burstRecovery.total} (상한 적용 전)`:dps.burstRecovery.rows.length?'회복 미확정 · 전투 조건에서 발동별 결과 확인':'전투 조건에서 매직 버스트 발동 기록 입력'}</p>`:''}
     ${renderEditDpsComparison(s, true)}
-    ${requirements.length ? `<details data-role="numeric-dps-requirements"><summary>전체 DPS 확인 항목</summary><div class="native-requirements" aria-label="계산에 필요한 입력">${requirements.map(r => button(esc(r.label), 'requirement', `data-type="${r.type ?? ''}" data-section="${r.section ?? 'hero'}" data-focus-role="${r.role ?? ''}"`)).join('')}</div></details>` : ''}
+    ${requirements.length ? `<details data-role="numeric-dps-requirements"><summary>전체 DPS 확인 항목</summary><div class="native-requirements" aria-label="계산에 필요한 입력">${renderReasons(s,dps.blockers)}</div></details>` : ''}
     <div class="native-result-actions">${button('다시 계산', 'apply')}${button('효과별 출처', 'effect-sources')}</div></div>
     <nav class="native-result-tabs" aria-label="계산 결과 보기">${RESULT_TABS.map(([key,label]) => button(label, 'result-tab', `data-tab="${key}" aria-pressed="${active === key}" aria-controls="native-result-panel"`)).join('')}</nav>
     <section id="native-result-panel" class="native-result-panel" aria-label="${RESULT_TABS.find(([key]) => key === active)?.[1] ?? '수치'}">${(panels[active] ?? panels.stats)()}</section></aside>`;
@@ -349,7 +356,7 @@ export function renderSeasonPlanner(s) {
   const report = s.report, dps = report.fullDps;
   const body = s.section === "hero" ? heroPanel(s) : ["skills", "gear"].includes(s.section) ? equipmentPanel(s, s.section)
     : s.section === "talents" ? talentPanel(s) : s.section === "pact" ? pactPanel(s)
-      : s.section === "divinity" ? divinityPanel(s) : combatPanel(s);
+      : s.section === "divinity" ? shelfTools("divinity",0,!!s.document.targetBuild.divinity?.boards?.find(b=>b.boardId===s.document.targetBuild.divinity.activeBoardId)?.slateInventory?.length,button)+divinityPanel(s) : combatPanel(s);
   return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves")}${button("공유", "share")}${button("빌드 파일", "files")}</div><span role="status" data-role="native-save-status">${esc(s.notice || (s.dirty ? "저장하지 않은 변경" : s.document.revision ? "저장됨" : "새 SS14 사본"))}</span></header>
     <nav class="quick-category-menu" aria-label="빌드 편집 메뉴">${tabs.map(([id, label]) => button(label, "section", `data-section="${id}" aria-pressed="${s.section === id}"`)).join("")}</nav>
     <div class="native-content"><main class="season-native-scroll"><section class="planner-section ${s.section === "hero" ? "hero-section" : ""}"><a class="scene-dps-jump" href="#native-dps-summary">전체 DPS ↓</a><h1>${esc(tabs.find(([id]) => id === s.section)?.[1])}</h1>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>

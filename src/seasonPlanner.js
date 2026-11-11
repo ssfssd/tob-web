@@ -12,6 +12,9 @@ import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, show
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
+import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
+import { previewSeasonGear } from './seasonGearPicker.js';
+import { getSeasonSelectionOptions } from './seasonSelections.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
 import { encodeBuildCode, decodeBuildCode, buildShareUrl, sharedCodeFromHash } from './seasonBuildCode.js';
 
@@ -47,6 +50,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   const recalculate = () => {
     state.analysis = null;
     state.report = state.document ? calculateSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
+    if(state.section==='gear'&&state.picker?.preview&&state.document)
+      state.picker.preview=previewSeasonGear(state.document,state.report,state.gearIndex,state.picker.candidate);
     if (editComparison) state.editComparison = editComparison.update(state.document, state.report);
   };
   recalculate();
@@ -114,6 +119,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           detail.scrollIntoView?.({ block: "nearest" });
         }
         state.focusRole = null;
+      }
+      if(state.focusField){
+        const f=state.focusField;
+        const scope=root.querySelector?.('.season-native-modal-body')??root.querySelector?.('.season-native-scroll');
+        const field=[...(scope?.querySelectorAll?.('[data-season-edit]')??[])].find(el=>el.dataset.seasonEdit===f.edit&&(el.dataset.key??el.dataset.roll)===f.key);
+        if(field){
+          for(let p=field.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+          field.focus();field.scrollIntoView({block:'center'});
+        }
+        state.focusField=null;
       }
     },
     edit(edit) {
@@ -213,6 +228,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       const input = event.target;
+      if(input.hasAttribute?.('data-spirit-filter')){
+        state.pactRoster.query=input.value.trim();
+        for(const card of root.querySelectorAll('[data-spirit-name]'))card.hidden=!card.dataset.spiritName.includes(state.pactRoster.query);
+        return;
+      }
       if (input.hasAttribute?.("data-hunter-filter")) {
         const normalize = value => value.normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
         const query = normalize(input.value);
@@ -244,6 +264,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.pending.set(editKey(edit), edit);
       const output = globalThis.document.querySelector?.('[data-role="native-dps"]');
       if (output) output.textContent = "입력 적용 대기";
+      const mobile=root?.querySelector?.('[data-mobile-dps]');
+      if(mobile){mobile.textContent="입력 적용 대기";root.querySelector('[data-mobile-delta]').textContent='';}
       const detail = globalThis.document.querySelector?.('[data-role="native-calculation-detail"]');
       if (detail) detail.hidden = true;
       const numeric = globalThis.document.querySelector?.('[data-role="native-numeric-result"]');
@@ -256,6 +278,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (history) history.outerHTML = renderEditHistory(state);
     },
     change(event) {
+      if(event.target.hasAttribute?.('data-gear-filter')){
+        state.picker={query:state.picker?.query??'',filter:event.target.value,candidate:''};api.render();return;
+      }
       if (event.target.hasAttribute?.('data-analysis-metric')) {
         if (Object.hasOwn(SEASON_ADVISOR_METRICS, event.target.value)) {
           state.analysisMetric = event.target.value; state.analysis = null; api.render();
@@ -297,6 +322,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (event.target.tagName === "INPUT") {
         try { api.flush(); state.error = ""; }
         catch (error) { state.error = error.message; }
+        if(!state.error && root?.querySelectorAll){
+          const committed=readSeasonPlannerEdit(event.target);
+          for(const field of root.querySelectorAll('input[data-season-edit]')){
+            if(field!==event.target&&editKey(readSeasonPlannerEdit(field))===editKey(committed))field.value=event.target.value;
+          }
+        }
         const dock = globalThis.document.querySelector?.(".native-dps-dock");
         if (dock) {
           const scroll = dock.scrollTop;
@@ -353,6 +384,17 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if(action==='bing-event-add'||action==='bing-event-remove'){api.edit({kind:action,rowIndex:Number(d.row)});return;}
         if (action === "undo" || action === "redo") { api.restore(action === "redo"); return; }
         api.flush();
+        if(action.startsWith('shelf-')){
+          const list=readShelf(storage);
+          const kind=d.kind??state.overlay?.kind,index=Number(d.index??state.overlay?.index);
+          const refresh=()=>{state.shelfRows=list.filter(v=>v.kind===kind&&(kind==='gear'?getSeasonSelectionOptions('gear',index).some(o=>o.id===v.item.itemId):kind!=='memory'||v.index===index));state.overlay={type:'shelf',kind,index};};
+          if(action==='shelf-open'){refresh();return;}
+          if(action==='shelf-save'){list.push(captureShelf(state.document.targetBuild,kind,index));storage.setItem(SHELF_KEY,JSON.stringify(list));state.notice='보관함에 저장했습니다.';return;}
+          const pos=list.findIndex(v=>v.id===d.id&&v.kind===kind);
+          if(pos<0)throw Error('보관 항목을 찾을 수 없습니다.');
+          if(action==='shelf-remove'){list.splice(pos,1);storage.setItem(SHELF_KEY,JSON.stringify(list));refresh();return;}
+          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=kind==='memory'?{type:'memory',index}:null;state.picker=null;state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
+        }
         if (handleSlateEditorAction(api,action,d)) {
           if (['slate-type','slate-select','slate-socket'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
           return;
@@ -362,7 +404,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'pact-inspect') {
           state.pactRoster=null; state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
         }
-        if (action === 'pact-roster') { state.pactRoster={index:Number(d.index),id:d.id||null}; return; }
+        if (action === 'pact-roster') { state.pactIndex=Number(d.index);state.pactRoster={index:state.pactIndex,id:d.id||null,query:state.pactRoster?.query??''}; return; }
+        if (action === 'pact-clear') {api.edit({kind:'spirit-selection',slotIndex:Number(d.index),value:''});state.pactRing=null;return;}
         if (action === 'pact-roster-apply') {
           if (state.pactRoster?.id) api.edit({kind:'spirit-selection',slotIndex:state.pactRoster.index,value:state.pactRoster.id});
           state.pactRoster=null; state.pactRing=null; return;
@@ -414,13 +457,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         else if (action === "requirement") {
           state.section = d.section;
-          state.overlay = d.type ? { type: d.type, index: 0 } : null;
+          const index=Number(d.index)||0;
+          if(d.section==='gear')state.gearIndex=index;
+          if(d.section==='skills'){state.skillIndex=index;state.supportIndex=null;}
+          state.overlay = d.type ? { type: d.type, index } : null;
+          state.focusField=d.field?{edit:d.field,key:d.fieldKey}:null;
           state.focusRole = d.focusRole;
         }
         else if (action === "close") { state.overlay = null; state.logImport = null; ++logRequest; }
         else if (action === "open-picker") state.picker = { candidate: "", query: "" };
         else if (action === "cancel-picker") state.picker = null;
-        else if (action === "preview-item") state.picker = { ...state.picker, candidate: d.id };
+        else if (action === "preview-item") state.picker = { ...state.picker, candidate: d.id,
+          preview:state.section==='gear'?previewSeasonGear(state.document,state.report,state.gearIndex,d.id):null };
         else if (action === "equip-item" || action === "clear-slot") {
           if (!["gear-selection", "skill-selection", "support-selection"].includes(d.kind)) throw new Error("선택할 슬롯을 확인하세요.");
           api.edit({ kind: d.kind, slotIndex: Number(d.index), rowIndex: Number(d.index),

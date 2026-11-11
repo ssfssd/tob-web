@@ -373,7 +373,7 @@ function dpsControls(document, report, formValues) {
   </details>`;
 }
 
-function dpsResults(report) {
+function dpsResults(report, renderIssues) {
   const r = report.fullDps;
   const blockers = [...new Set(r.blockers)];
   const joint = report.theaAverage?.combat && report.theaAverage.supported ? report.theaAverage : null;
@@ -382,7 +382,7 @@ function dpsResults(report) {
     <p class="season-dps-value"><strong>${r.supported ? number(r.dps) : seasonDpsStatusLabel(report)}</strong></p>
     ${joint?.projectileTie ? `<p data-role="season-projectile-order">같은 시각에 겹친 후속타의 처리 순서는 게임에서 미확인입니다. 먼저 시전한 투사체 우선 ${number(joint.projectileTie.arrivalsFirstDps)} DPS · 새 시전 우선 ${joint.projectileTie.newCastFirstDps === null ? '계산 불가' : number(joint.projectileTie.newCastFirstDps) + ' DPS'}</p>` : ''}
     <p>${r.supported ? report.theaAverage ? report.theaAverage.estimated ? "자동 은총 추정 평균" : "자동 은총 주기 평균" : "입력한 전투 조건 기준" : `입력·효과 ${blockers.length}건 확인 필요`}</p>
-    ${blockers.length ? `<details data-role="season-dps-blockers"><summary>계산에 필요한 입력·효과 확인 (${blockers.length})</summary>${seasonCalculationIssues(report).map(group=>`<section data-cause="${group.cause}"><h6>${group.label} (${group.reasons.length})</h6><ul>${group.reasons.map(b=>`<li>${escape(b)}</li>`).join('')}</ul></section>`).join('')}
+    ${blockers.length ? `<details data-role="season-dps-blockers"><summary>계산에 필요한 입력·효과 확인 (${blockers.length})</summary>${renderIssues ? renderIssues(blockers) : seasonCalculationIssues(report).map(group=>`<section data-cause="${group.cause}"><h6>${group.label} (${group.reasons.length})</h6><ul>${group.reasons.map(b=>`<li>${escape(b)}</li>`).join('')}</ul></section>`).join('')}
       <button type="button" data-action="advisor-open-section" data-section="combat">전투 조건 편집</button><button type="button" data-action="advisor-open-section" data-section="hero">히어로 특성 편집</button></details>` : ""}
     <details data-role="season-dps-breakdown"><summary>스킬별 DPS·계산 조건</summary>
     ${report.theaAverage?.supported ? `<p>측정 ${number(report.theaAverage.seconds)}초 · 준비 ${number(report.theaAverage.warmup)}초 · 은총 유지율 ${number(report.theaAverage.uptime)}% · 은총 지속 ${number(report.theaAverage.duration)}초 · 재사용 대기 ${number(report.theaAverage.cooldown)}초</p>` : ""}

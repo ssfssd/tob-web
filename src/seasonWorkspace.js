@@ -25,6 +25,7 @@ import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensi
 import { validSeasonDpsInputs, editSeasonDpsInput } from "./seasonDps.js";
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
+import { applyShelf } from './seasonShelf.js';
 import { applySeasonSlateSelections, validSeasonSlateSelections, seasonSlateTemplates, seasonSlateOptions } from "./seasonDivinity.js";
 import { applySeasonHeroSelection, validSeasonHeroSelection, editSeasonHeroSelection } from "./seasonHeroSelection.js";
 import { editNativeSeasonSelection } from "./seasonNativeSelections.js";
@@ -212,6 +213,8 @@ export function editSeasonWorkspace(document, edit) {
   if (edit.kind === "name") {
     if (typeof edit.value !== "string" || !edit.value.trim() || edit.value.trim().length > 160) throw new Error("빌드 이름을 1~160자로 입력하세요.");
     target.name = edit.value.trim();
+  } else if (edit.kind === 'shelf-apply') {
+    applyShelf(target,edit.value,edit.slotIndex);
   } else if (edit.kind === "log-review-reset") {
     target.ss14Inputs.logReview = Object.fromEntries(Object.keys(LOG_REVIEW_GROUPS).filter(k => k !== 'divinity' || edit.value !== 1).map(k => [k, null]));
   } else if (edit.kind === "log-review") {
@@ -504,6 +507,7 @@ export function editSeasonWorkspace(document, edit) {
     }
   } else if (!editNativeSeasonSelection(target, edit) && !editNativeDivinity(target, edit) && !editNativeExtension(target, edit)) throw new Error("지원하지 않는 SS14 편집입니다.");
   next.targetBuild = targetFor(next.sourceBuild, next.id, target.name, target.skillLevels, target.ss14Inputs);
+  if(edit.kind==='shelf-apply'&&!validDocument(next))throw Error('보관 항목의 SS14 수치 연결을 확인할 수 없습니다.');
   return next;
 }
 

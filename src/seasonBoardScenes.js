@@ -45,8 +45,8 @@ export function renderPactScene(s,{button,esc,select,icon}) {
   if(s.pactRoster?.index===i) {
     const candidate=selectedSeasonSpirit(s.pactRoster.id,options);
     const card=p=>button(`${icon(p.id)}<span>${esc(p.name)}</span>`,'pact-roster',
-      `data-index="${i}" data-id="${esc(p.id)}" aria-pressed="${p.id===candidate?.id}"`);
-    return `<div class="ss-board-scene pact-roster"><div><h3>정령 목록</h3><div class="pact-cards" role="group" aria-label="정령 목록">${options.map(card).join('')}</div></div>
+      `data-spirit-name="${esc(p.name)}"${s.pactRoster.query&&!p.name.includes(s.pactRoster.query)?' hidden':''} data-index="${i}" data-id="${esc(p.id)}" aria-pressed="${p.id===candidate?.id}"`);
+    return `<div class="ss-board-scene pact-roster"><div><h3>정령 목록</h3><div class="pact-cards" role="group" aria-label="정령 목록"><label>정령 검색<input type="search" data-spirit-filter value="${esc(s.pactRoster.query??'')}" aria-label="정령 이름 검색"></label>${options.map(card).join('')}</div></div>
       <div class="pact-portrait" aria-hidden="true">${candidate?icon(candidate.id):''}</div>
       <aside class="board-inspector"><header><h3>${esc(candidate?.name??'정령 선택')}</h3></header>
       ${candidate?`<p>${esc(candidate.korean.parsed.levelAffixes.find(r=>r.level===(candidate.id===o?.id?slot.spirit.level:candidate.levels[0]))?.affixes.join('\n'))}</p>${button('정령 '+(i+1)+'에 장착','pact-roster-apply')}`:''}
@@ -63,7 +63,7 @@ export function renderPactScene(s,{button,esc,select,icon}) {
   const nodeSwitch=key=>!o.drop ? turn(pactNodeActive(slot,key)?'포인트 회수':'포인트 추가',key,Number(!pactNodeActive(slot,key))):'';
   const branches=[0,1,2].map(j=>{
     const spirit=slots[j]?.spirit, opt=option(j);
-    return button(spirit?icon(spirit.spiritId):'＋','pact-inspect',`class="pact-hub" style="${pactPointStyle(j,-1)}" data-index="${j}" aria-label="정령 ${j+1} · ${esc(opt?.name??'선택')}" title="${esc(opt?.name??'정령 선택')}" aria-pressed="${j===i&&!ring&&!outer&&!fate}"`)
+    return button(spirit?icon(spirit.spiritId):'＋',spirit?'pact-inspect':'pact-roster',`class="pact-hub" style="${pactPointStyle(j,-1)}" data-index="${j}" aria-label="정령 ${j+1} · ${esc(opt?.name??'선택')}" title="${esc(opt?.name??'정령 선택')}" aria-pressed="${j===i&&!ring&&!outer&&!fate}"`)
     +(opt?button('<i aria-hidden="true"></i>','pact-inspect',`class="pact-gem outer ${pactNodeActive(slots[j],'outer')?'':'inactive'}" style="${pactPointStyle(j,-2)}" data-index="${j}" data-key="outer" title="${esc(opt.korean.parsed.mainAffix.name)}" aria-label="정령 ${j+1} 외환 효과" aria-pressed="${j===i&&!!outer}"`):'')
     +(opt&&fateRule?button('◇','pact-inspect',`class="pact-gem" style="${pactPointStyle(j,9)}" data-index="${j}" data-key="undetermined" aria-pressed="${j===i&&!!fate}" aria-label="정령 ${j+1} 미정 숙명"`):'')
     +ringOrder.map((key,k)=>{
@@ -77,8 +77,6 @@ export function renderPactScene(s,{button,esc,select,icon}) {
   }).join('');
   const installed=slot?.rings?.[ring?.slotId]?.installedDestiny?.destinyId;
   const choices=ring?seasonDestinyOptions(ring.slotId):[], destiny=choices.find(d=>d.id===installed);
-  const tabs=[0,1,2].map(j=>button(`<small>정령 ${j+1}</small><strong>${esc(option(j)?.name??(slots[j]?.spirit?'이전 선택':'빈 슬롯'))}</strong>`,'pact-inspect',
-    `data-index="${j}" aria-pressed="${j===i}"`)).join('');
   const ringList=(o?.korean.parsed.rings??[]).map(r=>{
     const id=slot.rings?.[r.slotId]?.installedDestiny?.destinyId;
     const name=id?seasonDestinyOptions(r.slotId).find(d=>d.id===id)?.name??'이전 선택':r.name;
@@ -112,12 +110,12 @@ export function renderPactScene(s,{button,esc,select,icon}) {
     ${installed?`<p>${esc(result?.detail||destiny?.detail||'효과 확인 필요')}</p><div class="pact-rolls">${rolls}</div>${button('운명 제거','pact-remove-destiny',`data-index="${i}" data-key="${ring.slotId}"`)}`:''}
     ${button('정령 설정으로','pact-inspect',`data-index="${i}"`)}`:
     fate?fateEditor():
-    `${button('정령 목록','pact-roster',`data-index="${i}" data-id="${esc(o?.id??'')}"`)}${select('정령 '+(i+1),'scene-spirit','spirit-selection',o?.id,options,`data-slot="${i}"`,true)}
+    `${o?button('정령 교체','pact-roster',`data-index="${i}" data-id="${esc(o.id)}"`)+button('정령 해제','pact-clear',`data-index="${i}"`):'계약판에서 빈 정령 슬롯을 선택하세요.'}
     ${o?select('정령 레벨','scene-level','spirit-level',slot.spirit.level,o.levels.map(n=>({id:n,name:n+'레벨'})),`data-slot="${i}"`):''}
     ${o?`<h4>현재 레벨 효과</h4><p>${esc(o.korean.parsed.levelAffixes.find(l=>l.level===slot.spirit.level)?.affixes.join('\n'))}</p>${o.drop?'':button('미정 숙명 편집','pact-inspect',`data-index="${i}" data-key="undetermined"`)}`:''}`;
   const remaining=pactAllocationKeys(slot).filter(key=>!pactNodeActive(slot,key));
   const sequence=remaining.length ? `<label>투자할 포인트 <input id="pact-spend-count" type="number" min="1" max="${remaining.length}" step="1" value="1"></label>${button('이 정령에 순서대로 배분','pact-spend',`data-index="${i}"`)}` : '';
-  return `<div class="ss-board-scene contract-scene"><nav class="pact-slot-list" aria-label="정령 슬롯">${tabs}</nav>
+  return `<div class="ss-board-scene contract-scene">
     <div class="contract-stage"><div class="contract-wheel" role="group" aria-label="정령 계약 경로">${renderPactConnections()}${branches}</div></div>
     <aside class="board-inspector" data-role="pact-inspector" tabindex="-1"><header>${slot?.spirit?icon(slot.spirit.spiritId):''}<h3>정령 ${i+1}${o?' · '+esc(o.name):''}</h3></header>${settings}</aside>
     ${o?`<div class="pact-board-actions"><details data-role="pact-overview"><summary>개요</summary>${[0,1,2].map(j=>{
