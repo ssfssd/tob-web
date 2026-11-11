@@ -140,10 +140,10 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
 // The full-build boundary remains fail-closed until every selected dependency
 // AND base-stat/level/combat rules have season-specific authority. Partial
 // component values are never summed and presented as full build performance.
-export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true } = {}) {
+export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true, beforeDefense = false } = {}) {
   if (includeTheaAverage && build.ss14Inputs?.theaCycle?.mode === "automatic") {
     const average=calculateTheaAverage(build,
-      state => calculateSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false }));
+      state => calculateSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false, beforeDefense }));
     average.numericStats=calculateSeasonNumericStats(average);
     return average;
   }
@@ -249,11 +249,11 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
     summary: { dps: null, life: null, mana: null, shield: null }, components, blockers,
     counts: { total: components.length, mapped: components.filter((row) => row.status === "mapped").length, blocked: blockers.length },
     sourceGeneratedAt: { skills: skills.generatedAt, gear: gear.generatedAt, supports: supports.generatedAt, components: componentProjection.generatedAt },
-    componentProjection, coupledSkills, character, blessings,
+    componentProjection, coupledSkills, character, blessings, beforeDefense,
     offense: calculateSeasonOffense(build, components, skills, componentProjection, character, coupledSkills),
     limitation: "개별 카드 해석 성공은 전체 빌드 계산 지원이 아닙니다. 구성과 설정은 모두 보존하며, 연결되지 않은 효과를 0으로 합산하지 않습니다." };
   if (includeAverage) report.elixirAverage = calculateElixirAverage(build, componentProjection,
-    input => calculateSeasonBuild(input, { skills, gear, supports, sourceBuild, includeAverage: false }));
+    input => calculateSeasonBuild(input, { skills, gear, supports, sourceBuild, includeAverage: false, beforeDefense }));
   report.fullDps = calculateSeasonDps(build, report);
   report.numericStats = calculateSeasonNumericStats(report);
   report.fullDpsSupported = report.fullDps.supported;

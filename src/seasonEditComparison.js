@@ -22,7 +22,8 @@ export function createSeasonEditComparison(document, report) {
       return this.result();
     },
     result() {
-      return {changed, baseline: compareSeasonDpsSnapshots(baseline, current),
+      const a=previous?.report.assumedDps?.dps, b=current.report.assumedDps?.dps;
+      return {changed, assumedDelta:Number.isFinite(a)&&Number.isFinite(b)?b-a:null, baseline: compareSeasonDpsSnapshots(baseline, current),
         previous: previous ? compareSeasonDpsSnapshots(previous, current) : null};
     },
   };

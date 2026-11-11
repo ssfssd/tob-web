@@ -1,7 +1,7 @@
 import { setPlannerHtml } from "./offlinePresentation.js";
 import { createSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
 import { prepareSeasonMigration } from "./seasonMigration.js";
-import { calculateSeasonBuild } from "./seasonBuild.js";
+import { calculateEditorSeasonBuild } from "./seasonAssumedDps.js";
 import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources } from "./seasonPlannerView.js";
 import { filterSeasonSelection } from "./seasonSelectionSearch.js";
 import { createSeasonEditHistory } from "./seasonEditHistory.js";
@@ -49,7 +49,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   let editComparison;
   const recalculate = () => {
     state.analysis = null;
-    state.report = state.document ? calculateSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
+    state.report = state.document ? calculateEditorSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
     if(state.section==='gear'&&state.picker?.preview&&state.document)
       state.picker.preview=previewSeasonGear(state.document,state.report,state.gearIndex,state.picker.candidate);
     if (editComparison) state.editComparison = editComparison.update(state.document, state.report);

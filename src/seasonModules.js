@@ -169,7 +169,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     * wiltEffects.filter(e => e.operation === "more").reduce((n,e) => n * (1 + e.value / 100), 1);
   row.wiltDuration = 1.5 * (state("moduleProfane") ? 1.07 : 1);
   const fixedErosion = effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value;
-  row.wiltTargetBase = (1 - ((fixedErosion ?? input?.enemy?.erosion) - (theaState(build)?.events?.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - minionEffects.filter(e => e.stat === "erosion_penetration").reduce((n,e) => n + e.value, 0)) / 100)
+  row.wiltTargetBase = (report.beforeDefense ? 1 : 1 - ((fixedErosion ?? input?.enemy?.erosion) - (theaState(build)?.events?.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - minionEffects.filter(e => e.stat === "erosion_penetration").reduce((n,e) => n + e.value, 0)) / 100)
     * effects.filter(e => e.stat === "erosion_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1);
   row.wiltTargetMultiplier = row.wiltTargetBase * (1 + (input?.enemy?.affliction ?? 0) / 100);
   row.minionSkills = profile.actions.map((action, n) => {
@@ -230,11 +230,11 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       const resPen = minionEffects.filter(e => e.stat === `${pool.type}_penetration`).reduce((n, e) => n + e.value, 0);
       if (!valid(enemyFields.armor, input?.enemy?.armor)) reasons.push("모듈 대상 적 아머 미입력");
       if (pool.type !== "physical" && !valid(enemyFields[pool.type], input?.enemy?.[pool.type])) reasons.push(`모듈 대상 ${pool.type} 저항 미입력`);
-      const armor = match[1] === "Persistent" ? 1 : 1 - Math.min(.8, input?.enemy?.armor / (.9 * input?.enemy?.armor + 30000)) * (pool.type === "physical" ? 1 : .6) + armorPen / 100;
+      const armor = report.beforeDefense || match[1] === "Persistent" ? 1 : 1 - Math.min(.8, input?.enemy?.armor / (.9 * input?.enemy?.armor + 30000)) * (pool.type === "physical" ? 1 : .6) + armorPen / 100;
       const scorch = combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0;
       const fixed = effects.find(e => e.stat === "enemy_erosion_resistance_fixed");
       const resistance = pool.type === "erosion" && fixed ? fixed.value : input?.enemy?.[pool.type];
-      const res = pool.type === "physical" ? 1 : 1 - (resistance - scorch - resPen) / 100;
+      const res = report.beforeDefense || pool.type === "physical" ? 1 : 1 - (resistance - scorch - resPen) / 100;
       const targetEffects = effects.filter(e => e.stat === `${pool.type}_damage_taken` || e.stat === "spell_damage_taken" && match[1] === "Spell");
       if (targetEffects.some(e => e.operation !== "more" || !Number.isFinite(e.value))) reasons.push("소환체 대상의 받는 대미지 연산을 확인하세요.");
       const taken = targetEffects.reduce((n, e) => n * (1 + e.value / 100), 1) * (pool.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1)
@@ -264,7 +264,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const penetration = minionEffects.filter(e => e.stat === "fire_penetration").reduce((n,e) => n + e.value, 0);
     const taken = effects.filter(e => e.stat === "fire_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1)*netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,'enemy_dot_damage_taken');
     row.ailmentDps = (b.moduleIgniteBaseMin + b.moduleIgniteBaseMax) / 2 * (1 + main) * hostMore * (1 + increase / 100) * more
-      * (1 - (input.enemy.fire - penetration) / 100) * taken * (1 + input.enemy.affliction / 100) * b.moduleIgniteStacks * b.moduleIgniteUptime / 100;
+      * (report.beforeDefense ? 1 : 1 - (input.enemy.fire - penetration) / 100) * taken * (1 + input.enemy.affliction / 100) * b.moduleIgniteStacks * b.moduleIgniteUptime / 100;
     // These are observed final target stacks, not stacks per creature. Never
     // multiply them by count or accuracy a second time.
     dps += row.ailmentDps;

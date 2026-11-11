@@ -85,7 +85,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
       } else if (!["mana-cost-multiplier", "supported-skill-area", "minion-skill-area"].includes(e.stat)) blockers.push(`소환체 보조의 효과 미지원: ${e.sourceText ?? e.stat}`);
     }
   }
-  const armor = input?.enemy?.armor; const armorMultiplier = 1 - Math.min(.8, armor / (.9 * armor + 30000)) * (profile.type === "physical" ? 1 : .6) + armorPenetration / 100;
+  const armor = input?.enemy?.armor; const armorMultiplier = report.beforeDefense ? 1 : 1 - Math.min(.8, armor / (.9 * armor + 30000)) * (profile.type === "physical" ? 1 : .6) + armorPenetration / 100;
   let stateMultiplier = 1 + Math.max(0, b?.command) * .03; let resistanceMultiplier = 1; let empowerMultiplier = 1;
   if (profile.kind === "spirit-magus") {
     if (!magus?.body.includes("+50%% additional damage") || !magus.body.includes("Only The Forsaken Iris - Growing Breeze")) blockers.push("SS14 소환체 성장·궁극기 공식 미확인");
@@ -105,7 +105,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
       }
     }
     stateMultiplier = b?.growth >= 500 ? 1.5 : 1;
-    resistanceMultiplier = 1 - (input?.enemy?.cold - coldPenetration - 15 * b?.frostEmpowerActive) / 100;
+    resistanceMultiplier = report.beforeDefense ? 1 : 1 - (input?.enemy?.cold - coldPenetration - 15 * b?.frostEmpowerActive) / 100;
   }
   const criticalMultiplier = 1 + Math.min(1, b?.minionCriticalRating / 10000) * .5;
   const taken = (profile.damageForm === "Spell" ? effects.filter(e => e.stat === "spell_damage_taken").reduce((n, e) => n * (1 + e.value / 100), 1) : 1)

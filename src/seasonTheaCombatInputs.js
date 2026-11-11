@@ -13,9 +13,9 @@ export function theaCombatKeys(build, mechanics = []) {
   for (const [i, slot] of (build.skills?.elixirs ?? []).entries()) if (slot?.skillId) keys.push(`elixir${i}Interval`, `elixir${i}Start`, `elixir${i}Duration`);
   return keys;
 }
-export function theaCombatInputBlockers(build, mechanics) {
+export function theaCombatInputBlockers(build, mechanics, { beforeDefense = false } = {}) {
   const input = build.ss14Inputs.theaEvents;
-  const blockers = theaCombatKeys(build, mechanics).filter(k => !validTheaEventValue(k, input[k])).map(k => `${THEA_EVENT_FIELDS[k].label}: 프로그램에서 값을 선택하세요.`);
+  const blockers = theaCombatKeys(build, mechanics).filter(k => !(beforeDefense && k === 'scorchResistance') && !validTheaEventValue(k, input[k])).map(k => `${THEA_EVENT_FIELDS[k].label}: 프로그램에서 값을 선택하세요.`);
   if (build.ss14Inputs.theaCombatReceipt !== theaCombatPin()) blockers.push("복합 발동의 SS14 근거를 다시 연결하세요.");
   if (input.igniteEnabled === 1 && (!(input.igniteDuration > 0) || !(input.igniteLimit > 0) || input.igniteBaseMin > input.igniteBaseMax)) blockers.push("점화의 최소·최대 대미지, 지속 시간과 중첩 상한을 확인하세요.");
   if ((input.numbedEnabled === 1 || moduleElementalEnabled(build)) && (!(input.enemyLifeShield > 0) || !(input.numbedDuration > 0) || !(input.numbedLimit > 0) || input.numbedThreshold < 1)) blockers.push("마취는 대상 최대 HP·보호막, 양수 지속 시간·상한과 1% 이상의 임계값이 필요합니다.");

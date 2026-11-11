@@ -342,7 +342,7 @@ export function renderNativeDps(s) {
     analysis: () => renderResultAnalysis(s),
   };
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
-    ${mobileDpsBar(s)}<div class="native-result-summary"><small>SS14 전체 DPS</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
+    ${mobileDpsBar(s)}<div class="native-result-summary">${s.report.assumedDps ? renderAssumedDps(s) : ''}<small>SS14 전체 DPS · 입력한 전투 조건</small><strong data-role="native-dps">${s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : seasonDpsStatusLabel(s.report)}</strong>
     <p>${s.pending.size ? '변경한 입력을 확인하세요.' : tie ? `기존 투사체 우선 추정 · 새 시전 우선 ${tie.newCastFirstDps === null ? '계산 불가' : tie.newCastFirstDps.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + ' DPS'}` : dps.supported ? '현재 빌드·전투 조건 기준' : '수치 탭에서 계산 가능한 항목을 확인하세요.'}</p>
     ${dps.burstRecovery?`<p>크리에이티브 대폭발 · ${dps.burstRecovery.total!==null?`기발 회복 ${dps.burstRecovery.total} (상한 적용 전)`:dps.burstRecovery.rows.length?'회복 미확정 · 전투 조건에서 발동별 결과 확인':'전투 조건에서 매직 버스트 발동 기록 입력'}</p>`:''}
     ${renderEditDpsComparison(s, true)}
@@ -350,6 +350,13 @@ export function renderNativeDps(s) {
     <div class="native-result-actions">${button('다시 계산', 'apply')}${button('효과별 출처', 'effect-sources')}</div></div>
     <nav class="native-result-tabs" aria-label="계산 결과 보기">${RESULT_TABS.map(([key,label]) => button(label, 'result-tab', `data-tab="${key}" aria-pressed="${active === key}" aria-controls="native-result-panel"`)).join('')}</nav>
     <section id="native-result-panel" class="native-result-panel" aria-label="${RESULT_TABS.find(([key]) => key === active)?.[1] ?? '수치'}">${(panels[active] ?? panels.stats)()}</section></aside>`;
+}
+function renderAssumedDps(s) {
+  const estimate=s.report.assumedDps, delta=s.editComparison?.assumedDelta;
+  const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
+  return `<small>가동률 100% · 방어 적용 전 DPS</small><strong data-role="assumed-dps">${s.pending.size?'입력 적용 대기':estimate.supported?fmt(estimate.dps):'확인 필요'}</strong>
+    <p>적 아머·저항·관통 제외${estimate.defaults.length?' · '+estimate.defaults.join(' · '):''}${!s.pending.size&&Number.isFinite(delta)?' · 직전 대비 '+(delta>0?'+':'')+fmt(delta):''}</p>
+    ${!s.pending.size&&!estimate.supported?`<details data-role="assumed-dps-reasons"><summary>가정 계산에 필요한 항목</summary>${renderReasons(s,estimate.blockers)}</details>`:''}`;
 }
 export function renderSeasonPlanner(s) {
   if (!s.document) return `<main class="season-native"><h1>TOB · SS14</h1><p role="alert">${esc(s.error)}</p><button data-action="open-preserved-build">이전 시즌 빌드 열기</button></main>`;

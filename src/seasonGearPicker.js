@@ -1,6 +1,6 @@
 import { SS14_CURRENT_DATABASE } from './data/ss14CurrentDatabase.generated.js';
 import { seasonGearSlotsForIndex } from './seasonGearSlots.js';
-import { calculateSeasonBuild } from './seasonBuild.js';
+import { calculateEditorSeasonBuild } from './seasonAssumedDps.js';
 import { editSeasonWorkspace } from './seasonWorkspace.js';
 import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
 
@@ -23,7 +23,7 @@ export function gearFilters(id) {
 // Run the same edit and calculation as equipping. Never publish the trial to history or storage.
 export function previewSeasonGear(document,report,index,id) {
   const next=editSeasonWorkspace(document,{kind:'gear-selection',slotIndex:index,value:id});
-  const after=calculateSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
+  const after=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
   const comparison=compareSeasonDpsSnapshots({document,report},{document:next,report:after});
   const stats=[];
   for(const [key,label] of Object.entries({strength:'힘',dexterity:'민첩',intelligence:'지혜',life:'최대 HP',mana:'최대 MP',shield:'최대 보호막',armor:'아머',evasion:'회피'})){
@@ -33,5 +33,5 @@ export function previewSeasonGear(document,report,index,id) {
   const slotEffects=r=>(r.components.flatMap(c=>c.category==='gear'?c.calculations??[]:[]).find(e=>e.slotIndex===index)?.effects??[]);
   const effects=r=>slotEffects(r).filter(e=>e.applied&&Number.isFinite(e.value)&&!e.condition&&!e.per&&!e.conditionRequirements)
     .map(e=>({stat:e.stat,operation:e.operation,unit:e.unit,value:e.value}));
-  return {comparison,stats,before:effects(report),after:effects(after)};
+  return {comparison,assumed:[report.assumedDps?.dps,after.assumedDps?.dps],stats,before:effects(report),after:effects(after)};
 }

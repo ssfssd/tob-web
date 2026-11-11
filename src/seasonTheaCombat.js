@@ -301,7 +301,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         const afflictionEffect = first?.combat?.afflictionEffect ?? 1;
         const afflictionWeight = w + integral(lo, hi) / 100 * afflictionEffect;
         for (const effect of active) {
-          const resist = 1 - (enemy.fire - (active.some(e => e.scorch) ? input.scorchResistance : 0) - (first?.combat?.penetration.fire ?? 0)) / 100;
+          const resist = report.beforeDefense ? 1 : 1 - (enemy.fire - (active.some(e => e.scorch) ? input.scorchResistance : 0) - (first?.combat?.penetration.fire ?? 0)) / 100;
           const amount = effect.damage * resist * fireTaken * afflictionWeight;
           rows.get(effect.row)[effect.scorch ? "scorchDps" : "igniteDps"] += amount;
         }
@@ -322,7 +322,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       }
       if (r.componentProjection.rows.some(row => row.mechanics?.some(m => m.kind === "ill-omen"))) {
         const first = r.fullDps.rows.find(row => row.rowIndex === 0);
-        const resist = 1 - (enemy.fire - (active.some(e => e.scorch) ? input.scorchResistance : 0) - (first?.combat?.penetration.fire ?? 0)) / 100;
+        const resist = report.beforeDefense ? 1 : 1 - (enemy.fire - (active.some(e => e.scorch) ? input.scorchResistance : 0) - (first?.combat?.penetration.fire ?? 0)) / 100;
         const fixed = wilts.reduce((n,e) => n + e.damage * r.fullDps.rows.find(row => row.rowIndex === e.row).wiltTargetBase, 0)
           + r.fullDps.rows.reduce((n,row) => n + minionDots(row) / (1 + (enemy.affliction ?? 0) / 100), 0);
         const eligible = t => fixed * (t + integral(0,t) / 100) + active.reduce((n,e) => n + e.damage * resist * fireTaken * (t + integral(0,t) / 100 * (first?.combat?.afflictionEffect ?? 1)), 0)
@@ -377,7 +377,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
 
 export function calculateTheaCombatAverage(build, report, calculateState, simulate, options, priorBlockers) {
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
-  const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics), ...report.fullDps.blockers];
+  const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics, report), ...report.fullDps.blockers];
   if (build.ss14Inputs.theaEvents.numbedEnabled !== 1 && mechanics.some(m => ["thea-numbed-on-hit", "thea-numbed-consume"].includes(m.kind))
     && report.fullDps.rows.some(r => r.pools?.some(p => p.type === "lightning" && p.max > 0))) blockers.push("선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.");
   if (report.componentProjection.rows.some(r => r.elixirState && r.elixirState.scale === "")) blockers.push("영약의 최종 효과 배율을 선택하세요.");

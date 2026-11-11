@@ -56,6 +56,13 @@ function controlFor(condition) {
   return null;
 }
 
+// Talents and slabs can have the same equipment predicate as a gear affix.
+// A theoretical combat state must still respect the equipped slots.
+export function seasonEquippedPredicateValue(predicate, build) {
+  const control = controlFor(predicate);
+  return control?.equipment ? equipmentState(control, build) : undefined;
+}
+
 function equipmentState(control, build) {
   if(control.empty)return (build?.skills?.[control.empty]??[]).filter(s=>!s?.skillId).length;
   if(control.levelStep){const level=build?.hero?.level??build?.heroLevel;return Number.isInteger(level)&&level>=1&&level<=100?Math.floor(level/control.levelStep):undefined;}

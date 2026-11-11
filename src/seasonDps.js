@@ -403,10 +403,10 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const reduction = Math.min(.8, armor / (.9 * armor + 30000));
     const pools = (basis?.pools ?? []).map(p => {
       const projectilePen = tags.includes("Projectile") ? effects.filter(e => e.stat === "projectile_armor_penetration").reduce((n, e) => n + e.value, 0) : 0;
-      const armorMultiplier = 1 - reduction * (p.type === "physical" ? 1 : .6) + (armorPenetration + projectilePen) / 100;
+      const armorMultiplier = report.beforeDefense ? 1 : 1 - reduction * (p.type === "physical" ? 1 : .6) + (armorPenetration + projectilePen) / 100;
       const fixedResistance = p.type === "erosion" ? effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value : undefined;
       const spellPen = tags.includes("Spell") && ["fire", "cold", "lightning"].includes(p.type) ? simple("spell_elemental_penetration", "add_percent") : 0;
-      const resistanceMultiplier = p.type === "physical" ? 1 : 1 - ((fixedResistance ?? input?.enemy?.[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100;
+      const resistanceMultiplier = report.beforeDefense || p.type === "physical" ? 1 : 1 - ((fixedResistance ?? input?.enemy?.[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100;
       const coldTaken = effects.filter(e => e.stat === `enemy_${p.type}_damage_taken` || p.type!=='physical'&&e.stat === `${p.type}_damage_taken`).reduce((n, e) => n * (1 + e.value / 100), 1);
       const numbed = p.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1;
       return { ...p, multiplier: armorMultiplier * resistanceMultiplier * coldTaken * numbed,
@@ -444,7 +444,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         const fixed = p.type === "erosion" ? effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value : undefined;
         const spellPen = tags.includes("Spell") && ["fire", "cold", "lightning"].includes(p.type) ? simple("spell_elemental_penetration", "add_percent") : 0;
         const taken = effects.filter(e => e.stat === `enemy_${p.type}_damage_taken` || p.type!=='physical'&&e.stat === `${p.type}_damage_taken`).reduce((n,e) => n * (1 + e.value / 100), 1);
-        return n + (p.min + p.max) / 2 * taken * (p.type === "physical" ? 1 : 1 - ((fixed ?? input.enemy[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100)
+        return n + (p.min + p.max) / 2 * taken * (report.beforeDefense || p.type === "physical" ? 1 : 1 - ((fixed ?? input.enemy[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100)
           * (p.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1);
       }, 0)
         * offense?.values.attributeMultiplier * afflictionMultiplier * b?.dotUptime / 100*netherMore(effects,'enemy_dot_damage_taken')*netherMore(effects,'enemy_all_damage_taken');
