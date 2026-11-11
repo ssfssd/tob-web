@@ -23,6 +23,10 @@
 .points-stepper {display:flex;align-items:center;gap:12px;margin-top:8px}.season-native .points-stepper button {min-width:38px;font-size:18px}.board-empty {padding:36px 12px;text-align:center}
 .contract-scene {grid-template-columns:minmax(0,1.7fr) minmax(170px,.8fr);align-items:center;background:linear-gradient(115deg,#20487955,#12306377),url("../assets/ingame-ui/game/pact-background.png") center/cover}
 .contract-stage {min-width:0}.contract-wheel {position:relative;aspect-ratio:5/4;width:100%;background:url("../assets/ingame-ui/game/pact-wheel.png") center/28% auto no-repeat}
+.pact-board-actions {grid-column:1/-1;display:flex;align-items:start;gap:8px;flex-wrap:wrap}
+.season-native .pact-board-actions details {margin:0;flex:1 1 130px}
+.season-native .contract-wheel .pact-gem.outer {width:8%;border:2px solid #efbe63;background:radial-gradient(#893a20,#30212b)}
+.season-native .contract-wheel .pact-gem.inactive {filter:grayscale(1);opacity:.55}
 .contract-wheel .ingame-pact-track,.contract-wheel .ingame-pact-seal {fill:none;stroke:#b5ddfb;stroke-width:3}.contract-wheel :is(.ingame-pact-rune,.ingame-pact-emblem){display:none}
 .season-native .contract-wheel :is(.pact-gem,.pact-hub) {position:absolute;transform:translate(-50%,-50%);display:grid;place-items:center;aspect-ratio:1;min-height:0;padding:0;border-radius:50%;width:5%;background:#594b40;border:1px solid #dec88d;color:#fff;line-height:1}
 .season-native .contract-wheel .pact-hub {width:9%;background:#152032;border-width:2px;z-index:1}.contract-wheel img {width:100%;height:100%;border-radius:50%;object-fit:contain}
@@ -48,6 +52,11 @@
 .pact-slot-list,.pact-ring-list {grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
 .season-native :is(.pact-slot-list,.pact-ring-list) button {display:grid;align-content:center;gap:2px;min-height:44px;min-width:0;padding:6px 9px;text-align:left;background:#182934ed;border-color:#566b77}
 .pact-slot-list small,.pact-ring-list small {font-size:12px;color:#c6d7de}
+.pact-rolls {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(104px,100%),1fr));gap:8px;margin-bottom:8px}
+.pact-rolls label {align-content:end;margin:0}
+.pact-rolls small {color:#c6d7de;font-variant-numeric:tabular-nums}
+.contract-scene .board-inspector h4 {margin-top:8px}
+.season-native .contract-wheel .pact-gem[aria-pressed=true] {outline:3px solid #ffe5a3;outline-offset:3px;z-index:2}
 .season-native :is(.pact-slot-list,.pact-ring-list) button[aria-pressed=true] {background:#463e30;border-color:#e1c58b;color:#fff1ce}
 .build-share-panel {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:6px 12px}
 .build-share-panel label,.build-share-panel p {margin:0}
@@ -55,8 +64,8 @@
 .build-share-panel input {width:100%;box-sizing:border-box}
 .build-share-panel [role=status]:empty {display:none}
 @media(max-width:900px) {
-  .contract-scene .board-inspector {grid-row:2}
-  .contract-scene .contract-stage {grid-row:4}
+  .contract-scene .contract-stage {grid-row:2}
+  .contract-scene .board-inspector {grid-row:3}
 }
 @container(max-width:619px) {
   .is-placing .slate-detail-panel {grid-row:1}

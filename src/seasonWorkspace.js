@@ -10,7 +10,7 @@ import { applySeasonSelections, getSeasonSelectionOptions, getSeasonSelectionRec
 import { parseTlidbGearTooltip } from "./tlidbGearTooltipCalculation.js";
 import { validLogGear, editLogGearRoll } from "./seasonLogGear.js";
 import { applyLogSlates } from "./seasonLogSlates.js";
-import { applySeasonConfigurations, captureSeasonConfiguration, compareSeasonConfigurations, SEASON_CONFIGURATION_GROUPS, validSeasonConfigurations } from "./seasonConfiguration.js";
+import { applySeasonConfigurations, captureSeasonConfiguration, compareSeasonConfigurations, SEASON_CONFIGURATION_GROUPS, validSeasonConfigurations, validPactAllocations } from "./seasonConfiguration.js";
 import { applySeasonSupportSelections, seasonSupportItem, seasonSupportOptions } from "./seasonSupport.js";
 import { pinSeasonComponentReceipts, projectSeasonComponents, validSeasonConditionValue } from "./seasonComponents.js";
 import { SEASON_CHARACTER_INPUTS, seasonRulePins } from "./seasonCharacter.js";
@@ -77,7 +77,7 @@ function validDocument(document) {
       }
     }
   }
-  if (!validSeasonConfigurations(target.ss14Inputs.configurations)) return false;
+  if (!validSeasonConfigurations(target.ss14Inputs.configurations) || !validPactAllocations(target.pact)) return false;
   if (!validLogReview(target.ss14Inputs.logReview)) return false;
   if (!validSeasonHeroSelection(target.ss14Inputs)) return false;
   if (!validSeasonDpsInputs(target.ss14Inputs)) return false;

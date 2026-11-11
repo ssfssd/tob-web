@@ -2,11 +2,11 @@ import { SS14_MEMORIES } from "./data/ss14Memories.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_SPIRIT_NAMES } from "./data/ss14SpiritNames.generated.js";
-import { getCatalogItems } from "./catalog.js";
+import { getCatalogItems, findItemById } from "./catalog.js";
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
-import { seasonDestinyOptions } from './seasonDestiny.js';
+import { seasonDestinyOptions, pactNodeActive } from './seasonDestiny.js';
 import { EMPTY_TRAIT_MEMORY } from "./seasonHeroSelection.js";
 
 const ko = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
@@ -50,8 +50,13 @@ export function seasonSpiritOptions() {
     if (!verified(page) || !verified(korean)) return [];
     const label = SS14_SPIRIT_NAMES[identity.catalogId];
     if ((label?.structurePageSha256 ?? label?.sourcePageSha256) !== korean.sourcePageSha256) return [];
-    return [{ id: identity.catalogId, name: ko(label.name), levels: page.parsed.levelAffixes.map(row => row.level), page, korean }];
+    const drop = findItemById(identity.catalogId)?.tags?.some(t=>['掉落','드롭'].includes(t));
+    return [{ id: identity.catalogId, aliases: [identity.id, ...identity.aliases], name: ko(label.name), levels: page.parsed.levelAffixes.map(row => row.level), page, korean, drop }];
   });
+}
+
+export function selectedSeasonSpirit(id, options = seasonSpiritOptions()) {
+  return options.find(option => option.id === id || option.aliases.includes(id));
 }
 function capture(target, group) {
   target.ss14Inputs.configurations ??= {};
@@ -126,12 +131,22 @@ export function editNativeSeasonSelection(target, edit) {
     target.selections = { ...target.selections, talents: ids };
     target.selectionProjection = { ...target.selectionProjection, talents: ids };
     capture(target, "talents");
+  } else if (edit.kind === 'pact-allocation') {
+    const slot=target.pact?.slots?.[index];
+    const spirit=selectedSeasonSpirit(slot?.spirit?.spiritId);
+    if (!spirit || spirit.drop || ![0,1].includes(edit.value)) throw new Error('전투 정령의 활성 노드를 선택하세요.');
+    const keys=[...spirit.page.parsed.rings.map(r=>r.slotId),'outer'];
+    if(edit.key!=='all' && !keys.includes(edit.key))throw new Error('정령의 노드를 확인하세요.');
+    slot.inactiveNodes=keys.filter(k=>edit.key==='all'||edit.key===k ? !edit.value : !pactNodeActive(slot,k));
+    if(!slot.inactiveNodes.length)delete slot.inactiveNodes;
+    capture(target,'pact');
   } else if (edit.kind === 'destiny-selection') {
     if(!Number.isInteger(index)||index<0||index>2)throw new Error('정령 칸을 확인하세요.');
     const slot=target.pact?.slots?.[index];
-    const spirit=seasonSpiritOptions().find(s=>s.id===slot?.spirit?.spiritId);
+    const spirit=selectedSeasonSpirit(slot?.spirit?.spiritId);
     if(!spirit?.page.parsed.rings.some(r=>r.slotId===edit.key))throw new Error('정령의 운명 장착 칸을 확인하세요.');
     if(edit.value&&!seasonDestinyOptions(edit.key).some(o=>o.id===edit.value))throw new Error('이 칸에 장착할 SS14 운명을 선택하세요.');
+    if(edit.value&&!pactNodeActive(slot,edit.key))throw new Error('링을 활성화한 뒤 운명을 장착하세요.');
     if((slot.rings?.[edit.key]?.installedDestiny?.destinyId??'')===edit.value)return true;
     slot.rings??={};slot.rings[edit.key]??={};
     if(edit.value)slot.rings[edit.key].installedDestiny={instanceId:`ss14-destiny-${index}-${edit.key}`,destinyId:edit.value};
@@ -149,7 +164,7 @@ export function editNativeSeasonSelection(target, edit) {
       target.pact.slots[index] = { spirit: option ? { spiritId: option.id, level: option.levels[0] } : null, rings: {} };
     } else {
       const slot = target.pact.slots[index];
-      if (!seasonSpiritOptions().find(row => row.id === slot?.spirit?.spiritId)?.levels.includes(edit.value)) throw new Error("정령 레벨을 확인하세요.");
+      if (!selectedSeasonSpirit(slot?.spirit?.spiritId)?.levels.includes(edit.value)) throw new Error("정령 레벨을 확인하세요.");
       slot.spirit.level = edit.value;
     }
     capture(target, "pact");

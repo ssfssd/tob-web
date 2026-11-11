@@ -4,7 +4,7 @@ import "./seasonCurrentDatabase.js";
 import { inspectSeasonAllocation } from "./seasonAllocation.js";
 import { boundBlessingStacks, blessingConditionValue } from "./seasonBlessings.js";
 import { seasonMemoryRows } from "./seasonMemories.js";
-import { seasonDestinyRow } from "./seasonDestiny.js";
+import { seasonDestinyRow, pactNodeActive } from "./seasonDestiny.js";
 import { seasonExtensionRows } from "./seasonExtensions.js";
 import { EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty } from "./seasonHeroSelection.js";
 import { parseSeasonHeroMechanics } from "./seasonHeroMechanics.js";
@@ -406,13 +406,16 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     const level = slot.spirit.level;
     const entry = en?.parsed.levelAffixes.find((row) => row.level === level);
     const koEntry = ko?.parsed.levelAffixes.find((row) => row.level === level);
-    add("pact", `pact.slots.${index}.spirit`, item, en, `level:${level}`, entry?.affixes.join("\n"), { detail: koEntry?.affixes.join("\n") });
+    const inactiveOuter = entry && !pactNodeActive(slot, 'outer') ? '외환 포인트 회수' : '';
+    add("pact", `pact.slots.${index}.spirit`, item, en, `level:${level}`, entry?.affixes.join("\n"), { detail: koEntry?.affixes.join("\n") }, 1, '', null, null, inactiveOuter);
     if (!entry || en?.parsed.duplicateDataLevels.length) continue;
     for (const ring of en?.parsed.rings ?? []) {
+      const inactiveRing = !pactNodeActive(slot, ring.slotId) ? '링 포인트 회수' : '';
       const replacement = slot.rings?.[ring.slotId]?.installedDestiny;
       if (replacement) {
         const destiny = seasonDestinyRow(build, index, ring);
-        add("pact", destiny.path, destiny.item, destiny.page, destiny.record, destiny.text, destiny.koText, 1, destiny.reason, null, null, destiny.activation?.inactiveReason);
+        const reason = inactiveRing && destiny.destinyRollControls.length ? '' : destiny.reason;
+        add("pact", destiny.path, destiny.item, destiny.page, destiny.record, destiny.text, destiny.koText, 1, reason, null, null, inactiveRing || destiny.activation?.inactiveReason);
         rows.at(-1).destinyRollControls = destiny.destinyRollControls;
         rows.at(-1).destinyActivation = destiny.activation;
         continue;
@@ -422,12 +425,12 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
         &&ring.contentFieldCount===3&&/^midRing[1-3]$/u.test(ring.slotId)&&ring.dataLevel===6+Number(ring.slotId.at(-1));
       add("pact", `pact.slots.${index}.rings.${ring.slotId}`, item, en, `ring:${ring.dataLevel}:${ring.dataId}`,
         ring.effect, { name: translated?.name, detail: translated?.effect },1,'',null,null,
-        explicitlyEmpty?'원문에서 효과 없는 공백 포인트로 확인됨':undefined);
+        inactiveRing || (explicitlyEmpty?'원문에서 효과 없는 공백 포인트로 확인됨':undefined));
     }
     // The SS14 promotion table includes the outer-ring base effect (and its
     // higher-level replacement). It is one effect, not a second additive copy.
     const mainInLevelTable = en?.parsed.levelAffixes.some(r => r.affixes.includes(en.parsed.mainAffix?.effect));
-    if (en?.parsed.mainAffix && !mainInLevelTable) add("pact", `pact.slots.${index}.main`, item, en, "main", en.parsed.mainAffix.effect, { detail: ko?.parsed.mainAffix?.effect });
+    if (pactNodeActive(slot,'outer') && en?.parsed.mainAffix && !mainInLevelTable) add("pact", `pact.slots.${index}.main`, item, en, "main", en.parsed.mainAffix.effect, { detail: ko?.parsed.mainAffix?.effect });
   }
   for (const row of rows.filter((r) => r.group === "divinity" && r.maxActive)) {
     const active = rows.filter((r) => r.group === "divinity" && (row.netherTalentId ? r.netherTalentId===row.netherTalentId : r.itemId === row.itemId)).reduce((sum, r) => sum + r.selectionCount, 0);

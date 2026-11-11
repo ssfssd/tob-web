@@ -358,6 +358,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'pact-inspect') {
           state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
         }
+        if (action === 'pact-allocation' || action === 'pact-remove-destiny') {
+          api.edit({kind:action==='pact-allocation'?action:'destiny-selection',slotIndex:Number(d.index),key:d.key,value:action==='pact-allocation'?Number(d.value):''});
+          return;
+        }
         if (action === 'talent-step') {
           const index=Number(d.index), board=state.document.targetBuild.talents.boards[index];
           const n=seasonTalentNodes(board?.treeSlug).find(n=>n.id===d.id);

@@ -28,7 +28,17 @@ export function validSeasonConfigurations(configurations) {
     return group && object(entry) && object(entry.fields) && object(entry.selections) && object(entry.selectionProjection)
       && Object.keys(entry).every((key) => ["fields", "selections", "selectionProjection"].includes(key))
       && Object.keys(entry.fields).every((key) => group.fields.includes(key))
+      && (id !== 'pact' || validPactAllocations(entry.fields.pact))
       && [entry.selections, entry.selectionProjection].every((values) => Object.keys(values).every((key) => group.selections.includes(key)));
+  });
+}
+
+export function validPactAllocations(pact) {
+  if (pact?.slots === undefined) return true;
+  return Array.isArray(pact.slots) && pact.slots.every(slot => {
+    const keys = slot?.inactiveNodes;
+    return keys === undefined || (Array.isArray(keys) && keys.length <= 10 && new Set(keys).size === keys.length
+      && keys.every(key => typeof key === 'string' && /^(outer|innerRing[1-6]|midRing[1-3])$/u.test(key)));
   });
 }
 

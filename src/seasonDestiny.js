@@ -5,6 +5,9 @@ import { SS14_DESTINY_RULES } from './data/ss14DestinyRules.generated.js';
 const pattern = /[+]?\(-?\d+(?:\.\d+)?–-?\d+(?:\.\d+)?\)/gu;
 const tokens = (text) => [...text.matchAll(pattern)].map((m) => m[0]);
 
+// Older planner builds counted every equipped spirit node.
+export const pactNodeActive = (slot, key) => !slot?.inactiveNodes?.includes(key);
+
 export function seasonDestinyOptions(ringSlot) {
   const instruction=/^innerRing[1-6]$/u.test(ringSlot)?'Install to replace a Micro Talent Node'
     :/^midRing[1-3]$/u.test(ringSlot)?'Install to replace a Medium Talent Node':null;
@@ -46,7 +49,7 @@ export function seasonDestinyRow(build, index, ring, { data = SS14_DESTINY } = {
       row.reason='이중 천명의 활성화 규칙 원문을 확인할 수 없습니다.';return row;
     }
     const equipped=build.pact.slots.flatMap((s,i)=>!s.spirit?[]:Object.entries(s.rings??{}).flatMap(([slotId,r])=>
-      /^midRing[1-3]$/u.test(slotId)&&[identity.id,identity.catalogId].includes(r.installedDestiny?.destinyId)
+      /^midRing[1-3]$/u.test(slotId)&&pactNodeActive(s,slotId)&&[identity.id,identity.catalogId].includes(r.installedDestiny?.destinyId)
         ?[`pact.slots.${i}.rings.${slotId}`]:[])).sort();
     row.activation={kind:'dual-kismet',count:equipped.length,required:2,owner:equipped[0],receipt:SS14_DESTINY_RULES,
       inactiveReason:equipped.length<2?'같은 이중 천명 2개를 장착하면 활성화됩니다.':equipped[0]!==path?'같은 이중 천명 효과는 한 번만 적용됩니다.':''};
@@ -73,9 +76,11 @@ export function seasonDestinyRow(build, index, ring, { data = SS14_DESTINY } = {
     const translated = ko?.modifiers.find((k) => k.id === m.id);
     if (!translated || JSON.stringify(tokens(m.text)) !== JSON.stringify(tokens(translated.text))) return null;
     let cursor = 0;
-    return translated.text.replace(pattern, (fragment) => {
+    return translated.text.replace(pattern, (fragment, offset) => {
       const ordinal = ++cursor;
       const c = row.destinyRollControls.find((c) => c.modifierId === m.id && c.ordinal === ordinal);
+      const line = translated.text.slice(translated.text.lastIndexOf('\n', offset) + 1).split('\n')[0];
+      if (c && tokens(line).length === 1) c.label = line.replace(pattern, '').trim();
       return c && c.value !== "" ? `${fragment.startsWith("+") && c.value >= 0 ? "+" : ""}${c.value}` : fragment;
     });
   });
