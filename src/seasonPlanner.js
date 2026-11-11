@@ -13,7 +13,7 @@ import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS } from './seasonAdvis
 import { RESULT_TABS } from './seasonResultPanels.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
-import { encodeBuildCode, decodeBuildCode } from './seasonBuildCode.js';
+import { encodeBuildCode, decodeBuildCode, buildShareUrl, sharedCodeFromHash } from './seasonBuildCode.js';
 
 export const ACTIVE_SEASON_WORKSPACE_KEY = "tob.activeSeasonWorkspace.v1";
 const stringKinds = new Set(["name", "hero-selection", "hero-choice", "skill-selection", "gear-selection", "support-selection", "memory-selection", "slate-affix", "talent-board", "spirit-selection", "destiny-selection", "thea-board", "elixir-selection", "module-selection", "module-option", "nether-layout", "nether-quality", "nether-banishment"]);
@@ -104,7 +104,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (modal) modal.scrollTop = modalScroll;
       if (state.focusRole) {
         const detail = globalThis.document.querySelector?.(`[data-role="${state.focusRole}"]`);
-        if (detail) { detail.open = true; detail.querySelector?.("input, select")?.focus(); detail.scrollIntoView?.({ block: "nearest" }); }
+        if (detail) {
+          if (detail.tagName === 'DETAILS') detail.open = true;
+          const focusTarget=detail.hasAttribute?.('tabindex') ? detail : detail.querySelector?.('input, select');
+          focusTarget?.focus({preventScroll:true});
+          detail.scrollIntoView?.({ block: "nearest" });
+        }
         state.focusRole = null;
       }
     },
@@ -337,17 +342,22 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const d = target?.dataset ?? legacy.dataset;
       const action = d.ss14Action ?? d.action;
       if (action === "open-preserved-build") return false;
-      if (['share','copy-code','import-code'].includes(action)) {
+      if (['share','copy-link','copy-code','import-code'].includes(action)) {
         void api.share(action);
         return true;
       }
       api.run(() => {
         if (action === "undo" || action === "redo") { api.restore(action === "redo"); return; }
         api.flush();
-        if (handleSlateEditorAction(api,action,d)) return;
+        if (handleSlateEditorAction(api,action,d)) {
+          if (['slate-type','slate-select','slate-socket'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
+          return;
+        }
         if (action === 'talent-slot') { state.talentIndex=Number(d.index); state.talentNode=null; return; }
         if (action === 'talent-inspect') { state.talentNode=d.id; return; }
-        if (action === 'pact-inspect') { state.pactIndex=Number(d.index); state.pactRing=d.key??null; return; }
+        if (action === 'pact-inspect') {
+          state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
+        }
         if (action === 'talent-step') {
           const index=Number(d.index), board=state.document.targetBuild.talents.boards[index];
           const n=seasonTalentNodes(board?.treeSlug).find(n=>n.id===d.id);
@@ -429,26 +439,51 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       });
       return true;
     },
+    openSharedCopy(imported) {
+      if (state.dirty || state.pending.size) api.save();
+      const saved = saveSeasonWorkspace(storage, imported);
+      api.open(saved.id);
+      state.section = 'hero';
+      state.notice = '공유 빌드를 새 사본으로 열었습니다.';
+    },
+    async followShareLink(location, history) {
+      const hash = location?.hash;
+      const code = sharedCodeFromHash(hash);
+      if (code === null) return;
+      try {
+        const imported = await decodeBuildCode(code);
+        if (location.hash !== hash) return;
+        api.openSharedCopy(imported);
+        api.active = true;
+        history.replaceState(history.state, '', location.pathname + location.search);
+      } catch (error) {
+        if (location.hash !== hash) return;
+        state.error = '공유 링크를 열 수 없습니다. ' + error.message;
+      }
+      api.render();
+    },
     async share(action) {
       let panel=state.overlay;
       try {
         if (action==='share') {
           api.flush();
-          panel={type:'share',code:'',paste:'',message:'',busy:false};
+          panel={type:'share',code:'',link:'',paste:'',message:'',busy:false};
           state.overlay=panel;
           state.error='';
           api.render();
           panel.code=await encodeBuildCode(state.document);
+          panel.link=buildShareUrl(panel.code);
         } else {
           if (panel?.type!=='share' || panel.busy) return;
           panel.paste=globalThis.document.getElementById('share-paste')?.value??'';
-          if (action==='copy-code') {
-            try { await navigator.clipboard.writeText(panel.code); panel.message='복사했습니다.'; }
+          if (action==='copy-code' || action==='copy-link') {
+            const link = action === 'copy-link';
+            try { await navigator.clipboard.writeText(link ? panel.link : panel.code); panel.message=link?'공유 링크를 복사했습니다.':'코드를 복사했습니다.'; }
             catch {
-              const field=globalThis.document.getElementById('share-code');
+              const field=globalThis.document.getElementById(link ? 'share-link' : 'share-code');
               if(state.overlay===panel && field) {
                 const status=globalThis.document.getElementById('share-status');
-                if(status)status.textContent='선택한 코드를 직접 복사하세요.';
+                if(status)status.textContent=link?'선택한 링크를 복사하세요.':'선택한 코드를 복사하세요.';
                 field.focus();field.select();return;
               }
             }
@@ -456,10 +491,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             panel.busy=true;
             const imported=await decodeBuildCode(panel.paste);
             if(state.overlay!==panel)return;
-            if(state.dirty || state.pending.size)api.save();
-            const saved=saveSeasonWorkspace(storage,imported);
-            api.open(saved.id);
-            state.section='hero';state.notice='공유 빌드를 새 사본으로 열었습니다.';
+            api.openSharedCopy(imported);
             api.render();return;
           }
         }

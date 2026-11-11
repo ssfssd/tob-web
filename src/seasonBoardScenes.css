@@ -39,3 +39,41 @@
 @media(min-width:1320px) {.tree-scene {grid-template-columns:minmax(92px,.25fr) minmax(0,1fr) minmax(158px,.44fr)}.tree-scene .board-inspector {grid-column:auto}}
 @media(max-width:900px) {.contract-scene {grid-template-columns:minmax(0,1fr)}.contract-wheel {max-width:540px;margin:auto}.tree-scene {gap:7px;padding:8px}}
 @media(max-width:600px) {.tree-scene {grid-template-columns:minmax(0,1fr)}.tree-rail {grid-template-columns:repeat(3,minmax(0,1fr));padding:0}.tree-rail img {width:20px}.tree-scene .board-inspector {grid-column:1}.ss-board-scene {padding:7px}.tree-core .tree-point span {font-size:11px}.native-slate-editor {padding:6px}.slate-palette {max-width:100%}}
+
+.slate-add-tools {display:flex;align-items:start;gap:8px;flex-wrap:wrap}
+.slate-add-tools .regular-slate-add,.build-share-panel button {border-color:#b49460;background:#40392c;color:#fff1cc;font-weight:700}
+.season-native .slate-add-tools details {order:0;flex:1 1 180px;margin:0;min-width:0}
+.slate-families {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(98px,100%),1fr));gap:4px;margin:10px 0}
+.season-native .slate-families button {padding:6px;min-height:38px}
+.pact-slot-list,.pact-ring-list {grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.season-native :is(.pact-slot-list,.pact-ring-list) button {display:grid;align-content:center;gap:2px;min-height:44px;min-width:0;padding:6px 9px;text-align:left;background:#182934ed;border-color:#566b77}
+.pact-slot-list small,.pact-ring-list small {font-size:12px;color:#c6d7de}
+.season-native :is(.pact-slot-list,.pact-ring-list) button[aria-pressed=true] {background:#463e30;border-color:#e1c58b;color:#fff1ce}
+.build-share-panel {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:6px 12px}
+.build-share-panel label,.build-share-panel p {margin:0}
+.build-share-panel p {grid-column:1/-1}
+.build-share-panel input {width:100%;box-sizing:border-box}
+.build-share-panel [role=status]:empty {display:none}
+@media(max-width:900px) {
+  .contract-scene .board-inspector {grid-row:2}
+  .contract-scene .contract-stage {grid-row:4}
+}
+@container(max-width:619px) {
+  .is-placing .slate-detail-panel {grid-row:1}
+}
+@media(max-width:600px) {
+  .season-native .planner-header {display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px}
+  .season-native .planner-header .build-chip {margin:0}
+  .season-native .planner-header .native-edit-history {grid-column:1/-1;grid-row:2;justify-self:start}
+  .season-native .planner-header [data-role=native-save-status] {grid-column:1/-1;grid-row:2;margin-inline-start:164px;text-align:right;font-size:12px;overflow-wrap:anywhere}
+  .season-native .planner-header .header-primary-actions {grid-column:1/-1;grid-row:3}
+  .season-native .quick-category-menu {display:grid;grid-template-columns:1.55fr repeat(5,1fr) 1.5fr;gap:0;overflow:visible;padding-inline:4px}
+  .season-native .quick-category-menu button {min-width:0;padding:6px 1px;font-size:13px}
+  .season-native .planner-header .header-primary-actions {flex:1 1 100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+  .season-native .planner-header .header-primary-actions button {width:100%;min-width:0;padding-inline:3px}
+  .pact-ring-list {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .build-share-panel {grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:349px) {
+  .season-native .quick-category-menu {grid-template-columns:repeat(4,minmax(0,1fr))}
+}

@@ -158,7 +158,7 @@ function talentPanel(s) {
   return renderTalentScene(s,{button,esc,select,icon})+theaControls(s.document,s.report,{});
 }
 function pactPanel(s) {
-  return renderPactScene(s,{button,esc,select,icon})+destinyControls(s.report,{});
+  return renderPactScene(s,{button,esc,select,icon});
 }
 function combatPanel(s) {
   return `${dpsControls(s.document, s.report, {})}<details data-role="native-critical-input"><summary>스킬 기본 크리티컬</summary>${offenseControls(s.document, s.report, {})}</details><details data-role="season-character-input"><summary>캐릭터 기본 수치·효과 조건</summary>${characterControls(s.document, s.report, {})}</details><details data-role="native-blessing-input"><summary>축복 중첩</summary>${blessingControls(s.document, s.report, {})}</details>${theaControls(s.document, s.report, {})}<details data-role="native-extension-input"><summary>영약·특수 효과 조건</summary>${extensionControls(s.report, {})}</details>`;
@@ -295,11 +295,12 @@ function overlay(s) {
   let content;
   if (type === "saves") content = s.documents.map(d => `<article class="native-save-row"><span>${esc(d.targetBuild.name)}</span>${button("열기", "open", `data-id="${esc(d.id)}" aria-label="${esc(d.targetBuild.name)} 열기"`)}</article>`).join("") || "저장된 SS14 빌드가 없습니다.";
   else if (type === "files") content = `${button("사본 저장", "copy")}${RUNTIME_POLICY.allowGameLogs ? button("게임 로그 가져오기", "local-log") : `<p>${esc(LOCAL_LOG_ONLY_MESSAGE)}</p><p>빌드는 이 브라우저에 저장됩니다. 다른 기기로 옮기거나 작업을 종료하기 전 빌드 JSON을 보관하세요.</p>`}<label>TOB SS14 빌드 내보내기<textarea readonly aria-label="TOB SS14 빌드 내보내기">${esc(exportSeasonWorkspace(s.document))}</textarea></label><label>TOB SS14 빌드 가져오기<textarea id="native-import" aria-label="TOB SS14 빌드 가져오기"></textarea></label>${button("가져오기", "import")}<details><summary>이전 시즌 보관함</summary><button type="button" data-action="open-preserved-build">이전 시즌 빌드 열기</button></details>`;
-  else if (type === "share") content = `<label>내 빌드 코드<textarea id="share-code" readonly spellcheck="false" aria-label="내 빌드 코드">${esc(s.overlay.code)}</textarea></label>${button("코드 복사","copy-code",s.overlay.code?"":"disabled")}<p id="share-status" role="status">${esc(s.overlay.message)}</p><label>받은 빌드 코드<textarea id="share-paste" spellcheck="false" placeholder="TOB14-1.…" aria-label="받은 빌드 코드">${esc(s.overlay.paste)}</textarea></label>${button("새 사본으로 열기","import-code")}`;
+  else if (type === "share") content = `<div class="build-share-panel"><label>공유 링크<input type="text" id="share-link" aria-label="공유 링크" readonly value="${esc(s.overlay.link)}" /></label>${button("공유 링크 복사","copy-link",s.overlay.link?"":"disabled")}<p>받은 사람이 링크를 열면 이 빌드의 사본이 열립니다.</p><p id="share-status" role="status">${esc(s.overlay.message)}</p></div>
+    <details data-role="share-code-tools"><summary>빌드 코드로 공유하거나 가져오기</summary><label>내 빌드 코드<textarea id="share-code" readonly spellcheck="false" aria-label="내 빌드 코드">${esc(s.overlay.code)}</textarea></label>${button("코드 복사","copy-code",s.overlay.code?"":"disabled")}<label>받은 빌드 코드<textarea id="share-paste" spellcheck="false" placeholder="TOB14-1.…" aria-label="받은 빌드 코드">${esc(s.overlay.paste)}</textarea></label>${button("새 사본으로 열기","import-code")}</details>`;
   else if (type === "local-log") content = localLogPanel(s);
   else if (type === "effects") content = renderEffectSources(s);
   else content = slotEditor(s);
-  const titles = { share: "빌드 코드", saves: "저장 빌드", files: "빌드 파일", "local-log": "게임 로그 가져오기", effects: "효과별 출처", hero: "히어로 선택", traits: "히어로 특성", memory: "히어로 추억", talents: "재능 편집", pact: "정령 편집", extensions: "영약·모듈화" };
+  const titles = { share: "빌드 공유", saves: "저장 빌드", files: "빌드 파일", "local-log": "게임 로그 가져오기", effects: "효과별 출처", hero: "히어로 선택", traits: "히어로 특성", memory: "히어로 추억", talents: "재능 편집", pact: "정령 편집", extensions: "영약·모듈화" };
   const heading = titles[type] ?? "빌드 편집";
   return `<div class="season-native-backdrop"><section role="dialog" aria-modal="true" aria-label="SS14 ${heading}" class="season-native-modal"><header><h2>${heading}</h2>${button("닫기", "close", 'aria-label="편집 닫기"')}</header>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}<div class="season-native-modal-body">${content}</div><footer>${!["share","local-log", "files", "saves", "effects", "hero"].includes(type) ? button("적용", "apply") : ""}${button("닫기", "close")}</footer></section></div>`;
 }
@@ -329,9 +330,9 @@ export function renderSeasonPlanner(s) {
   const body = s.section === "hero" ? heroPanel(s) : ["skills", "gear"].includes(s.section) ? equipmentPanel(s, s.section)
     : s.section === "talents" ? talentPanel(s) : s.section === "pact" ? pactPanel(s)
       : s.section === "divinity" ? divinityPanel(s) : combatPanel(s);
-  return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves")}${button("빌드 코드", "share")}${button("빌드 파일", "files")}</div><span role="status" data-role="native-save-status">${s.dirty ? "저장하지 않은 변경" : s.document.revision ? "저장됨" : "새 SS14 사본"}</span></header>
+  return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves")}${button("공유", "share")}${button("빌드 파일", "files")}</div><span role="status" data-role="native-save-status">${esc(s.notice || (s.dirty ? "저장하지 않은 변경" : s.document.revision ? "저장됨" : "새 SS14 사본"))}</span></header>
     <nav class="quick-category-menu" aria-label="빌드 편집 메뉴">${tabs.map(([id, label]) => button(label, "section", `data-section="${id}" aria-pressed="${s.section === id}"`)).join("")}</nav>
     <div class="native-content"><main class="season-native-scroll"><section class="planner-section ${s.section === "hero" ? "hero-section" : ""}"><a class="scene-dps-jump" href="#native-dps-summary">전체 DPS ↓</a><h1>${esc(tabs.find(([id]) => id === s.section)?.[1])}</h1>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>
     ${renderNativeDps(s)}</div>
-    ${s.notice ? `<div class="toast" role="status">${esc(s.notice)}</div>` : ""}${overlay(s)}</div>`;
+    ${overlay(s)}</div>`;
 }

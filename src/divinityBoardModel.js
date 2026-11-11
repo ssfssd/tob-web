@@ -236,6 +236,7 @@ export function createSlateInstance({
   slotSelectionsByKey = {},
   hadesAuthorityConfig = null,
   nether = null,
+  regularFamily,
   createdOrder = 0,
   anchor = null,
 } = {}) {
@@ -256,6 +257,7 @@ export function createSlateInstance({
       ? cloneJson(slotSelectionsByKey)
       : {},
     ...(nether && typeof nether === 'object' && !Array.isArray(nether) ? { nether: cloneJson(nether) } : {}),
+      ...(slateId === 'six_gods' && typeof regularFamily === 'string' && regularFamily ? { regularFamily } : {}),
     ...(hadesAuthorityConfig
       && typeof hadesAuthorityConfig === "object"
       && !Array.isArray(hadesAuthorityConfig)

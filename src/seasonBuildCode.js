@@ -3,6 +3,16 @@ import { openSharedSeasonBuild, shareableSeasonBuild } from './seasonWorkspace.j
 const prefix = 'TOB14-1.';
 const maxBytes = 2_000_000;
 const maxCodeChars = 2_700_000;
+const publicPlanner = 'https://ssfssd.github.io/tob-web/';
+const shareFragment = '#build=';
+
+export function buildShareUrl(code) {
+  return publicPlanner + shareFragment + code;
+}
+
+export function sharedCodeFromHash(hash) {
+  return typeof hash === 'string' && hash.startsWith(shareFragment) ? hash.slice(shareFragment.length) : null;
+}
 
 async function readBounded(stream) {
   const reader = stream.getReader(), chunks = [];

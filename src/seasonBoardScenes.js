@@ -56,7 +56,25 @@ export function renderPactScene(s,{button,esc,select,icon}) {
   }).join('');
   const installed=slot?.rings?.[ring?.slotId]?.installedDestiny?.destinyId;
   const choices=ring?seasonDestinyOptions(ring.slotId):[], destiny=choices.find(d=>d.id===installed);
-  return `<div class="ss-board-scene contract-scene"><div class="contract-stage"><div class="contract-wheel" role="group" aria-label="정령 계약 경로">${renderPactConnections()}${branches}</div></div>
-    <aside class="board-inspector"><header>${slot?.spirit?icon(slot.spirit.spiritId):''}<h3>정령 ${i+1}${o?' · '+esc(o.name):''}</h3></header>${ring?`<h4>${esc(destiny?.name??ring.name)}</h4><p>${esc(installed?(destiny?.detail??'이전 선택 · 효과 확인 필요'):ring.effect)}</p>${select(ring.name+' 운명','scene-destiny','destiny-selection',installed,choices,`data-slot="${i}" data-key="${esc(ring.slotId)}"`,true)}${button('정령으로','pact-inspect',`data-index="${i}"`)}`:
-    `${select('정령 '+(i+1),'scene-spirit','spirit-selection',slot?.spirit?.spiritId,options,`data-slot="${i}"`,true)}${o?select('정령 레벨','scene-level','spirit-level',slot.spirit.level,o.levels.map(n=>({id:n,name:n+'레벨'})),`data-slot="${i}"`):''}${o?`<p>${esc(o.korean.parsed.levelAffixes.find(l=>l.level===slot.spirit.level)?.affixes.join('\n'))}</p>`:''}`}</aside></div>`;
+  const tabs=[0,1,2].map(j=>button(`<small>정령 ${j+1}</small><strong>${esc(option(j)?.name??(slots[j]?.spirit?'이전 선택':'빈 슬롯'))}</strong>`,'pact-inspect',
+    `data-index="${j}" aria-pressed="${j===i}"`)).join('');
+  const ringList=(o?.korean.parsed.rings??[]).map(r=>{
+    const id=slot.rings?.[r.slotId]?.installedDestiny?.destinyId;
+    const name=id?seasonDestinyOptions(r.slotId).find(d=>d.id===id)?.name??'이전 선택':r.name;
+    return button(`<small>${esc(r.category)} ${r.slotId.at(-1)}</small><span>${esc(name)}</span>`,'pact-inspect',
+      `data-index="${i}" data-key="${r.slotId}" aria-pressed="${ring?.slotId===r.slotId}"`);
+  }).join('');
+  const result=ring && s.report.componentProjection.rows.find(r=>r.path===`pact.slots.${i}.rings.${ring.slotId}`);
+  const rolls=(result?.destinyRollControls??[]).map((c,n)=>`<label>운명 수치 ${n+1} (${c.min}~${c.max})<input type="number" min="${c.min}" max="${c.max}" step="any" data-season-edit="destiny-roll" data-key="${esc(c.key)}" value="${esc(c.value)}" /></label>`).join('');
+  const settings=ring?`<h4>${esc(ring.category)} ${ring.slotId.at(-1)} · ${esc(ring.name)}</h4><p>기본 효과 · ${esc(ring.effect||'없음')}</p>
+    ${select(ring.name+' 운명','scene-destiny','destiny-selection',installed,choices,`data-slot="${i}" data-key="${esc(ring.slotId)}"`,true)}
+    ${installed?`<p>${esc(result?.detail||destiny?.detail||'효과 확인 필요')}</p>${rolls}`:''}
+    ${button('정령 설정으로','pact-inspect',`data-index="${i}"`)}`:
+    `${select('정령 '+(i+1),'scene-spirit','spirit-selection',slot?.spirit?.spiritId,options,`data-slot="${i}"`,true)}
+    ${o?select('정령 레벨','scene-level','spirit-level',slot.spirit.level,o.levels.map(n=>({id:n,name:n+'레벨'})),`data-slot="${i}"`):''}
+    ${o?`<h4>현재 레벨 효과</h4><p>${esc(o.korean.parsed.levelAffixes.find(l=>l.level===slot.spirit.level)?.affixes.join('\n'))}</p>`:''}`;
+  return `<div class="ss-board-scene contract-scene"><nav class="pact-slot-list" aria-label="정령 슬롯">${tabs}</nav>
+    <div class="contract-stage"><div class="contract-wheel" role="group" aria-label="정령 계약 경로">${renderPactConnections()}${branches}</div></div>
+    <aside class="board-inspector" data-role="pact-inspector" tabindex="-1"><header>${slot?.spirit?icon(slot.spirit.spiritId):''}<h3>정령 ${i+1}${o?' · '+esc(o.name):''}</h3></header>${settings}</aside>
+    ${ringList?`<div class="pact-ring-list" role="group" aria-label="링과 장착 운명">${ringList}</div>`:''}</div>`;
 }

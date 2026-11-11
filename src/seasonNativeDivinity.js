@@ -5,6 +5,7 @@ import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { isSeasonNether, netherSlateOptions, netherLayouts, netherReceipt, netherQualityOptions, netherTalentOptions } from './seasonNether.js';
+import { regularSlateFamilies } from './seasonDivinity.js';
 
 const types = { corner_of_divinity: "A_Corner_of_Divinity", stars_fall: "Fallen_Starlight", starfire: "Sparks_of_Moth_Fire",
   moth_fire: "When_Sparks_Set_the_Prairie_Ablaze", void_gap: "Space_Rift", residence_of_stars: "Residence_of_Stars", genealogy: "Pedigree_of_Gods" };
@@ -65,7 +66,8 @@ export function editNativeDivinity(target, edit) {
       }
       if(!next)throw new Error('명왕을 배치할 수 있는 위치를 비워 주세요.');board=next;
     } else {
-      const slate = createSlateInstance({ instanceId: globalThis.crypto.randomUUID(), slateId: option.id, shapeId: shape.id, shape:shape.shape, rotation:shape.fixed?0:edit.rotation??0 });
+      if (edit.regularFamily && (option.id !== 'six_gods' || !regularSlateFamilies.some(f => f.id === edit.regularFamily))) throw new Error('일반 석판의 신을 선택하세요.');
+      const slate = createSlateInstance({ instanceId: globalThis.crypto.randomUUID(), slateId: option.id, regularFamily:edit.regularFamily, shapeId: shape.id, shape:shape.shape, rotation:shape.fixed?0:edit.rotation??0 });
       const candidate=addSlateToInventory(board, slate);
       board = edit.anchor ? placeNativeSlate(candidate,slate,edit.anchor) : autoPlaceSlate(candidate, slate.instanceId);
     }

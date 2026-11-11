@@ -5,6 +5,7 @@ import { mechanicPage } from "./seasonMechanicInputs.js";
 import { transformedShape } from "./divinityBoardModel.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
 import { isSeasonNether, netherTemplate, netherTalent, netherTalentOptions } from './seasonNether.js';
+import { TALENT_SUBTREE_SLUGS_BY_GOD } from './talentBoardModel.js';
 
 const templates = { corner_of_divinity: "A_Corner_of_Divinity", stars_fall: "Fallen_Starlight", starfire: "Sparks_of_Moth_Fire",
   moth_fire: "When_Sparks_Set_the_Prairie_Ablaze", void_gap: "Space_Rift", residence_of_stars: "Residence_of_Stars", genealogy: "Pedigree_of_Gods" };
@@ -12,11 +13,20 @@ const safeKo = s => typeof s === "string" && /[가-힣]/u.test(s) && !/\p{Script
 const items = [...getCatalogItems("slates"), ...SS14_CURRENT_DATABASE.identities.filter(i=>i.categoryId==="slates")];
 const entries = SS14_COMPONENTS.pages["https://tlidb.com/en/Divinity_Slate"].parsed.entries;
 const koEntries = SS14_COMPONENTS.pages["https://tlidb.com/ko/Divinity_Slate"].parsed.entries;
+const entryKey = (section,id) => section + ':' + id;
+const itemById = new Map(items.map(item => [item.id, item]));
+const entryByKey = new Map(entries.map(entry => [entryKey(entry.section,entry.id), entry]));
+const koreanByKey = new Map(koEntries.map(entry => [entryKey(entry.section,entry.id), entry]));
+const talentPage = (locale, slug) => SS14_COMPONENTS.pages[`https://tlidb.com/${locale}/${slug}`];
+export const regularSlateFamilies = Object.entries(TALENT_SUBTREE_SLUGS_BY_GOD).map(([id, subtrees]) => ({
+  id, name:safeKo(talentPage('ko',id)?.parsed.name),
+  affiliations:[id,...subtrees].map(slug => talentPage('en',slug)?.parsed.name).filter(Boolean)
+}));
 export function seasonSlateEntry(id) {
   if (id?.startsWith('slates-ss14-nether-')) return netherTalent(id) ?? null;
-  const item = items.find(i => i.id === id);
+  const item = itemById.get(id);
   const m = item?.tlidbText?.en?.sourceRecordKey?.match(/^data-id:(\d+):(regular|core)$/u);
-  return m ? entries.find(e => e.id === m[1] && e.section === m[2]) : null;
+  return m ? entryByKey.get(entryKey(m[2],m[1])) : null;
 }
 const category = e => ["Micro Talent", "Medium Talent", "Legendary Medium Talent", "Ultimate Nether King Talent Node"].includes(e?.typeLabel) ? e.typeLabel : e?.section === "core" ? "Core Talent" : null;
 const copyOptions = {
@@ -27,6 +37,10 @@ const selectedCopy = slate => slate.slateId === "starfire" ? slate.slotSelection
   : ["copy_left", "copy_right"].find(k => slate.slotSelectionsByKey?.[k]?.valueId === k);
 const selectionAllowed = (type, id) => copyOptions[type] ? copyOptions[type].includes(id) : allowed(type, seasonSlateEntry(id));
 function allowed(label, entry) {
+  if (label.startsWith('regular:')) {
+    const family = regularSlateFamilies.find(f => f.id === label.slice(8));
+    return !!family && family.affiliations.includes(entry?.affiliation) && allowed('Regular Talent',entry);
+  }
   const type = category(entry);
   if (label === "Regular Talent") return ["Micro Talent", "Medium Talent", "Legendary Medium Talent"].includes(type);
   if (label === "Micro Talent or Medium Talent") return ["Micro Talent", "Medium Talent"].includes(type);
@@ -42,7 +56,7 @@ export function seasonSlateOptions(label) {
   }
   const result = items.flatMap(item => {
     const entry = seasonSlateEntry(item.id);
-    const ko = netherTalent(entry?.id)?.ko ?? koEntries.find(e => e.id === entry?.id && e.section === entry?.section);
+    const ko = netherTalent(entry?.id)?.ko ?? (entry && koreanByKey.get(entryKey(entry.section,entry.id)));
     return entry && allowed(label, entry) && ko ? [{ id: item.id, name: safeKo(ko.name), detail: safeKo(ko.detail) }] : [];
   });
   if (label === 'Ultimate Nether King Talent Node') for (const option of netherTalentOptions(label)) {
@@ -61,7 +75,7 @@ export function seasonSlateTemplates(build, { requireBindings = true } = {}) {
         const slot = `slot_${index + 1}`, value = slate.slotSelectionsByKey?.[slot]?.valueId ?? "";
         // Older hand-edited boards used this generic container for core talents.
         // Keep those choices editable; native imports start empty and require regular talents.
-        const type = category(seasonSlateEntry(value)) === "Core Talent" ? "Core Talent" : "Regular Talent";
+        const type = slate.regularFamily ? 'regular:' + slate.regularFamily : category(seasonSlateEntry(value)) === "Core Talent" ? "Core Talent" : "Regular Talent";
         return { key: `${slate.instanceId}|${slot}`, instanceId: slate.instanceId, slot, type, index, value };
       });
       const blockers = Object.entries(slate.slotSelectionsByKey ?? {}).some(([key, v]) => !controls.some(c => c.slot === key && selectionAllowed(c.type, v.valueId)))

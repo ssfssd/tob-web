@@ -132,6 +132,7 @@ export function editNativeSeasonSelection(target, edit) {
     const spirit=seasonSpiritOptions().find(s=>s.id===slot?.spirit?.spiritId);
     if(!spirit?.page.parsed.rings.some(r=>r.slotId===edit.key))throw new Error('정령의 운명 장착 칸을 확인하세요.');
     if(edit.value&&!seasonDestinyOptions(edit.key).some(o=>o.id===edit.value))throw new Error('이 칸에 장착할 SS14 운명을 선택하세요.');
+    if((slot.rings?.[edit.key]?.installedDestiny?.destinyId??'')===edit.value)return true;
     slot.rings??={};slot.rings[edit.key]??={};
     if(edit.value)slot.rings[edit.key].installedDestiny={instanceId:`ss14-destiny-${index}-${edit.key}`,destinyId:edit.value};
     else delete slot.rings[edit.key].installedDestiny;
@@ -143,6 +144,8 @@ export function editNativeSeasonSelection(target, edit) {
     if (edit.kind === "spirit-selection") {
       const option = seasonSpiritOptions().find(row => row.id === edit.value);
       if (edit.value && !option) throw new Error("SS14 정령을 선택하세요.");
+      if((target.pact.slots[index]?.spirit?.spiritId??'')===edit.value)return true;
+      for(const key of Object.keys(target.ss14Inputs.destinyRolls??{}))if(key.startsWith(`pact.slots.${index}.rings.`))delete target.ss14Inputs.destinyRolls[key];
       target.pact.slots[index] = { spirit: option ? { spiritId: option.id, level: option.levels[0] } : null, rings: {} };
     } else {
       const slot = target.pact.slots[index];

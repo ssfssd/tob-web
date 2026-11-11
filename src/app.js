@@ -14595,6 +14595,9 @@ window.addEventListener("keydown", (event) => {
 
 state.advisorWorkspace = latestSeasonWorkspace(state.advisorSeasonWorkspaces.documents, state.build);
 render();
+const openLinkedBuild = () => seasonPlanner.followShareLink(window.location, window.history);
+window.addEventListener("hashchange", openLinkedBuild);
+void openLinkedBuild();
 function initializeLegacyRuntime() {
 void recoverInventory();
 if (buildHasHanCustomAffixText()) {
