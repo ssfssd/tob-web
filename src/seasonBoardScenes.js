@@ -47,8 +47,7 @@ export function renderPactScene(s,{button,esc,select,icon}) {
     const card=p=>button(`${icon(p.id)}<span>${esc(p.name)}</span>`,'pact-roster',
       `data-spirit-name="${esc(p.name)}"${s.pactRoster.query&&!p.name.includes(s.pactRoster.query)?' hidden':''} data-index="${i}" data-id="${esc(p.id)}" aria-pressed="${p.id===candidate?.id}"`);
     return `<div class="ss-board-scene pact-roster"><div><h3>정령 목록</h3><div class="pact-cards" role="group" aria-label="정령 목록"><label>정령 검색<input type="search" data-spirit-filter value="${esc(s.pactRoster.query??'')}" aria-label="정령 이름 검색"></label>${options.map(card).join('')}</div></div>
-      <div class="pact-portrait" aria-hidden="true">${candidate?icon(candidate.id):''}</div>
-      <aside class="board-inspector"><header><h3>${esc(candidate?.name??'정령 선택')}</h3></header>
+      <aside class="board-inspector"><header>${candidate?icon(candidate.id):''}<h3>${esc(candidate?.name??'정령 선택')}</h3></header>
       ${candidate?`<p>${esc(candidate.korean.parsed.levelAffixes.find(r=>r.level===(candidate.id===o?.id?slot.spirit.level:candidate.levels[0]))?.affixes.join('\n'))}</p>${button('정령 '+(i+1)+'에 장착','pact-roster-apply')}`:''}
       ${button('계약판으로','pact-inspect',`data-index="${i}"`)}</aside></div>`;
   }

@@ -1,6 +1,7 @@
 .ss-board-scene {container-type:inline-size; display:grid; gap:10px; min-width:0; align-items:start; padding:12px; color:#f0ede5; border:1px solid #5b5957}
-.tree-scene {grid-template-columns:minmax(74px,.24fr) minmax(0,1fr);background:linear-gradient(100deg,#14171bd9,#251f19aa 66%,#241c11ac),url("../assets/ingame-ui/game/talent-background.png") center/cover}
-.tree-rail {display:grid;gap:5px;align-self:stretch;align-content:start;padding-block:8px}
+.tree-scene {grid-template-columns:minmax(0,1fr);background:#211f20}
+.tree-rail {grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px}
+.tree-rail button {flex:1 1 100px}
 .season-native .tree-rail button {display:flex;align-items:center;gap:5px;min-width:0;padding:6px;text-align:left;border:1px solid #63533d;border-radius:1px;background:#211d19e8;color:#ece1c6;line-height:1.25}
 .tree-rail img {width:28px;height:30px;object-fit:contain}.tree-rail span {overflow-wrap:anywhere}.tree-rail small {display:block;color:#c4b49c}
 .season-native .tree-rail [aria-pressed=true],.season-native .tree-point[aria-pressed=true] {border-color:#ffdf9d;box-shadow:0 0 5px #f1cc76}
@@ -17,11 +18,11 @@
 .season-native :is(.tree-core,.tree-extra) .tree-point {padding:3px 5px;display:flex;align-items:center;gap:4px;background:#27231e;border:1px solid #655a47;font-size:12px}
 .tree-core img,.tree-extra img {width:23px;height:23px;object-fit:contain}
 .board-inspector {min-width:0;padding:12px;border:1px solid #736d62;background:#20212c url("../assets/ingame-ui/game/tooltip-background.png") center/100% 100%;overflow-wrap:anywhere}
-.tree-scene .board-inspector {grid-column:2}.board-inspector header {display:flex;align-items:center;gap:7px;padding:5px 8px;background:#6b4531 url("../assets/ingame-ui/game/tooltip-orange.png") center/100% 100%}
+.board-inspector header {display:flex;align-items:center;gap:7px;padding:5px 8px;background:#6b4531 url("../assets/ingame-ui/game/tooltip-orange.png") center/100% 100%}
 .board-inspector header img {width:32px;height:32px;object-fit:contain}.board-inspector h3,.board-inspector h4 {margin:0;font-size:15px}.board-inspector p {white-space:pre-line;margin:9px 0;color:#e3e5e9}.board-inspector label {display:grid;min-width:0;margin-top:8px}
 .ss-board-scene :is(select,input) {min-width:0;max-width:100%;background:#182128;color:#fff}.board-inspector :is(select,input){width:100%;box-sizing:border-box}
-.points-stepper {display:flex;align-items:center;gap:12px;margin-top:8px}.season-native .points-stepper button {min-width:38px;font-size:18px}.board-empty {padding:36px 12px;text-align:center}
-.contract-scene {grid-template-columns:minmax(0,1.7fr) minmax(170px,.8fr);align-items:center;background:linear-gradient(115deg,#20487955,#12306377),url("../assets/ingame-ui/game/pact-background.png") center/cover}
+.points-stepper {display:flex;align-items:center;gap:12px;margin-top:8px}.season-native .points-stepper button {min-width:38px;font-size:18px}.board-empty {margin:4px 0}
+.contract-scene {grid-template-columns:minmax(0,1fr) minmax(200px,1fr);background:#19252d}
 .contract-stage {min-width:0}.contract-wheel {position:relative;aspect-ratio:5/4;width:100%;background:url("../assets/ingame-ui/game/pact-wheel.png") center/28% auto no-repeat}
 .pact-board-actions {grid-column:1/-1;display:flex;align-items:start;gap:8px;flex-wrap:wrap}
 .season-native .pact-board-actions details {margin:0;flex:1 1 130px}
@@ -32,17 +33,18 @@
 .season-native .contract-wheel .pact-hub {width:9%;background:#152032;border-width:2px;z-index:1}.contract-wheel img {width:100%;height:100%;border-radius:50%;object-fit:contain}
 .season-native .contract-wheel .pact-gem.medium {width:6.4%}.contract-wheel .pact-gem i {width:57%;aspect-ratio:1;background:linear-gradient(135deg,#fff1a0,#b95e19 65%,#633716);transform:rotate(45deg);border:1px solid #f6c971}
 .season-native .contract-wheel span.pact-gem {opacity:.4;background:#47719d}.season-native .contract-wheel [aria-pressed=true] {outline:2px solid #fff1ba;outline-offset:2px;box-shadow:0 0 8px #ffda72}
-.native-slate-editor {display:flex;flex-direction:column;gap:8px;padding:12px;background:linear-gradient(110deg,#191a20ef,#212026eb),url("../assets/ingame-ui/game/common-background.png") center/cover;border:1px solid #5d5556}
+.native-slate-editor {display:flex;flex-direction:column;gap:8px;padding:8px;background:#201f24;border:1px solid #5d5556}
 .slate-editor-heading {margin:0}.slate-inventory {order:2}.slate-inventory summary {cursor:pointer;color:#f4d491;padding:8px;font-weight:600}.slate-inventory .slate-palette {margin:4px 0}
-.slate-editor-columns {order:1}.slate-board-panel {background:transparent;border:0;padding:8px}.slate-detail-panel {background:#1c1c22;border-color:#554e4e}
+.slate-editor-columns {order:1;gap:8px}.slate-board-panel {background:transparent;border:0;padding:4px;position:static}.slate-detail-panel {background:#1c1c22;border-color:#554e4e}
+@container (min-width:620px) {.slate-editor-columns {grid-template-columns:minmax(230px,310px) minmax(0,1fr)}}
+.slate-option-picker>header {flex-wrap:wrap}.slate-option-picker>header label {min-width:min(160px,100%)}
 .slate-interactive-board {gap:0;background:none}.season-native .slate-board-cell {border-radius:0;background:#28262a;border:1px solid #574749}
 .season-native .slate-board-cell.is-filled {border-width:var(--edges);border-color:var(--slate-color);background:linear-gradient(135deg,transparent 25%,#ffffff20 49%,transparent 80%),color-mix(in srgb,var(--slate-color) 68%,#172231)}
 .season-native .slate-board-cell.is-selected {border-color:#ffe2a0;box-shadow:none}.season-native .slate-board-cell.can-place {border:1px dashed #c2a367;background-color:#3a3731}
 .season-native .slate-board-cell[data-ghost=valid] {background:#547e79;box-shadow:inset 0 0 0 2px #9ef1d5}.season-native .slate-board-cell[data-ghost=invalid] {background:#774749;box-shadow:inset 0 0 0 2px #f39f95}
-@container (min-width:760px) {.tree-scene>.board-inspector {grid-column:auto}.tree-scene .board-picker {margin-bottom:10px}}
-@media(min-width:1320px) {.tree-scene {grid-template-columns:minmax(92px,.25fr) minmax(0,1fr) minmax(158px,.44fr)}.tree-scene .board-inspector {grid-column:auto}}
-@media(max-width:900px) {.contract-scene {grid-template-columns:minmax(0,1fr)}.contract-wheel {max-width:540px;margin:auto}.tree-scene {gap:7px;padding:8px}}
-@media(max-width:600px) {.tree-scene {grid-template-columns:minmax(0,1fr)}.tree-rail {grid-template-columns:repeat(3,minmax(0,1fr));padding:0}.tree-rail img {width:20px}.tree-scene .board-inspector {grid-column:1}.ss-board-scene {padding:7px}.tree-core .tree-point span {font-size:11px}.native-slate-editor {padding:6px}.slate-palette {max-width:100%}}
+@media(min-width:1000px) {.tree-scene:has(.board-inspector) {grid-template-columns:minmax(0,1.8fr) minmax(165px,1fr)}}
+@media(max-width:900px) {.contract-scene {grid-template-columns:minmax(0,1fr)}.contract-wheel {max-width:420px;margin:auto}.tree-scene {gap:7px;padding:8px}}
+@media(max-width:600px) {.tree-rail img {width:20px}.ss-board-scene {padding:7px}.tree-core .tree-point span {font-size:11px}.native-slate-editor {padding:6px}.slate-palette {max-width:100%}}
 
 .slate-add-tools {display:flex;align-items:start;gap:8px;flex-wrap:wrap}
 .slate-add-tools .regular-slate-add,.build-share-panel button {border-color:#b49460;background:#40392c;color:#fff1cc;font-weight:700}
@@ -58,14 +60,13 @@
 .pact-extra-list button {display:grid;min-width:0;text-align:start;gap:3px}
 .pact-extra-list button[aria-pressed=true] {outline:2px solid #ebc47e}
 .pact-extra-list small {color:#c5d4df}
-.pact-roster {grid-template-columns:minmax(174px,1fr) minmax(110px,.8fr) minmax(175px,.9fr);align-items:start}
-.pact-portrait {display:grid;place-items:center;align-self:center}
-.pact-portrait img {width:min(100%,145px);height:auto;object-fit:contain}
+.pact-roster {grid-template-columns:minmax(0,1.2fr) minmax(160px,1fr);background:#19252d}
+.pact-cards label {grid-column:1/-1;min-width:0}
+.season-native .pact-cards button[hidden] {display:none}
 .pact-cards {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;max-height:59vh;overflow:auto}
 .season-native .pact-cards button {display:grid;justify-items:center;min-width:0;background:#192736;line-height:1.3}
 .pact-cards img {width:50px;height:55px;object-fit:contain}
 .pact-cards button[aria-pressed=true] {outline:2px solid #e7c686;outline-offset:-2px}
-@media(max-width:980px){.pact-roster {grid-template-columns:minmax(0,1.2fr) minmax(160px,1fr)}.pact-portrait {display:none}}
 @media(max-width:600px){.pact-roster {grid-template-columns:minmax(0,1fr)}.pact-cards {max-height:42vh}}
 .pact-rolls small {color:#c6d7de;font-variant-numeric:tabular-nums}
 .contract-scene .board-inspector h4 {margin-top:8px}
@@ -76,10 +77,6 @@
 .build-share-panel p {grid-column:1/-1}
 .build-share-panel input {width:100%;box-sizing:border-box}
 .build-share-panel [role=status]:empty {display:none}
-@media(max-width:900px) {
-  .contract-scene .contract-stage {grid-row:2}
-  .contract-scene .board-inspector {grid-row:3}
-}
 @container(max-width:619px) {
   .is-placing .slate-detail-panel {grid-row:1}
 }

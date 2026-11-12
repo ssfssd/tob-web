@@ -55,8 +55,7 @@ function traitEmblem(heroId, trait, level) {
 function heroPanel(s) {
   const b = s.document.targetBuild, id = b.hero?.branchId, hero = seasonHeroOptions().find(h => h.id === id);
   const art = getIngameHeroArt(id), choices = seasonHeroTraitOptions(id);
-  const portraits = art ? `<img class="hunter-portrait" src="${esc(art)}" alt="" />` : !hero
-    ? `<div class="hunter-preview" aria-hidden="true">${["rehan_1", "thea_1", "carino_1"].map(name => `<img src="./assets/ingame-heroes/${name}.png" alt="">`).join("")}</div>` : "";
+  const portraits = art ? `<img class="hunter-portrait" src="${esc(art)}" alt="">` : "";
   return `<div class="hunter-scene"><div class="hunter-showcase">${portraits}<div class="hunter-caption"><h2>${esc(hero?.name ?? "히어로 선택")}</h2>${hero ? `<p>${esc(hero.title)}</p>` : ""}
     <div class="hunter-controls">${field("레벨", "hero-level", b.heroLevel ?? 90, 'min="1" max="100" step="1" aria-label="히어로 레벨"')}${button(hero ? "히어로 변경" : "히어로 선택", "edit-slot", 'data-type="hero"')}</div></div></div>
     <div class="hunter-path"><h2>히어로 특성</h2>${[1, 45, 60, 75].map((level, i) => {
