@@ -24,6 +24,7 @@ import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
 import { validSeasonDpsInputs, editSeasonDpsInput } from "./seasonDps.js";
 import { trainingDummyLevels } from "./seasonTrainingDummy.js";
+import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
 import { applyShelf } from './seasonShelf.js';
@@ -89,7 +90,7 @@ function validDocument(document) {
   if(target.ss14Inputs.equippedTraitLevels!==undefined && (!Number.isInteger(target.ss14Inputs.equippedTraitLevels)||target.ss14Inputs.equippedTraitLevels<0||target.ss14Inputs.equippedTraitLevels>7))return false;
   if (!validTheaInputs(target.ss14Inputs)) return false;
   if (!validSeasonSlateSelections(target)) return false;
-  if (!validSeasonMemoryBases(target)) return false;
+  if (!validSeasonMemoryBases(target) || !((target.hero?.memories ?? []).every(validMemoryQuality))) return false;
   if (!validSeasonMemoryRolls(target)) return false;
   if (target.ss14Inputs.extensionInputs !== undefined && !validSeasonExtensionInputs(target, projectSeasonComponents(target).rows.flatMap((r) => r.extensionControls ?? []))) return false;
   if (target.ss14Inputs.destinyRolls !== undefined && !validSeasonDestinyRolls(target, projectSeasonComponents(target).rows.flatMap((r) => r.destinyRollControls ?? []))) return false;

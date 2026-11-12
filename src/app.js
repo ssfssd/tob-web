@@ -22,6 +22,7 @@ import { getExactBarrierBurstMechanicLocale } from "./barrierBurstMechanics.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
 import { getIngameHeroArt } from "./ingameHeroArt.js";
 import { createSeasonPlanner } from "./seasonPlanner.js";
+import { watchWebRelease } from './webRelease.js';
 import { pactPointStyle, renderPactConnections } from "./ingameLayout.js";
 import { getGearLocaleText, renderGearLocaleText } from "./gearLocale.js";
 import { loadGearLocaleRegistry } from "./activeGearLocaleData.js";
@@ -14594,6 +14595,32 @@ window.addEventListener("keydown", (event) => {
 });
 
 state.advisorWorkspace = latestSeasonWorkspace(state.advisorSeasonWorkspaces.documents, state.build);
+const releaseBar = document.querySelector('[data-current-release]');
+const resumeKey = 'tob.web-release.resume';
+if (releaseBar?.dataset?.currentRelease) {
+  try {
+    const resume = JSON.parse(sessionStorage.getItem(resumeKey));
+    if (resume && !location.hash) {
+      if (resume.legacy) { seasonPlanner.active = false; initializeLegacyRuntime(); }
+      else {
+        seasonPlanner.open(resume.id);
+        if (['hero','gear','skills','talents','divinity','pact','combat'].includes(resume.section)) seasonPlanner.state.section = resume.section;
+      }
+    }
+    sessionStorage.removeItem(resumeKey);
+  } catch (error) { seasonPlanner.state.error = error.message; }
+  watchWebRelease(releaseBar, () => {
+    if (location.hash.startsWith('#build=')) throw new Error('공유 빌드를 연 뒤 업데이트하세요.');
+    if (seasonPlanner.active) {
+      seasonPlanner.save();
+      sessionStorage.setItem(resumeKey, JSON.stringify({id:seasonPlanner.state.document.id, section:seasonPlanner.state.section}));
+    } else {
+      if (state.advisorWorkspaceDirty || state.advisorWorkspaceInputStale || document.querySelector('[role="dialog"],dialog[open]'))
+        throw new Error('열린 편집을 저장한 뒤 업데이트하세요.');
+      sessionStorage.setItem(resumeKey, JSON.stringify({legacy:true}));
+    }
+  });
+}
 render();
 const openLinkedBuild = () => seasonPlanner.followShareLink(window.location, window.history);
 window.addEventListener("hashchange", openLinkedBuild);

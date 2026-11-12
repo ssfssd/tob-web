@@ -7,6 +7,7 @@ import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { seasonHeroOptions, seasonHeroTraitOptions, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlotCount, buildTraitSlots } from "./seasonHeroSelection.js";
 import { seasonMemoryOptions, seasonTalentBoards, seasonTalentNodes, seasonSpiritOptions } from "./seasonNativeSelections.js";
+import { memoryQualities, memoryQuality } from './seasonMemoryQuality.js';
 import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { seasonSupportOptions } from "./seasonSupport.js";
 import { seasonDestinyOptions } from './seasonDestiny.js';
@@ -238,7 +239,22 @@ function slotEditor(s) {
   }
   if (type === "memory") {
     const options = seasonMemoryOptions(index), memory = b.hero.memories[index];
-    return `${select(options.name, "native-memory", "memory-selection", memory?.baseAttributeId, options.bases, `data-slot="${index}"`)}${memory ? `${field("강화 단계", "memory-enhancement", memory.enhancement, `data-slot="${index}" min="1" max="50" step="1"`)}<details data-role="native-memory-affixes"><summary>고정·랜덤 옵션 선택</summary>${options.affixes.map(o => `<label>${esc(o.name)}<select data-season-edit="memory-affix" data-slot="${index}" data-key="${o.id}"><option value="0">선택 안 함</option><option value="1"${memory.affixRolls?.[o.groupId]?.tierId === o.tierId ? " selected" : ""}>선택</option></select></label>`).join("")}</details>${memoryControls(s.report, {})}` : ""}`;
+    const base = select(options.name, "native-memory", "memory-selection", memory?.baseAttributeId, options.bases, `data-slot="${index}"`);
+    if (!memory) return base;
+    const quality = memoryQuality(memory.ss14Quality);
+    const tiers = options.affixGroups.map(({id}) => {
+      const choices = options.affixes.filter(o=>o.groupId === id);
+      if (!choices.length) return '';
+      const first = choices[0];
+      const label = first.name.replace(/\s*[+(–\d].*$/u, '').trim() || first.name;
+      return select((first.kind === 'fixed' ? '고유' : '랜덤')+' · '+label, 'tier-'+id, 'memory-tier',
+        memory.affixRolls?.[id]?.tierId, choices.map(o=>({id:o.tierId,name:`T${o.tier} · ${o.name}`})), `data-slot="${index}" data-key="${esc(id)}"`);
+    }).join('');
+    return base + select('추억 희귀도','native-memory-quality','memory-quality',memory.ss14Quality,
+      memoryQualities.map(q=>({id:q.id,name:q.name+' · 최대 강화 '+q.maxLevel})), `data-slot="${index}"`)
+      + field("강화 단계", "memory-enhancement", memory.enhancement, `data-slot="${index}" min="1" max="${quality?.maxLevel ?? 50}" step="1"`)
+      + `<details data-role="native-memory-affixes"><summary>고유·랜덤 옵션 티어</summary>${tiers}</details>`
+      + memoryControls(s.report, {}, index);
   }
   if (type === "skills" || type === "gear") {
     const isGear = type === "gear", row = index < 5 ? b.skills.active[index] : b.skills.passive[index - 5];

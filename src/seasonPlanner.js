@@ -23,7 +23,7 @@ const stringKinds = new Set(["name", "hero-selection", "hero-choice", "skill-sel
 export function readSeasonPlannerEdit(input) {
   const d = input.dataset, kind = d.seasonEdit;
   return { kind, rowIndex: Number(d.row), supportIndex: Number(d.support), slotIndex: Number(d.slot), key: d.key ?? d.choice ?? d.roll,
-    value: stringKinds.has(kind) || kind==='bing-event-source' ? input.value : String(input.value).trim() === "" ? "" : Number(input.value) };
+    value: stringKinds.has(kind) || kind==='bing-event-source' || kind==='memory-tier' ? input.value : String(input.value).trim() === "" ? "" : Number(input.value) };
 }
 const editKey = e => JSON.stringify([e.kind, e.rowIndex, e.supportIndex, e.slotIndex, e.key]);
 

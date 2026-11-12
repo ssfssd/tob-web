@@ -8,6 +8,7 @@ import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
 import { seasonDestinyOptions, pactNodeActive, validFateLayout, pactAllocationKeys } from './seasonDestiny.js';
 import { EMPTY_TRAIT_MEMORY } from "./seasonHeroSelection.js";
+import { memoryQuality } from './seasonMemoryQuality.js';
 
 const ko = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
 const verified = page => page?.season === "SS14" && page.sourceSeasonEvidence?.actualSeason === 14 && page.sourceSeasonEvidence.verificationComplete;
@@ -16,9 +17,9 @@ export function seasonMemoryOptions(index) {
   if (!type) return null;
   const row = ref => ref && SS14_MEMORIES.pages[`ko/${ref.slug}`]?.rows.find(r => r.id === ref.modifierId);
   return { ...type, name: ko(SS14_MEMORIES.pages[`ko/${type.sourcePath}`]?.name),
-    bases: type.baseGroups.map(group => ({ id: group.id, name: ko(row(group.rows[0])?.text) })),
+    bases: type.baseGroups.map(group => ({ id: group.id, name: ko(row(group.rows[0])?.text).replace(/\s*\+[\d,.]+\s*%?$/u, '').trim() })),
     affixes: type.affixGroups.flatMap(group => group.tiers.filter(t => t.ref && row(t.ref)).map(t => ({
-      id: `${group.id}|${t.tierId}`, groupId: group.id, tierId: t.tierId, kind: group.kind, name: ko(row(t.ref).text),
+      id: `${group.id}|${t.tierId}`, groupId: group.id, tierId: t.tierId, tier: row(t.ref).tier, kind: group.kind, name: ko(row(t.ref).text),
     }))) };
 }
 export function seasonTalentBoards() {
@@ -74,7 +75,7 @@ export function editNativeSeasonSelection(target, edit) {
     if (!slot?.skillId || !Number.isInteger(edit.value) || edit.value < 0 || edit.value > 5) throw new Error("보조 칸을 0~5개로 선택하세요.");
     if (slot.supports?.slice(edit.value).some(Boolean)) throw new Error("닫을 칸의 보조 스킬을 먼저 해제하세요.");
     slot.unlockedSupportCount = edit.value; capture(target, "skills");
-  } else if (["memory-selection", "memory-affix", "memory-enhancement"].includes(edit.kind)) {
+  } else if (["memory-selection", "memory-affix", "memory-enhancement", "memory-quality", "memory-tier"].includes(edit.kind)) {
     const options = Number.isInteger(index) && index >= 0 && index < 3 && seasonMemoryOptions(index);
     if (!options) throw new Error("추억 칸을 확인하세요.");
     target.ss14Inputs.heroMemoryMode = "configured-v1";
@@ -95,15 +96,30 @@ export function editNativeSeasonSelection(target, edit) {
       }
     } else {
       if (!memory) throw new Error("추억 기본 옵션을 먼저 선택하세요.");
+      if (edit.kind === "memory-quality") {
+        const quality = memoryQuality(edit.value);
+        if (edit.value !== "" && !quality) throw new Error("추억 희귀도를 확인하세요.");
+        if (quality && (memory.enhancement > quality.maxLevel || memory.randomAffixIds.length > quality.randomLimit))
+          throw new Error(`${quality.name} 추억은 강화 ${quality.maxLevel}단계, 랜덤 옵션 ${quality.randomLimit}개까지입니다. 현재 구성을 먼저 조정하세요.`);
+        if (quality) memory.ss14Quality = quality.id; else delete memory.ss14Quality;
+        capture(target, "hero");
+        return true;
+      }
       if (edit.kind === "memory-enhancement") {
-        if (!Number.isInteger(edit.value) || edit.value < 1 || edit.value > 50) throw new Error("추억 강화 단계를 확인하세요.");
+        const maxLevel = memoryQuality(memory.ss14Quality)?.maxLevel ?? 50;
+        if (!Number.isInteger(edit.value) || edit.value < 1 || edit.value > maxLevel) throw new Error(`추억 강화는 1~${maxLevel}단계에서 선택하세요.`);
         memory.enhancement = edit.value;
       } else {
+        if (edit.kind === 'memory-tier') {
+          const tierId = edit.value || memory.affixRolls?.[edit.key]?.tierId;
+          edit = {...edit, kind:'memory-affix', key:edit.key+'|'+tierId, value:edit.value ? 1 : 0};
+        }
         const option = options.affixes.find(row => row.id === edit.key);
         if (!option || ![0, 1].includes(edit.value)) throw new Error("SS14 추억 옵션을 선택하세요.");
         const key = option.kind === "fixed" ? "fixedAffixIds" : "randomAffixIds";
         const selected = memory[key].filter(id => id !== option.groupId);
-        if (edit.value && selected.length >= 2) throw new Error("종류별 추억 옵션은 두 개까지 선택하세요.");
+          const limit = option.kind === 'random' ? memoryQuality(memory.ss14Quality)?.randomLimit ?? 2 : 2;
+          if (edit.value && selected.length >= limit) throw new Error(`이 추억의 ${option.kind === 'random' ? '랜덤' : '고유'} 옵션은 ${limit}개까지 선택할 수 있습니다.`);
         memory[key] = edit.value ? [...selected, option.groupId] : selected;
         if (edit.value) memory.affixRolls[option.groupId] = { tierId: option.tierId, rolls: {} };
         else delete memory.affixRolls[option.groupId];
