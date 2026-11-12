@@ -270,7 +270,7 @@ function slotEditor(s) {
       const calculation = s.report.components.filter(component => component.category === "supports")
         .flatMap(component => component.calculations ?? []).find(entry => entry.rowIndex === index && entry.supportIndex === c);
       return `${actions}<fieldset><legend>보조 ${c + 1}</legend>${field(`보조 ${c + 1} 레벨`, "support-level", row.supports[c].level, `data-row="${index}" data-support="${c}" min="1" max="100" step="1"`)}
-        ${calculation?.tiers?.length ? `<label>옵션 등급<select data-season-edit="support-tier" data-row="${index}" data-support="${c}">${calculation.tiers.map(t => `<option value="${t.tier}"${t.tier === calculation.tier ? " selected" : ""}>T${t.tier}</option>`).join("")}</select></label>` : ""}
+        ${calculation?.tiers?.length ? `<label>옵션 등급<select data-season-edit="support-tier" data-row="${index}" data-support="${c}">${calculation.tier == null ? '<option value="" selected disabled>등급 선택</option>' : ""}${calculation.tiers.map(t => `<option value="${t.tier}"${t.tier === calculation.tier ? " selected" : ""}>T${t.tier}</option>`).join("")}</select></label>` : ""}
         ${(calculation?.controls ?? []).map((control, n) => field(`보조 옵션 ${n + 1} (${control.min}~${control.max})`, "support-roll", control.value,
           `data-row="${index}" data-support="${c}" data-key="${esc(control.key)}" min="${control.min}" max="${control.max}" step="any"`)).join("")}
         ${(calculation?.conditionControls ?? []).map(control => `${control.sourceText?`<details><summary>조건 원문</summary><p>${esc(control.sourceText)}</p></details>`:''}${field(control.label, "support-condition", control.value,

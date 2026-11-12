@@ -1,5 +1,6 @@
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { calculateSeasonSurvival } from "./seasonSurvival.js";
+import { validSeasonGearEffects } from "./seasonGearEffects.js";
 
 export const SEASON_CHARACTER_INPUTS = {
   strength: { label: "적용 전 힘", min: 0, max: 100000 },
@@ -64,8 +65,7 @@ export function calculateSeasonCharacter(build, components, projection, { data =
       if (gear.status !== "mapped") blockers.push("선택 장비의 미해석 효과는 제외하고, 원문에 연결된 유효한 무조건부 수치만 자원·방어 참고값에 반영합니다.");
       // Rejected receipts/crafted states have no rawEffects. A partial card may
       // still contain independent exact base stats; never carry invalid rolls.
-      const raw = (gear.rawEffects ?? []).filter((e) => finite(e.value) && !e.condition && !e.conditionRequirements && !e.per && !e.target
-        && (!e.roll || finite(e.roll.min) && finite(e.roll.max) && e.value >= e.roll.min && e.value <= e.roll.max));
+      const raw = validSeasonGearEffects(gear);
       for (const stat of Object.keys(gearLocal)) {
         const local = value(`gear_${stat === "max_energy_shield" ? "energy_shield" : stat}`, 0, raw);
         gearLocal[stat] = finite(gearLocal[stat]) && finite(local) ? gearLocal[stat] + local : null;

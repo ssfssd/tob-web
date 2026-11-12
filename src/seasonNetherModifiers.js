@@ -20,7 +20,7 @@ const push=(row,stat,value,operation='add_percent',sourceText=row.detail)=>row.e
 const fail=(row,reason)=>{row.blockers.push({reason});row.status='partial';};
 const resolveBuff=(slot,card)=>resolveSeasonSkillLevel({id:slot.skillId,categoryId:'skills',tlidbText:{en:{...card,sourcePageVersion:'SS14',sourceFieldStatus:{detail:'exact'}}}},slot.level??20);
 
-export function applyNetherModifiers(rows,build,parseLines) {
+export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation = 0) {
   const originals=rows.flatMap(r=>r.effects),sources=stat=>rows.filter(r=>r.effects.some(e=>e.stat===stat));
   const amount=stat=>netherSum(originals,stat);
   const hasNether=rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
@@ -78,7 +78,7 @@ export function applyNetherModifiers(rows,build,parseLines) {
     if(fear&&card.sourceRecordKey==='Precise_Fearless')push(row,'double_damage_chance',5*multiplier);
     const sealed=Number(resolvedText.match(/^Sealed Mana\n([\d.]+)%/u)?.[1]);
     if(aura&&Number.isFinite(sealed)&&netherRule('Sealed_Mana_Compensation').body.includes('Initial Sealed Mana/(1+ Sealed Mana Compensation)')) {
-      const compensation=amount('sealed_mana_compensation')+supportAmount('supported-skill-sealed-mana-compensation');
+      const compensation=gearSealCompensation+amount('sealed_mana_compensation')+supportAmount('supported-skill-sealed-mana-compensation');
       const cost=supports.filter(e=>e.stat==='mana-cost-multiplier').reduce((n,e)=>n*e.value/100,1);
       if(compensation<=-100||cost<0)fail(row,'봉인 MP 보상·소모 배율 범위를 확인하세요.');
       else push(row,'sealed_mana_percent',sealed*cost/(1+compensation/100),'add');

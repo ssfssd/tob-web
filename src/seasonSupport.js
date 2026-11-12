@@ -75,8 +75,16 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
     if (binding?.tier !== undefined) {
       const chosen = record.supportTiers?.find(t => t.tier === binding.tier);
       const current = record.supportTiers?.filter(t => detail.includes(t.text));
-      if (!chosen || current?.length !== 1) return { ...base, blockers: ["보조 옵션 등급의 SS14 원문 연결을 확인하세요."] };
-      detail = detail.replace(current[0].text, chosen.text);
+      if (chosen && current?.length === 1) {
+        detail = detail.replace(current[0].text, chosen.text);
+      } else if (chosen && ["Activation_Medium_Perpetual_Motion", "Activation_Medium_Spell_Burst"].includes(record.sourceRecordKey)) {
+        const [recovery, duration, trigger, ...extra] = chosen.text.split("\n");
+        const suffix = `${trigger}\n<Cooldown Recovery Speed or Duration Bonus>`;
+        if (extra.length || !recovery?.endsWith("additional Cooldown Recovery Speed")
+          || !duration?.endsWith("additional Duration for the supported skill") || !trigger || !detail.endsWith(suffix))
+          return { ...base, blockers: ["보조 옵션 등급의 SS14 원문 연결을 확인하세요."] };
+        detail = detail.slice(0, -suffix.length) + chosen.text;
+      } else return { ...base, blockers: ["보조 옵션 등급의 SS14 원문 연결을 확인하세요."] };
     }
     selected = { ...selected, tlidbText: { ...selected.tlidbText, en: { ...selected.tlidbText.en, detail } } };
   }

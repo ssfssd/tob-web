@@ -26,7 +26,9 @@ import { inspectLogGear } from "./seasonLogGear.js";
 import { seasonGearLevelBonus, seasonEffectLevelBonus } from "./seasonSkillLevels.js";
 import { projectSeasonClockwork } from "./seasonClockwork.js";
 import { calculateSeasonNumericStats } from "./seasonNumericStats.js";
-import { normalizeSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
+import { normalizeSeasonGearEffects, validSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
+import { netherSum } from "./seasonNetherRemaining.js";
+import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { logMechanicStats } from "./seasonLogGearMechanics.js";
 import { resolveSeasonGearConditions } from './seasonGearConditions.js';
 
@@ -201,7 +203,8 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
       ? "SS14 항목 원문은 연결됐지만 선택 효과·레벨·배치의 계산 연결은 미완료입니다."
       : "선택 구성별 수치 내역과 별개로 이 참조의 전체 효과 연결은 미완료입니다."] };
   });
-  const componentProjection = projectSeasonComponents(build);
+  const gearEffects = components.filter(c => c.category === "gear").flatMap(c => c.calculations ?? []).flatMap(validSeasonGearEffects);
+  const componentProjection = projectSeasonComponents(build, { gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation") });
   for(const component of components.filter(c=>c.category==='skills')) {
     const buffs=componentProjection.rows.filter(r=>r.itemId===component.id&&Number.isInteger(r.buffSkill));
     if(!buffs.length)continue;
@@ -230,7 +233,13 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
   }
   const blessings = projectSeasonBlessings(build, componentProjection, components);
   componentProjection.effects.push(...blessings.effects);
-  componentProjection.globalBlockers = blessings.blockers;
+  componentProjection.globalBlockers = [...blessings.blockers];
+  const energy = getSkillEnergyUsage(inputs.normalized.skills);
+  if (energy.over > 0) {
+    const reason = `스킬 에너지 한도 초과 (${energy.used}/${energy.maximum}). 열린 보조 칸을 줄이세요.`;
+    componentProjection.globalBlockers.push(reason);
+    inputs.extra.push({ path: "skills.energyMax", label: "스킬 에너지", reason });
+  }
   projectSeasonClockwork(componentProjection, components);
   const blockers = [...inputs.extra, ...componentProjection.allocation.issues.map((row) => ({ ...row, label: "배치 검증" })), ...componentProjection.rows.filter((row) => row.blockers.length).map((row) => ({
     path: row.path, label: row.name, reason: [...new Set(row.blockers.map((entry) => entry.reason))].join(" · "),

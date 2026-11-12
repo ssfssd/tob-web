@@ -3,6 +3,7 @@ import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_SPIRIT_NAMES } from "./data/ss14SpiritNames.generated.js";
 import { getCatalogItems, findItemById } from "./catalog.js";
+import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
@@ -74,7 +75,14 @@ export function editNativeSeasonSelection(target, edit) {
     const slot = edit.rowIndex < 5 ? target.skills.active[edit.rowIndex] : target.skills.passive[edit.rowIndex - 5];
     if (!slot?.skillId || !Number.isInteger(edit.value) || edit.value < 0 || edit.value > 5) throw new Error("보조 칸을 0~5개로 선택하세요.");
     if (slot.supports?.slice(edit.value).some(Boolean)) throw new Error("닫을 칸의 보조 스킬을 먼저 해제하세요.");
-    slot.unlockedSupportCount = edit.value; capture(target, "skills");
+    const previous = slot.unlockedSupportCount;
+    slot.unlockedSupportCount = edit.value;
+    const energy = getSkillEnergyUsage(target.skills);
+    if (edit.value > (previous ?? 0) && energy.over > 0) {
+      slot.unlockedSupportCount = previous;
+      throw new Error(`스킬 에너지 한도 초과 (${energy.used}/${energy.maximum}).`);
+    }
+    capture(target, "skills");
   } else if (["memory-selection", "memory-affix", "memory-enhancement", "memory-quality", "memory-tier"].includes(edit.kind)) {
     const options = Number.isInteger(index) && index >= 0 && index < 3 && seasonMemoryOptions(index);
     if (!options) throw new Error("추억 칸을 확인하세요.");

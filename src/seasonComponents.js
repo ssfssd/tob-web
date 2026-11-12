@@ -243,7 +243,7 @@ function heroTier(trait, tier, locale) {
   return texts.join("\n");
 }
 
-export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14" } = {}) {
+export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0 } = {}) {
   const rows = seasonGearConditionRows(build);
   const resolvedSlates = resolveSeasonSlates(build);
   const netherTemplate = resolvedSlates.special.find(t=>t.nether);
@@ -379,7 +379,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
         if (copiedFrom) rows.at(-1).copiedFrom = copiedFrom;
         if(topology.active&&topology.type==='nether_judgment') {
           const row=rows.at(-1), ownBrand=topology.owner===instanceId && netherTalent(row.netherTalentId)?.typeLabel==='Ultimate Nether King Talent Node';
-          if(ownBrand || topology.line.includes(instanceId)) {
+          if(ownBrand || (!copiedFrom && topology.line.includes(instanceId))) {
             scaleNetherRow(row,ownBrand ? .7 : netherJudgmentScale(topology,slate.slateId));
             row.judgmentSource='https://torchlight.xd.com/ss14pn/';
           }
@@ -466,7 +466,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     for(let n=rows.length-1;n>=0;n--)if(rows[n].path.startsWith('skills.elixirs.'))rows.splice(n,1);
     rows.push(...revised);
   }
-  applyNetherModifiers(rows,build,parseSeasonComponentLines);
+  applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation);
   applySeasonCurses(rows,build);
   // Imported documents may contain inconsistent answers for one physical state.
   // Keep the document readable but do not calculate either conflicting clause.

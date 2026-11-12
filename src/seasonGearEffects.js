@@ -1,3 +1,8 @@
+export function validSeasonGearEffects(gear) {
+  return (gear.rawEffects ?? []).filter(e => Number.isFinite(e.value) && !e.condition && !e.conditionRequirements && !e.per && !e.target
+    && (!e.roll || Number.isFinite(e.roll.min) && Number.isFinite(e.roll.max) && e.value >= e.roll.min && e.value <= e.roll.max));
+}
+
 // Native weapon properties stay on their own slot; they are never global spell bonuses.
 export const SEASON_LOCAL_WEAPON_STATS = new Set(["weapon_critical_strike_rating", "weapon_attack_speed",
   "gear_elemental_damage", "gear_attack_speed", "gear_attack_critical_strike_rating",

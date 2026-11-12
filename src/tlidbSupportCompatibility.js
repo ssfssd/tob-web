@@ -154,7 +154,7 @@ export function getCurrentTlidbSupportCompatibility(item, { season = CURRENT_SEA
       [/\bChanneled\b/iu, "channeling"],
       [/\bMobility\b/iu, "movement"],
       [/\bSentry\b/iu, "sentry"],
-      [/\bSummon\b|summon Minions/iu, "summon"],
+      [/\bSummon\b|\bMinion Skills?\b/iu, "summon"],
     ];
     const matched = mappings.filter(([pattern]) => pattern.test(body));
     excludedTags.push(...matched.map(([, tag]) => tag));
