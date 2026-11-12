@@ -13,6 +13,7 @@ import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS } from './seasonAdvis
 import { RESULT_TABS } from './seasonResultPanels.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
+import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem } from './seasonItemWorkshop.js';
 import { previewSeasonGear } from './seasonGearPicker.js';
 import { getSeasonSelectionOptions } from './seasonSelections.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
@@ -26,6 +27,8 @@ export function readSeasonPlannerEdit(input) {
     value: stringKinds.has(kind) || kind==='bing-event-source' || kind==='memory-tier' ? input.value : String(input.value).trim() === "" ? "" : Number(input.value) };
 }
 const editKey = e => JSON.stringify([e.kind, e.rowIndex, e.supportIndex, e.slotIndex, e.key]);
+const shelfFits = (entry,kind,index) => entry.kind === kind && (kind === 'gear'
+  ? getSeasonSelectionOptions('gear',index).some(o => o.id === entry.item.itemId) : kind !== 'memory' || entry.index === index);
 
 // The current editor has one SS14 document and one calculation. Historical
 // build keys are never written here, including when no SS14 copy exists yet.
@@ -61,6 +64,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   }
   const api = {
     active: true, state,
+    flushWorkshop() {
+      const draft = state.overlay;
+      let doc = draft.document;
+      for (const edit of draft.pending.values()) doc = editItemWorkshop(draft, doc, edit);
+      draft.document = doc;
+      draft.pending.clear();
+    },
     render(element = root) {
       const bindFocus=element && element !== root;
       root = element;
@@ -228,6 +238,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       const input = event.target;
+      if (state.overlay?.type === 'workshop' && input.closest?.('[data-item-workshop]')) {
+        const draft = state.overlay;
+        if (input.hasAttribute('data-workshop-name')) {draft.name=input.value;return;}
+        if (input.dataset.seasonEdit) {
+          const edit=readSeasonPlannerEdit(input);
+          if (edit.kind === 'workshop-affix') edit.value=input.value;
+          draft.pending.set(editKey(edit),edit);
+          return;
+        }
+      }
       if(input.hasAttribute?.('data-spirit-filter')){
         state.pactRoster.query=input.value.trim();
         for(const card of root.querySelectorAll('[data-spirit-name]'))card.hidden=!card.dataset.spiritName.includes(state.pactRoster.query);
@@ -278,8 +298,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (history) history.outerHTML = renderEditHistory(state);
     },
     change(event) {
+      const input = event.target;
+      if (state.overlay?.type === 'workshop' && input.closest?.('[data-item-workshop]')) {
+        if (input.dataset.seasonEdit) api.run(() => {api.input(event);api.flushWorkshop();});
+        return;
+      }
       if(event.target.hasAttribute?.('data-gear-filter')){
-        state.picker={query:state.picker?.query??'',filter:event.target.value,candidate:''};api.render();return;
+        state.picker={...state.picker,query:state.picker?.query??'',filter:event.target.value,candidate:'',preview:null};api.render();return;
       }
       if (event.target.hasAttribute?.('data-analysis-metric')) {
         if (Object.hasOwn(SEASON_ADVISOR_METRICS, event.target.value)) {
@@ -381,13 +406,37 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return true;
       }
       api.run(() => {
+        if (action === 'workshop-open') {
+          api.flush();
+          state.overlay=createItemWorkshop(d.kind??state.overlay?.kind, Number(d.index??state.overlay?.index));
+          return;
+        }
+        if (state.overlay?.type === 'workshop') {
+          const draft=state.overlay;
+          if (action === 'close') {state.overlay=null;return;}
+          if (action === 'workshop-category') {
+            if (draft.category !== d.category) state.overlay={...createItemWorkshop(draft.kind,draft.index),category:d.category,name:draft.name};
+            return;
+          }
+          api.flushWorkshop();
+          if (action === 'workshop-remove') {
+            draft.document=editItemWorkshop(draft,draft.document,{kind:action,value:d.key});
+          } else if (action === 'workshop-store') {
+            const entry=finishedWorkshopItem(draft), list=readShelf(storage);
+            storage.setItem(SHELF_KEY,JSON.stringify([...list,entry]));
+            state.shelfRows=[...list,entry].filter(v=>shelfFits(v,draft.kind,draft.index));
+            state.overlay={type:'shelf',kind:draft.kind,index:draft.index};
+            state.notice='아이템을 제작해 보관함에 넣었습니다.';
+          }
+          return;
+        }
         if(action==='bing-event-add'||action==='bing-event-remove'){api.edit({kind:action,rowIndex:Number(d.row)});return;}
         if (action === "undo" || action === "redo") { api.restore(action === "redo"); return; }
         api.flush();
         if(action.startsWith('shelf-')){
           const list=readShelf(storage);
           const kind=d.kind??state.overlay?.kind,index=Number(d.index??state.overlay?.index);
-          const refresh=()=>{state.shelfRows=list.filter(v=>v.kind===kind&&(kind==='gear'?getSeasonSelectionOptions('gear',index).some(o=>o.id===v.item.itemId):kind!=='memory'||v.index===index));state.overlay={type:'shelf',kind,index};};
+          const refresh=()=>{state.shelfRows=list.filter(v=>shelfFits(v,kind,index));state.overlay={type:'shelf',kind,index};};
           if(action==='shelf-open'){refresh();return;}
           if(action==='shelf-save'){list.push(captureShelf(state.document.targetBuild,kind,index));storage.setItem(SHELF_KEY,JSON.stringify(list));state.notice='보관함에 저장했습니다.';return;}
           const pos=list.findIndex(v=>v.id===d.id&&v.kind===kind);
@@ -465,6 +514,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.focusRole = d.focusRole;
         }
         else if (action === "close") { state.overlay = null; state.logImport = null; ++logRequest; }
+        else if (action === "picker-gear-kind") state.picker={gearKind:d.category,filter:'',candidate:'',query:state.picker?.query??''};
         else if (action === "open-picker") state.picker = { candidate: "", query: "" };
         else if (action === "cancel-picker") state.picker = null;
         else if (action === "preview-item") state.picker = { ...state.picker, candidate: d.id,

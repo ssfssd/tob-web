@@ -1,5 +1,6 @@
 import { SS14_EXTENSIONS } from "./data/ss14Extensions.generated.js";
 import { SS14_CRAFT } from "./data/ss14Craft.generated.js";
+import { craftOptions } from './seasonItemCraft.js';
 import { memoryRange } from "./seasonMemoryRolls.js";
 import { addSeasonIngredients } from "./seasonElixirIngredients.js";
 import { inspectSeasonPrism } from "./seasonPrismPlacement.js";
@@ -217,7 +218,8 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       const unique = (p) => [...new Map((p?.rows ?? []).filter((r) => r.id === identity?.modifierId).map((r) => [signature(r), r])).values()];
       const matches = unique(en); const translated = unique(ko);
       const entry = matches.length === 1 ? matches[0] : null; const kr = translated.length === 1 ? translated[0] : null;
-      const valid = index < 10 && craftData.gear[slot.itemId]?.includes(key) && entry && !sourceIds.has(identity.modifierId)
+      const allowed = craftData.gear[slot.itemId]?.includes(key) || (craftData === SS14_CRAFT && craftOptions(slot.itemId).some(o => o.key === key));
+      const valid = index < 10 && allowed && entry && !sourceIds.has(identity.modifierId)
         && !slot.corrupted && !slot.legendaryDraft?.corrodedSlotIds?.length && !slot.affixText?.trim();
       if (identity) sourceIds.add(identity.modifierId);
       const row = make(`gear.slots.${index}.crafts.${selectedCraft?.affixId}`, slot.itemId, en,

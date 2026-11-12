@@ -31,6 +31,7 @@ import { netherSum } from "./seasonNetherRemaining.js";
 import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { logMechanicStats } from "./seasonLogGearMechanics.js";
 import { resolveSeasonGearConditions } from './seasonGearConditions.js';
+import { craftOptions } from './seasonItemCraft.js';
 
 export const SS14_BUILD_MODEL = "tlidb-ss14-build-preview-v1";
 const labels = { hero: "히어로", heroTraits: "히어로 특성", heroMemory: "히어로 추억", heroMemoryAffixes: "추억 옵션", skills: "스킬", supports: "보조", gear: "장비", talents: "재능", talentTrees: "재능 패널", spirits: "정령", destiny: "운명", slates: "신격의 석판", divinityAffixes: "석판 옵션", modularization: "모듈", elixirs: "영약", ingredients: "영약 재료", prisms: "프리즘", inverseImages: "역상" };
@@ -111,7 +112,9 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
   if (isTarget && targetBinding?.logGear && targetBinding.itemId === item.id && targetBinding.sourcePageSha256 === record.sourcePageSha256) {
     return inspectLogGear(item.id, targetBinding.logGear, build, slotIndex);
   }
-  if (slot.corrupted || nonempty(slot.legendaryDraft?.corrodedSlotIds) || nonempty(slot.crafts) || slot.affixText?.trim()) {
+  const crafts = Object.values(slot.crafts ?? {});
+  const unknownCraft = crafts.some(c => !craftOptions(item.id).some(o => o.affixId === c?.affixId && o.tierId === c?.tierId));
+  if (slot.corrupted || nonempty(slot.legendaryDraft?.corrodedSlotIds) || unknownCraft || slot.affixText?.trim()) {
     return { status: "partial", receipt, reasons: ["SS14 제작·침식·사용자 장비 옵션의 별도 수치 근거 미확보. SS13 값으로 대체하지 않습니다."] };
   }
   const parsed = normalizeSeasonGearEffects(parseTlidbGearTooltip({ id: item.id, categoryId: "gear", tlidbText: { en: { ...record,

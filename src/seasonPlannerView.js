@@ -19,6 +19,8 @@ import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
 import { gearFilters } from './seasonGearPicker.js';
+import { craftOptions, itemGearKind } from './seasonItemCraft.js';
+import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
 import { renderGearPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
 import { renderSlateEditor } from './seasonSlateEditor.js';
@@ -113,14 +115,17 @@ export function renderEffectSources(s, path = null) {
 function itemPicker(s, category, index, supportIndex, current) {
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";
   const all = support ? seasonSupportOptions() : getSeasonSelectionOptions(category, index);
-  const filters=category==="gear"?[...new Set(all.flatMap(o=>gearFilters(o.id)))]:[];
-  const options=s.picker?.filter?all.filter(o=>gearFilters(o.id).includes(s.picker.filter)):all;
+  const family=s.picker?.gearKind??'';
+  const pool=category==='gear'&&family?all.filter(o=>itemGearKind(o.id)===family):all;
+  const filters=category==="gear"?[...new Set(pool.flatMap(o=>gearFilters(o.id)))].filter(f=>!['제작','레전드'].includes(f)):[];
+  const options=s.picker?.filter?pool.filter(o=>gearFilters(o.id).includes(s.picker.filter)):pool;
   const selected = s.picker?.candidate ?? current ?? "";
   const query = s.picker?.query ?? "";
   const key = value => String(value).normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
   const match = option => key(`${option.name} ${(SS14_CARDS.records[option.id] ?? SS14_SUPPORTS.records[option.id])?.detail ?? ""}`).includes(key(query));
   const card = SS14_CARDS.records[selected] ?? SS14_SUPPORTS.records[selected];
   return `<div class="native-item-picker" aria-label="슬롯 아이템 선택">
+    ${category==='gear'?`<nav class="native-slot-actions" aria-label="장비 종류">${[['','전체'],['base','제작 장비'],['legendary','레전드 장비']].map(([id,label])=>button(label,'picker-gear-kind',`data-category="${id}" aria-pressed="${family===id}"`)).join('')}</nav>`:''}
     <header>${filters.length?`<label>장비 분류<select data-gear-filter aria-label="장비 분류"><option value="">전체</option>${filters.map(f=>`<option${f===s.picker?.filter?' selected':''}>${esc(f)}</option>`).join('')}</select></label>`:''}<label>이름·효과 검색<input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" /></label>${current ? button("고른 아이템 보기", "cancel-picker") : ""}<small data-picker-count>${options.filter(match).length}개</small></header>
     <div class="native-picker-columns"><div class="native-picker-list" aria-label="아이템 후보">${options.map(o => button(`${icon(o.id)}<span>${esc(o.name)}</span>`, "preview-item",
       `data-id="${esc(o.id)}" data-picker-option data-search="${esc(`${o.name} ${(SS14_CARDS.records[o.id] ?? SS14_SUPPORTS.records[o.id])?.detail ?? ""}`)}" aria-pressed="${selected === o.id}"${match(o) ? "" : " hidden"}`)).join("")}</div>
@@ -277,7 +282,7 @@ function slotEditor(s) {
           `data-row="${index}" data-support="${c}" data-key="${esc(control.key)}" min="${control.min}" max="${control.max}" step="1" ${control.automatic?'disabled':''}`)}`).join("")}</fieldset>`;
     }
     return `${actions}${isGear && index < 2 ? weaponSummary(s.document.targetBuild, index) : ''}
-      ${isGear ? entry ? rollControls(component, entry, {}) : "" : id ? `${field("스킬 레벨", "skill-level", row.level, `data-row="${index}" min="1" max="100" step="1"`)}${field("보조 칸 수", "support-count", row.unlockedSupportCount, `data-row="${index}" min="0" max="5" step="1"`)}` : ""}`;
+      ${isGear ? (entry ? rollControls(component, entry, {}) : "") + craftFields(s.report,index) : id ? `${field("스킬 레벨", "skill-level", row.level, `data-row="${index}" min="1" max="100" step="1"`)}${field("보조 칸 수", "support-count", row.unlockedSupportCount, `data-row="${index}" min="0" max="5" step="1"`)}` : ""}`;
   }
   if (type === "talents") {
     const board = b.talents.boards[index];
@@ -329,12 +334,46 @@ function logGearPreview(row) {
 export function renderEditHistory(s) {
   return `<div class="native-edit-history" data-role="edit-history" aria-label="편집 기록">${button("↶ 되돌리기", "undo", `title="되돌리기 (Ctrl+Z)"${s.history?.canUndo || s.pending.size ? "" : " disabled"}`)}${button("↷ 다시 실행", "redo", `title="다시 실행 (Ctrl+Shift+Z)"${s.history?.canRedo ? "" : " disabled"}`)}</div>`;
 }
+function craftFields(report,index,choices) {
+  return report.componentProjection.rows.filter(r=>r.path.startsWith(`gear.slots.${index}.crafts.`)).map(row=>{
+    const choice=choices?.find(o=>o.modifierId===row.receipt?.sourceRecordKey && row.path.endsWith('.'+o.affixId));
+    const inputs=(row.extensionControls??[]).map((c,i)=>field(`수치 ${i+1} (${c.min}~${c.max})`,'extension-input',c.value,`data-key="${esc(c.key)}" min="${c.min}" max="${c.max}" step="any"`)).join('');
+    return `<fieldset><legend>${esc(choice?.name??row.detail??row.name)}</legend>${inputs}${choice?button('옵션 제거','workshop-remove',`data-key="${esc(choice.key)}"`):''}</fieldset>`;
+  }).join('');
+}
+function workshopView(s) {
+  const draft=s.overlay, {kind,index,document:doc}=draft, build=doc.targetBuild;
+  const report=calculateSeasonBuild(build), gear=kind==='gear';
+  const item=gear?build.gear?.slots?.[index]:build.hero?.memories?.[index];
+  let form='';
+  if (gear) {
+    const options=getSeasonSelectionOptions('gear',index).filter(o=>itemGearKind(o.id)===draft.category);
+    form=`<nav class="native-slot-actions" aria-label="제작할 장비 종류">${[['base','제작 장비'],['legendary','레전드 장비']].map(([key,label])=>button(label,'workshop-category',`data-category="${key}" aria-pressed="${draft.category===key}"`)).join('')}</nav>`;
+    form+=select(draft.category==='base'?'기본 장비':'레전드 장비','workshop-base','gear-selection',item?.itemId,options,`data-slot="${index}"`,true);
+    if(item?.itemId) {
+      const component=report.components.find(r=>r.category==='gear'&&r.id===item.itemId);
+      const entry=component?.calculations?.find(r=>r.slotIndex===index);
+      if(entry) form+=rollControls(component,entry,{});
+      const choices=craftOptions(item.itemId);
+      if(draft.category==='base'){
+        form+=choices.length?select('제작 옵션 추가·등급 변경','workshop-craft','workshop-affix','',choices.map(o=>({id:o.key,name:o.name})),`data-slot="${index}"`,true):'<p>이 기본 장비에 연결된 SS14 제작 옵션이 없습니다.</p>';
+        form+=craftFields(report,index,choices);
+      }
+    }
+  } else form=slotEditor({...s,document:doc,report,overlay:{type:'memory',index}});
+  return `<section data-item-workshop>${form}<label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',(gear?item?.itemId:item?.baseAttributeId)?'':'disabled')}</section>`;
+}
 function overlay(s) {
   if (!s.overlay) return "";
   const type = s.overlay.type;
   let content;
   if (type === "saves") content = s.documents.map(d => `<article class="native-save-row"><span>${esc(d.targetBuild.name)}</span>${button("열기", "open", `data-id="${esc(d.id)}" aria-label="${esc(d.targetBuild.name)} 열기"`)}</article>`).join("") || "저장된 SS14 빌드가 없습니다.";
-  else if(type==="shelf") content=s.shelfRows.length?s.shelfRows.map(v=>`<article class="native-save-row"><strong>${esc(v.name)}</strong>${button("적용","shelf-use",`data-id="${esc(v.id)}"`)}${button("보관 해제","shelf-remove",`data-id="${esc(v.id)}"`)}</article>`).join(""):"이곳에 적용할 수 있는 보관 항목이 없습니다.";
+  else if(type==="workshop") content=workshopView(s);
+  else if(type==="shelf") {
+    const wearable=['gear','memory'].includes(s.overlay.kind);
+    content=(wearable?button(s.overlay.kind==='gear'?'새 장비 제작':'새 추억 제작','workshop-open'):'')+
+      (s.shelfRows.length?s.shelfRows.map(v=>`<article class="native-save-row"><strong>${esc(v.name)}</strong>${button(wearable?"장착":"적용","shelf-use",`data-id="${esc(v.id)}"`)}${button("보관 해제","shelf-remove",`data-id="${esc(v.id)}"`)}</article>`).join(""):"<p>이 슬롯에 사용할 보관 항목이 없습니다.</p>");
+  }
   else if (type === "files") content = `${button("사본 저장", "copy")}${RUNTIME_POLICY.allowGameLogs ? button("게임 로그 가져오기", "local-log") : `<p>${esc(LOCAL_LOG_ONLY_MESSAGE)}</p><p>빌드는 이 브라우저에 저장됩니다. 다른 기기로 옮기거나 작업을 종료하기 전 빌드 JSON을 보관하세요.</p>`}<label>TOB SS14 빌드 내보내기<textarea readonly aria-label="TOB SS14 빌드 내보내기">${esc(exportSeasonWorkspace(s.document))}</textarea></label><label>TOB SS14 빌드 가져오기<textarea id="native-import" aria-label="TOB SS14 빌드 가져오기"></textarea></label>${button("가져오기", "import")}<details><summary>이전 시즌 보관함</summary><button type="button" data-action="open-preserved-build">이전 시즌 빌드 열기</button></details>`;
   else if (type === "share") content = `<div class="build-share-panel"><label>공유 링크<input type="text" id="share-link" aria-label="공유 링크" readonly value="${esc(s.overlay.link)}" /></label>${button("공유 링크 복사","copy-link",s.overlay.link?"":"disabled")}<p>받은 사람이 링크를 열면 이 빌드의 사본이 열립니다.</p><p id="share-status" role="status">${esc(s.overlay.message)}</p></div>
     <details data-role="share-code-tools"><summary>빌드 코드로 공유하거나 가져오기</summary><label>내 빌드 코드<textarea id="share-code" readonly spellcheck="false" aria-label="내 빌드 코드">${esc(s.overlay.code)}</textarea></label>${button("코드 복사","copy-code",s.overlay.code?"":"disabled")}<label>받은 빌드 코드<textarea id="share-paste" spellcheck="false" placeholder="TOB14-1.…" aria-label="받은 빌드 코드">${esc(s.overlay.paste)}</textarea></label>${button("새 사본으로 열기","import-code")}</details>`;
@@ -343,8 +382,8 @@ function overlay(s) {
   else content = slotEditor(s);
   if(type==="memory")content=shelfTools("memory",s.overlay.index,!!s.document.targetBuild.hero?.memories?.[s.overlay.index],button)+content;
   const titles = { shelf:"보관함", share: "빌드 공유", saves: "저장 빌드", files: "빌드 파일", "local-log": "게임 로그 가져오기", effects: "효과별 출처", hero: "히어로 선택", traits: "히어로 특성", memory: "히어로 추억", talents: "재능 편집", pact: "정령 편집", extensions: "영약·모듈화" };
-  const heading = titles[type] ?? "빌드 편집";
-  return `<div class="season-native-backdrop"><section role="dialog" aria-modal="true" aria-label="SS14 ${heading}" class="season-native-modal"><header><h2>${heading}</h2>${button("닫기", "close", 'aria-label="편집 닫기"')}</header>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}<div class="season-native-modal-body">${content}</div><footer>${!["shelf","share","local-log", "files", "saves", "effects", "hero"].includes(type) ? button("적용", "apply") : ""}${button("닫기", "close")}</footer></section></div>`;
+  const heading = type==='workshop'?(s.overlay.kind==='gear'?'장비 제작':'추억 제작'):titles[type] ?? "빌드 편집";
+  return `<div class="season-native-backdrop"><section role="dialog" aria-modal="true" aria-label="SS14 ${heading}" class="season-native-modal"><header><h2>${heading}</h2>${button("닫기", "close", 'aria-label="편집 닫기"')}</header>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}<div class="season-native-modal-body">${content}</div><footer>${!["workshop","shelf","share","local-log", "files", "saves", "effects", "hero"].includes(type) ? button("적용", "apply") : ""}${button("닫기", "close")}</footer></section></div>`;
 }
 export function renderNativeDps(s) {
   const dps = s.report.fullDps;

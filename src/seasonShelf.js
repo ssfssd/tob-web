@@ -35,7 +35,8 @@ export function captureShelf(build,kind,index){
     if(item&&tree){name=build.name+' · 프리즘';bindings={placement,tree};}
   }
   if(!name)throw Error('보관할 항목을 먼저 장착하거나 배치하세요.');
-  return structuredClone({id:crypto.randomUUID(),name,kind,index,item,bindings});
+  const craftRolls = kind === 'gear' ? subset(inputs.extensionInputs, k => k.startsWith('craft:'+index+':')) : undefined;
+  return structuredClone({id:crypto.randomUUID(),name,kind,index,item,bindings,...(craftRolls ? {craftRolls} : {})});
 }
 export function applyShelf(target,entry,index){
   const {kind,item,bindings}=structuredClone(entry), inputs=target.ss14Inputs;
@@ -52,6 +53,13 @@ export function applyShelf(target,entry,index){
     if(inputs.selections?.gear)delete inputs.selections.gear[index];
     delete inputs.gear[index];
     if(bindings)inputs.gear[index]=bindings;
+    const remaining = subset(inputs.extensionInputs, k => !k.startsWith('craft:'+index+':'));
+    for (const [key, roll] of Object.entries(entry.craftRolls ?? {})) {
+      const match = /^craft:([0-9]):(\d+:[1-9]\d*)$/u.exec(key);
+      if (!match || Number(match[1]) !== entry.index) throw Error('제작 옵션의 장비 칸을 확인하세요.');
+      remaining['craft:'+index+':'+match[2]] = structuredClone(roll);
+    }
+    if (inputs.extensionInputs || Object.keys(remaining).length) inputs.extensionInputs = remaining;
   }else if(kind==='memory'){
     if(index!==entry.index||!Number.isInteger(index)||index<0||index>2)throw Error('같은 종류의 추억 슬롯을 선택하세요.');
     group='hero';

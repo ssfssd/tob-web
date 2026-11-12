@@ -164,3 +164,7 @@
   .season-native-modal>header,.season-native-modal>footer,.season-native-modal-body { padding-inline:14px; }
   .season-native-modal>header h2 { min-width:0;overflow-wrap:anywhere; }
 }
+[data-item-workshop] { display:grid; gap:12px; min-width:0; }
+[data-item-workshop] :is(label,select,input,fieldset) { min-width:0; max-width:100%; box-sizing:border-box; }
+[data-item-workshop] label { display:grid; gap:4px; }
+[data-item-workshop] [aria-pressed=true],.native-item-picker [aria-pressed=true]:is(nav button) { border-color:#d9ae60; color:#ffe3ac; }

@@ -20,7 +20,8 @@ export function renderGearPreview(p,labels){
 }
 export function shelfTools(kind,index,filled,button){
   const attrs=`data-kind="${kind}" data-index="${index}"`;
-  return `<div class="native-slot-actions">${button('보관함 열기','shelf-open',attrs)}${filled?button('보관함에 저장','shelf-save',attrs):''}</div>`;
+  const create = kind === 'gear' || kind === 'memory' ? button(kind === 'gear' ? '장비 제작' : '추억 제작', 'workshop-open', attrs) : '';
+  return `<div class="native-slot-actions">${create}${button('보관함 열기','shelf-open',attrs)}${filled?button('보관함에 저장','shelf-save',attrs):''}</div>`;
 }
 export function mobileDpsBar(s){
   const assumed=s.report.assumedDps, delta=s.editComparison?.assumedDelta;
