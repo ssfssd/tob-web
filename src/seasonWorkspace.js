@@ -23,6 +23,7 @@ import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
 import { validSeasonDpsInputs, editSeasonDpsInput } from "./seasonDps.js";
+import { trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
 import { applyShelf } from './seasonShelf.js';
@@ -429,6 +430,13 @@ export function editSeasonWorkspace(document, edit) {
       target.ss14Inputs.heroCombat ??= {};
       if (edit.value === "") delete target.ss14Inputs.heroCombat[edit.key]; else target.ss14Inputs.heroCombat[edit.key] = edit.value;
       target.ss14Inputs.mechanicReceipts = seasonMechanicPins();
+    }
+  } else if (edit.kind === "dummy-level") {
+    const dummy = trainingDummyLevels.find(row => row.level === edit.value);
+    if (!dummy) throw new Error("허수아비 레벨을 확인하세요.");
+    editSeasonDpsInput(target, "enemy:armor", dummy.armor);
+    for (const type of ["fire", "cold", "lightning", "erosion"]) {
+      editSeasonDpsInput(target, "enemy:" + type, dummy.resistance);
     }
   } else if (edit.kind === "dps-input") {
     editSeasonDpsInput(target, edit.key, edit.value);

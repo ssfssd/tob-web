@@ -65,7 +65,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   let hasProjectileTie = false;
   let aggressionUntil = 0, affliction = enemy.affliction ?? 0, afflictionUntil = 0, nextDotTrigger = Infinity;
   let currentTenacity = 0, recentAgility = false;
-  let numbedArea = 0, scorchArea = 0;
+  let numbedArea = 0, scorchArea = 0, igniteTime = 0, numbedTime = 0;
   const activeIgnites = () => ailments.active((input.igniteLimit ?? 1) + Number(has("thea-ignite-limit") && currentTenacity >= 10));
   const push = e => { if (Number.isFinite(e.at)) queue.push(e); };
   for (const row of report.fullDps.rows) {
@@ -277,7 +277,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   return {
     blockers, counts, rows,
     get hasProjectileTie() { return hasProjectileTie; },
-    result() { return { numbedAverage: numbedArea / seconds, scorchUptime: 100 * scorchArea / seconds }; },
+    result() { return { numbedAverage: numbedArea / seconds, scorchUptime: 100 * scorchArea / seconds,
+      igniteUptime: 100 * igniteTime / seconds, numbedUptime: 100 * numbedTime / seconds }; },
     state(time, stacks, events) { currentTenacity = stacks.Tenacity; recentAgility = events.recentAgility > 0; return { ...values(), ...elixirState(time), ...Object.fromEntries(Object.entries(infiltrations).map(([type,until]) => [`${type}Infiltration`, Number(until > time + eps || events[`${type}Infiltration`])])), attackAggression: Number(aggressionUntil > time + eps) }; },
     next() { return Math.min(Infinity, ...Object.values(infiltrations).filter(t => t > clock + eps), ...queue.map(e => e.at), ...wilts.map(e => e.expires), ...deteriorations.map(e => e.at), ailments.next(), aggressionUntil || Infinity, afflictionUntil || Infinity, nextDotTrigger, nextElixir(clock)); },
     expire(time) { clock = time; ailments.expire(time); for (let i = wilts.length - 1; i >= 0; i--) if (wilts[i].expires <= time + eps) wilts.splice(i, 1); if (aggressionUntil <= time + eps) aggressionUntil = 0; if (afflictionUntil <= time + eps) { afflictionUntil = 0; affliction = 0; } },
@@ -296,6 +297,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const fireTaken = r.componentProjection.effects.filter(e => e.stat === "fire_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1);
       const lo = Math.max(0, warmup - from), hi = Math.min(delta, warmup + seconds - from), w = Math.max(0, hi - lo);
       if (w) {
+        if (active.length) igniteTime += w;
+        if (ailments.numbed() > 0) numbedTime += w;
         numbedArea += ailments.numbed() * w; if (active.some(e => e.scorch)) scorchArea += w;
         const first = r.fullDps.rows.find(r => r.rowIndex === 0);
         const afflictionEffect = first?.combat?.afflictionEffect ?? 1;
@@ -429,6 +432,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     doubleUptime: supported ? sum(simulations.map(s => s.doubleUptime)) / 128 : null,
     numbedAverage: supported ? sum(results.map(r => r.result().numbedAverage)) / 128 : null,
     scorchUptime: supported ? sum(results.map(r => r.result().scorchUptime)) / 128 : null,
+    igniteUptime: supported ? sum(results.map(r => r.result().igniteUptime)) / results.length : null,
+    numbedUptime: supported ? sum(results.map(r => r.result().numbedUptime)) / results.length : null,
     counts: supported ? Object.fromEntries(Object.keys(results[0].counts).map(k => [k, sum(results.map(r => r.counts[k])) / 128])) : null,
     extraBlessings: supported ? Object.fromEntries(['gained', 'consumed'].map(kind => [kind,
       Object.fromEntries(Object.keys(options.caps).map(key => [key, sum(simulations.map(s => s.eventTotals[kind][key])) / 128]))])) : null,

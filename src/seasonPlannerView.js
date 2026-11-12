@@ -185,7 +185,7 @@ function combatPanel(s) {
     ${recovery.problem?`<p>${esc(recovery.problem)}</p>`:''}
     ${recovery.total!==null?`<p>기본·추가 합계 ${recovery.total} · 실제 회복 합계 ${recovery.credited??'직전 기발 확인 필요'}</p>`:''}
     <small>1초 제한의 기본 회복 적용 범위와 일반·오버로드 공유 여부는 미확인입니다. 회복을 추가 대미지나 발동 횟수로 환산하지 않습니다.</small></fieldset>`:'';
-  return `${editor}${dpsControls(s.document, s.report, {})}<details data-role="native-critical-input"><summary>스킬 기본 크리티컬</summary>${offenseControls(s.document, s.report, {})}</details><details data-role="season-character-input"><summary>캐릭터 기본 수치·효과 조건</summary>${characterControls(s.document, s.report, {})}</details><details data-role="native-blessing-input"><summary>축복 중첩</summary>${blessingControls(s.document, s.report, {})}</details>${theaControls(s.document, s.report, {})}<details data-role="native-extension-input"><summary>영약·특수 효과 조건</summary>${extensionControls(s.report, {})}</details>`;
+  return `${editor}${dpsControls(s.document, s.report, {}, true)}<details data-role="native-critical-input"><summary>스킬 기본 크리티컬</summary>${offenseControls(s.document, s.report, {})}</details><details data-role="season-character-input"><summary>캐릭터 기본 수치·효과 조건</summary>${characterControls(s.document, s.report, {})}</details><details data-role="native-blessing-input"><summary>축복 중첩</summary>${blessingControls(s.document, s.report, {})}</details>${theaControls(s.document, s.report, {})}<details data-role="native-extension-input"><summary>영약·특수 효과 조건</summary>${extensionControls(s.report, {})}</details>`;
 }
 function divinityPanel(s) {
   const conditions=netherConditions(s.report);
@@ -208,7 +208,7 @@ function slotEditor(s) {
     }).join("")}</section><section><h3>모듈화</h3>${[0, 1, 2, 3, 4].map(i => {
       const config = original.skills?.active?.[i]?.modularization;
       return `<details data-role="native-module-${i}"${config ? " open" : ""}><summary>액티브 ${i + 1} 모듈</summary>${select(`액티브 ${i + 1} 모듈`, `native-module-${i}`, "module-selection", config?.modularizationSkillId, modules, `data-slot="${i}"`, true)}${config ? [0, 1, 2].map(n => `${select(`모듈 ${i + 1} 옵션 ${n + 1}`, `native-module-${i}-${n}`, "module-option", config.moduleOptionIds[n], affixes, `data-slot="${i}" data-key="${n}"`, true)}<p>${esc(affixes.find(a => a.id === config.moduleOptionIds[n])?.detail ?? "")}</p>`).join("") : ""}</details>`;
-    }).join("")}</section></div><details class="native-extension-conditions" data-role="native-extension-conditions"><summary>영약·모듈 전투 조건</summary>${extensionControls(s.report, {})}${dpsControls(s.document, s.report, {})}${theaControls(s.document, s.report, {})}</details>`;
+    }).join("")}</section></div><details class="native-extension-conditions" data-role="native-extension-conditions"><summary>영약·모듈 전투 조건</summary>${extensionControls(s.report, {})}${dpsControls(s.document, s.report, {}, true)}${theaControls(s.document, s.report, {})}</details>`;
   }
   if (type === "hero") {
     return `<label>히어로 검색<input type="search" data-hunter-filter aria-label="히어로 이름·특성 검색"></label><div class="hunter-gallery">${seasonHeroOptions().map(h => {
@@ -356,6 +356,10 @@ function renderAssumedDps(s) {
   const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
   return `<small>가동률 100% · 방어 적용 전 DPS</small><strong data-role="assumed-dps">${s.pending.size?'입력 적용 대기':estimate.supported?fmt(estimate.dps):'확인 필요'}</strong>
     <p>적 아머·저항·관통 제외${estimate.defaults.length?' · '+estimate.defaults.join(' · '):''}${!s.pending.size&&Number.isFinite(delta)?' · 직전 대비 '+(delta>0?'+':'')+fmt(delta):''}</p>
+    ${!s.pending.size?`<details data-role="native-uptime-details"><summary>가동률과 DPS 적용 내역</summary>
+      <p>가동률 = 효과가 켜진 시간 ÷ 측정 시간 × 100. 10초 중 6초 유지하면 60%입니다.</p>
+      ${estimate.uptimeDetails?.length?`<ul>${estimate.uptimeDetails.map(row=>`<li><b>${esc(row.name)}</b><br>입력 조건 ${esc(row.setting)} · 방어 전 ${esc(row.assumed)}<br>${esc(row.method)}</li>`).join('')}</ul>`:'<p>이 빌드에서 별도로 가동률을 가정한 효과가 없습니다.</p>'}
+      ${button('전투 조건 보기','result-tab','data-tab="conditions"')}</details>`:''}
     ${!s.pending.size&&!estimate.supported?`<details data-role="assumed-dps-reasons"><summary>가정 계산에 필요한 항목</summary>${renderReasons(s,estimate.blockers)}</details>`:''}`;
 }
 export function renderSeasonPlanner(s) {

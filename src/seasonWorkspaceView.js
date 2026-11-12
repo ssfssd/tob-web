@@ -1,4 +1,5 @@
 import { calculateSeasonBuild } from "./seasonBuild.js";
+import { renderTrainingDummyPicker } from "./seasonTrainingDummy.js";
 import { seasonCalculationIssues, seasonDpsStatusLabel } from './seasonCalculationIssues.js';
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
@@ -331,7 +332,7 @@ function theaControls(document, report, formValues) {
     </details>`;
 }
 
-function dpsControls(document, report, formValues) {
+function dpsControls(document, report, formValues, showDummy = false) {
   const build = document.targetBuild;
   const input = document.targetBuild.ss14Inputs.dps;
   const field = (key, definition, value) => {
@@ -344,7 +345,7 @@ function dpsControls(document, report, formValues) {
   return `<details data-role="season-dps-input"><summary>전체 DPS 전투 입력</summary>
     ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
     <p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후, 관통 적용 전의 유효 저항입니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
-    <fieldset><legend>대상 방어</legend>${Object.entries(SEASON_DPS_ENEMY_FIELDS).map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}</fieldset>
+    <fieldset><legend>대상 방어</legend>${showDummy ? renderTrainingDummyPicker() : ""}${Object.entries(SEASON_DPS_ENEMY_FIELDS).map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}</fieldset>
     ${report.componentProjection.rows.filter(r => r.slateControls?.length).map(r => `<fieldset><legend>${escape(r.name)} · SS14 석판 옵션</legend>
       ${r.slateControls.map(c => `<label>${c.index + 1}번째 옵션<select data-season-edit="slate-affix" data-key="${escape(c.key)}" aria-label="SS14 ${escape(r.name)} 옵션 ${c.index + 1}"><option value="">옵션 선택 필요</option>
         ${seasonSlateOptions(c.type).map(o => `<option value="${escape(o.id)}"${(formValues[`slate-affix:${c.key}`] ?? c.value) === o.id ? " selected" : ""}>${escape(o.name)} · ${escape(o.detail)}</option>`).join("")}</select></label>`).join("")}</fieldset>`).join("")}

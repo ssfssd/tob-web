@@ -1,6 +1,7 @@
 import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { SEASON_DPS_ENEMY_FIELDS } from './seasonDps.js';
 import { inputDestinations } from './seasonInputRequirements.js';
+import { renderTrainingDummyPicker } from './seasonTrainingDummy.js';
 
 const esc = v => String(v ?? '').replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const number = v => Number.isFinite(v) ? v.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : '미지원';
@@ -49,7 +50,7 @@ export function renderEditDpsComparison(s, compact = false) {
 export function renderResultConditions(s) {
   const inputs = s.document.targetBuild.ss14Inputs;
   return `<section class="native-result-conditions" aria-label="적용 중인 전투 조건">
-    <h2>대상·스킬 조건</h2><dl class="native-condition-values">${Object.entries(SEASON_DPS_ENEMY_FIELDS).map(([key, def]) =>
+    <h2>대상·스킬 조건</h2>${renderTrainingDummyPicker()}<dl class="native-condition-values">${Object.entries(SEASON_DPS_ENEMY_FIELDS).map(([key, def]) =>
       `<div><dt><label for="dock-enemy-${key}">${esc(def.label)}</label></dt><dd><input id="dock-enemy-${key}" type="number" step="any" min="${def.min}" max="${def.max}" data-season-edit="dps-input" data-key="enemy:${key}" value="${esc(inputs.dps?.enemy?.[key])}" placeholder="미입력"></dd></div>`).join('')}</dl>
     ${edit('대상 방어·스킬 사용 조건 편집', 'season-dps-input')}
     <h2>캐릭터·효과 조건</h2>${edit('기본 속성·효과 조건 편집', 'season-character-input')}${edit('기본 크리티컬 편집', 'native-critical-input')}${edit('축복 중첩 편집', 'native-blessing-input')}
