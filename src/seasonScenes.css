@@ -113,13 +113,6 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 }
 .gear-scene .loadout-stage { grid-column: 2; grid-row: 1; background: radial-gradient(ellipse at 52% 40%,#374958,#131c23 72%); }
 .gear-scene .native-slot-detail { grid-column: 1; grid-row: 1; }
-.gear-scene:has(.native-slot-actions) { position: relative; isolation: isolate; padding: 12px; background: #172026; }
-.gear-scene:has(.native-slot-actions)::before {
-  content: ""; position: absolute; inset: 0 49% 0 0; z-index: -1;
-  /* HUD-free rectangle in the preserved 2048 × 1152 equipment capture. */
-  background: linear-gradient(90deg,#20190d33,#1a1b1c44), url("../assets/ingame-ui/gear-world-reference.jpg") 20.72% 49.75% / 341.33% 153.6% no-repeat;
-}
-.gear-scene:has(.native-slot-actions) .native-slot-detail { width: min(100%,380px); justify-self: end; align-self: center; }
 .loadout-portrait { position: absolute; inset: 3% 0; width: 100%; height: 94%; object-fit: contain; z-index: -1; pointer-events: none; }
 .equipment-sockets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px; padding: 10px; }
 .season-native .equipment-sockets button {
