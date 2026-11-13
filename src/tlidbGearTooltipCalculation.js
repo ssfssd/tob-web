@@ -298,6 +298,7 @@ const STAT_ENTRIES = Object.freeze([
   statEntry("max sentry quantity", "max_sentry_quantity", "count"),
   statEntry("max summonable synthetic troops", "max_summonable_synthetic_troops", "count"),
   statEntry("ignite limit", "ignite_limit", "count"),
+  statEntry("support skill level", "support_skill_level", "level"),
   statEntry("fire skill level", "fire_skill_level", "level"),
   ...['attack','physical','cold','erosion','aura','curse','restoration','spell projectile'].map(type=>
     statEntry(`${type} skill level`,`${type.replaceAll(' ','_')}_skill_level`,'level')),

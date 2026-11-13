@@ -125,6 +125,13 @@ export function getCurrentTlidbSupportCompatibility(item, { season = CURRENT_SEA
       return true;
     }
 
+    // A list is a union of complete tag groups, not one composite tag.
+    const listParts = body.replace(/ Skills?$/iu, "").split(/\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or)\s+/u);
+    if (listParts.length > 1 && listParts.every(part => SUPPORT_TAG_GROUPS[part])) {
+      requiredTagGroups.push(...listParts.map(part => [...SUPPORT_TAG_GROUPS[part]]));
+      return true;
+    }
+
     const roleMatch = body.match(/^(Active|Passive) Skills?$/iu);
     if (roleMatch) {
       hostRole = roleMatch[1].toLowerCase();
@@ -184,6 +191,8 @@ export function getCurrentTlidbSupportCompatibility(item, { season = CURRENT_SEA
       sourceTexts.push(line);
       continue;
     }
+    // Do not turn an unrecognized allow-list into an exclusion-only permit.
+    if (clauses.some(clause => /^Supports?\s/iu.test(clause))) return null;
     requiredTagGroups.length = snapshot.requiredTagGroupCount;
     excludedTags.length = snapshot.excludedTagCount;
     specificHostSkillNames.length = snapshot.specificHostSkillNameCount;

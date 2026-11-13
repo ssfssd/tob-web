@@ -1024,18 +1024,31 @@ export function getExternalMainSkillOverride(model, build, kind, rowIndex) {
   if (kind !== "active" || rowIndex !== 0) return null;
   const equippedGearIds = Array.isArray(build?.selections?.gear) ? build.selections.gear : [];
   if (equippedGearIds[FIREBIRD_NECKLACE_GEAR_SLOT_INDEX] !== FIREBIRD_NECKLACE_ITEM_ID) return null;
-  const nestedNecklace = build?.gear?.slots?.[FIREBIRD_NECKLACE_GEAR_SLOT_INDEX];
-  const legendaryDraft = build?.gearLegendaryDrafts?.[FIREBIRD_NECKLACE_ITEM_ID]
-    ?? (nestedNecklace?.itemId === FIREBIRD_NECKLACE_ITEM_ID ? nestedNecklace.legendaryDraft : null);
+  const nativeSlots = build?.gear?.slots;
+  const nestedNecklace = nativeSlots?.[FIREBIRD_NECKLACE_GEAR_SLOT_INDEX];
+  // Native explicit removal/replacement must not resurrect an old compatibility
+  // selection. In inconsistent states wait for reconciliation, never grant free20.
+  if (Array.isArray(nativeSlots) && nestedNecklace?.itemId !== FIREBIRD_NECKLACE_ITEM_ID) return null;
+  // Match native gear evaluation: equipped instance fields precede legacy maps,
+  // including explicit null/false after an edit or removal.
+  const instanceValue = (field, compatibilityField, fallback) => {
+    if (nestedNecklace?.itemId === FIREBIRD_NECKLACE_ITEM_ID
+      && Object.hasOwn(nestedNecklace, field)) return nestedNecklace[field];
+    return build?.[compatibilityField]?.[FIREBIRD_NECKLACE_ITEM_ID] ?? fallback;
+  };
+  const legendaryDraft = instanceValue("legendaryDraft", "gearLegendaryDrafts", null);
   const hasExplicitCorrosionSlots = Array.isArray(legendaryDraft?.corrodedSlotIds);
   const isBarrierBurstAffixCorroded = hasExplicitCorrosionSlots
     ? legendaryDraft.corrodedSlotIds.includes(FIREBIRD_BARRIER_BURST_AFFIX_SLOT_ID)
-    : Boolean(build?.gearCorruptions?.[FIREBIRD_NECKLACE_ITEM_ID]);
+    : Boolean(instanceValue("corrupted", "gearCorruptions", false));
   const skill = model?.external?.find(({ id }) => id === FIREBIRD_BARRIER_BURST_SKILL_ID)
     ?? FIREBIRD_BARRIER_BURST_SKILL;
   return {
     skill,
     level: isBarrierBurstAffixCorroded ? 25 : 20,
+    grantBaseLevel: isBarrierBurstAffixCorroded ? 25 : 20,
+    effectiveLevel: null,
+    levelSource: "equipped-firebird-affix",
     sourceItemId: FIREBIRD_NECKLACE_ITEM_ID,
   };
 }
