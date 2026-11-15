@@ -207,7 +207,7 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
       : "선택 구성별 수치 내역과 별개로 이 참조의 전체 효과 연결은 미완료입니다."] };
   });
   const gearEffects = components.filter(c => c.category === "gear").flatMap(c => c.calculations ?? []).flatMap(validSeasonGearEffects);
-  const componentProjection = projectSeasonComponents(build, { gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation") });
+  const componentProjection = projectSeasonComponents(build, { gearEffects, gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation") });
   for(const component of components.filter(c=>c.category==='skills')) {
     const buffs=componentProjection.rows.filter(r=>r.itemId===component.id&&Number.isInteger(r.buffSkill));
     if(!buffs.length)continue;

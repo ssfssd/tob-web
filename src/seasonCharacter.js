@@ -118,12 +118,17 @@ export function calculateSeasonCharacter(build, components, projection, { data =
     return [type, { raw: round(raw), effective: !capConflict ? scenarios[0] : null, scenarios }];
   }));
   const survival = calculateSeasonSurvival({ safe, input, effects, life, mana, shield, evasion, data });
-  const reservedManaPercent=effects.filter(e=>e.stat==='sealed_mana_percent').reduce((n,e)=>n+e.value,0);
-  if(reservedManaPercent>100)blockers.push('선택한 패시브의 MP 봉인 합이 100%를 초과합니다.');
+  const holds=(kind)=>projection.rows.some(r=>r.mechanics?.some(m=>m.kind===kind));
+  const reserveUnknown=holds('unresolved-law-of-greed-reservation');
+  const maxManaUnknown=holds('unresolved-reservation-max-mp');
+  const reservedManaPercent=reserveUnknown?null:effects.filter(e=>e.stat==='sealed_mana_percent').reduce((n,e)=>n+e.value,0);
+  if(reserveUnknown)blockers.push('탈법의 MP 봉인 조합을 확인하기 전에는 합계를 표시하지 않습니다.');
+  if(maxManaUnknown)blockers.push('탈법의 최대 MP 옵션 수치가 확인될 때까지 사용 가능한 MP를 확정하지 않습니다.');
+  if(reservedManaPercent>100)blockers.push('확인된 MP 봉인 합이 100%를 초과합니다.');
   return { scope: "source-bound-resource-defense-projection", fullBuildSupported: false,
     values: { ...Object.fromEntries(Object.entries(stats).map(([k, v]) => [k, safe ? round(v) : null])),
       life: round(life), mana: round(mana), shield: round(shield), armor: round(armor), evasion: round(evasion),
-      reservedManaPercent:round(reservedManaPercent),unreservedMana:reservedManaPercent>100?null:round(mana*(1-reservedManaPercent/100)),
+      reservedManaPercent:round(reservedManaPercent),unreservedMana:reserveUnknown||maxManaUnknown||!finite(mana)||reservedManaPercent>100?null:round(mana*(1-reservedManaPercent/100)),
       armorReduction: round(armorReduction), nonPhysicalArmorReduction: round(armorReduction === null ? null : armorReduction * .6),
       ...survival.values }, resistances, armorScenarios, survival, blockers: [...new Set([...blockers, ...survival.reasons])], receipts,
     omittedEffectCount: projection.rows.filter((r) => r.blockers.length).length,

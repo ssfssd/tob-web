@@ -1,3 +1,4 @@
+import { appendGreedReservation } from "./seasonLawOfGreedReservation.js";
 import { findItemById } from "./catalog.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import "./seasonCurrentDatabase.js";
@@ -243,7 +244,7 @@ function heroTier(trait, tier, locale) {
   return texts.join("\n");
 }
 
-export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0 } = {}) {
+export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0, gearEffects = [] } = {}) {
   const rows = seasonGearConditionRows(build);
   const resolvedSlates = resolveSeasonSlates(build);
   const netherTemplate = resolvedSlates.special.find(t=>t.nether);
@@ -481,6 +482,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     row.effects = row.effects.filter((e) => !conflicts.some((c) => c.sourceLineIndex === e.sourceLineIndex));
     row.blockers.push({ reason: "같은 상태의 조건·중첩 입력이 서로 충돌합니다. 조건을 다시 입력하세요." }); row.status = "partial";
   }
+  appendGreedReservation(rows,build,gearEffects,gearSealCompensation);
   const uniqueBuffs = new Set();
   for (const row of rows) row.effects = row.effects.filter(effect => {
     if (!effect.buffIdentity) return true;
