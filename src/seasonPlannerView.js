@@ -122,6 +122,13 @@ export function renderEffectSources(s, path = null) {
         ${/^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(r.receipt?.sourceUrl ?? "") ? `<a href="${esc(r.receipt.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>` : ""}</details>`;
     }).join("") || "<p>이 슬롯에서 확인된 효과가 없습니다.</p>"}</div></section>`;
 }
+function drawerDps(s, comparison, action, status='') {
+  const format=n=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:2}):'미확정';
+  const current=s.report.fullDps.supported?s.report.fullDps.dps:null;
+  const values=comparison?format(comparison.baseValue)+' → '+format(comparison.value):format(current);
+  const delta=comparison?.supported?(comparison.delta>0?'+':'')+format(comparison.delta):comparison?'비교 보류':'';
+  return `<div class="drawer-dps" aria-label="전체 DPS와 적용"><div aria-live="polite"><small>전체 DPS ${delta?'<b>'+delta+'</b>':''}</small><strong>${status||values}</strong></div>${action}</div>`;
+}
 function itemPicker(s, category, index, supportIndex, current) {
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";
   const all = support ? seasonSupportOptions() : getSeasonSelectionOptions(category, index);
@@ -135,6 +142,7 @@ function itemPicker(s, category, index, supportIndex, current) {
   const match = option => key(`${option.name} ${(SS14_CARDS.records[option.id] ?? SS14_SUPPORTS.records[option.id])?.detail ?? ""}`).includes(key(query));
   const card = SS14_CARDS.records[selected] ?? SS14_SUPPORTS.records[selected];
   const equip = button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`);
+  if(s.drawer) s.drawer.bar=drawerDps(s,s.picker?.preview?.comparison,card?equip:button('후보 선택','equip-item','disabled'));
   const detail = card && `<p>${card.koreanTextVerified ? esc(card.detail) : "한국어 원문 미제공"}</p>`;
   const preview = s.picker?.preview ? renderSlotPreview(s.picker.preview,sourceStats,esc) : "";
   const oldOptions = category==="gear" && current && selected!==current ? `<details><summary>현재 장비 옵션 · ${esc(title(current))}</summary><p>${SS14_CARDS.records[current]?.koreanTextVerified?esc(SS14_CARDS.records[current].detail):'한국어 원문 미제공'}</p></details>` : "";
@@ -377,11 +385,14 @@ function workshopView(s) {
       const value=actual?.control.tier??memoryTraitTier(build,level).tier;
       return value?value+'단계':build.hero?.memories?.[index]?'확인 필요':'미장착';
     };
+    if(s.drawer)s.drawer.bar=drawerDps(s,null,button('이 슬롯에 장착','workshop-equip','disabled'));
     if(item || draft.slotDraft&&s.document.targetBuild.hero.memories?.[index]) {
       const edit=item?{kind:'shelf-apply',slotIndex:index,value:finishedWorkshopItem(draft)}:{kind:'memory-selection',slotIndex:index,value:''};
       const p=previewSlotEdit(s.document,s.report,edit);
+      const equip=button(item?'이 슬롯에 장착':'추억 해제','workshop-equip');
+      if(s.drawer)s.drawer.bar=drawerDps(s,p.comparison,equip);
       preview=`<section class="memory-preview"><strong>${level}레벨 특성 · ${tier(s.document.targetBuild,s.report)} → ${tier(build,report)}</strong>${renderSlotPreview(p,sourceStats,esc)}</section>`
-        +button(item?'이 슬롯에 장착':'추억 해제','workshop-equip');
+        +equip;
     }
     const shelf=draft.slotDraft?button('보관함에서 장착','shelf-open',`data-kind="memory" data-index="${index}"`):'';
     return `<section data-item-workshop class="memory-workbench"><div class="memory-fields">${form}</div><div class="memory-decisions">${preview}${shelf}<details><summary>보관함에 저장</summary><label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',item?'':'disabled')}</details></div></section>`;
@@ -430,6 +441,18 @@ function boardOptions(snapshot,section){
   }
   return entries;
 }
+function boardApply(s){
+  return button('빌드에 적용','board-apply',s.overlay.document===s.document&&!s.overlay.pending.size?'disabled':'');
+}
+export function renderDrawerBar(s){
+  if(s.overlay.type==='board') {
+    const draft=s.overlay;
+    return drawerDps(s,compareSeasonDpsSnapshots(s,draft),boardApply(s));
+  }
+  const initial=s.overlay.initial;
+  const comparison=initial&&initial.document!==s.document?compareSeasonDpsSnapshots(initial,s):null;
+  return drawerDps(s,comparison,button('편집 완료','close'),s.error?'입력 확인':s.pending.size?'입력 적용 대기':'');
+}
 export function renderBoardComparison(s){
   const draft=s.overlay,section=draft.section;
   const after={...s,document:draft.document,report:draft.report,boardOverview:false};
@@ -447,7 +470,7 @@ export function renderBoardComparison(s){
   const reasons=result.reasons.length?`<details><summary>비교 보류 사유</summary><ul>${result.reasons.map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></details>`:'';
   return `<h3>전체 DPS</h3><p><span>현재 → 변경 후</span><strong>${fmt(result.baseValue)} → ${fmt(result.value)}</strong>${amount}</p>${reasons}
     <h4>변경 옵션</h4>${changed.length?`<ul class="board-option-diff">${changed.join('')}</ul>`:'<p>변경된 옵션이 없습니다.</p>'}
-    ${button('빌드에 적용','board-apply',draft.document===s.document&&!draft.pending.size?'disabled':'')}${button('취소','close')}`;
+    ${boardApply(s)}${button('취소','close')}`;
 }
 function boardDrawer(s){
   const draft=s.overlay,section=draft.section;
@@ -457,19 +480,20 @@ function boardDrawer(s){
     <header><h2 data-role="board-heading" tabindex="-1">${boardTitles[section]} 편집</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
     ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}
     <div class="season-native-modal-body board-workbench"><div class="board-edit-fields">${boardScene(after)}</div>
-    <aside class="board-comparison" aria-label="적용 전후 비교">${renderBoardComparison(s)}</aside></div></section></div>`;
+    <aside class="board-comparison" aria-label="적용 전후 비교">${renderBoardComparison(s)}</aside></div>${renderDrawerBar(s)}</section></div>`;
 }
 function overlay(s) {
   if (!s.overlay) return "";
   const type = s.overlay.type;
   if(type==='board')return boardDrawer(s);
+  s={...s,drawer:{}};
   if(type==='skills'||type==='workshop'&&s.overlay.kind==='memory'){
     const index=s.overlay.index,skill=type==='skills',b=normalizeBuild(s.document.targetBuild),row=[...b.skills.active,...b.skills.passive][index];
     const name=skill?(index===0?'주력 스킬':index<5?'액티브 '+(index+1):'패시브 '+(index-4)):seasonMemoryOptions(index).name;
     const id=skill&&(Number.isInteger(s.supportIndex)?row.supports[s.supportIndex]?.supportId:row.skillId);
     return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="편집창 닫기"></button>
       <section role="dialog" aria-modal="true" aria-label="SS14 ${esc(name)}" class="season-native-modal gear-drawer slot-side-editor"><header><h2 data-role="${skill?'slot-detail-heading':'memory-drawer-heading'}" tabindex="-1">${esc(name)}</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
-      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?skillSockets(row,row.skillId,s.supportIndex)+slotEditor(s)+(id&&!s.picker?itemSource(id,s.supportIndex==null?name:name+' · 보조 '+(s.supportIndex+1))+`<details><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:''):workshopView(s)}</div></section></div>`;
+      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?skillSockets(row,row.skillId,s.supportIndex)+slotEditor(s)+(id&&!s.picker?itemSource(id,s.supportIndex==null?name:name+' · 보조 '+(s.supportIndex+1))+`<details><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:''):workshopView(s)}</div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
   }
   if (type === "gear") {
     const index=s.overlay.index, id=normalizeBuild(s.document.targetBuild).gear.slots[index]?.itemId;
@@ -480,7 +504,7 @@ function overlay(s) {
       ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}
       <div class="season-native-modal-body">${shelfTools("gear",index,!!id,button)}${slotEditor(s)}
       ${id&&!picking?`<details class="native-slot-effects"><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s,`gear.slots.${index}`)}</details>${itemSource(id,label)}`:''}
-      </div></section></div>`;
+      </div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
   }
   let content;
   if (type === "saves") content = s.documents.map(d => `<article class="native-save-row"><span>${esc(d.targetBuild.name)}</span>${button("열기", "open", `data-id="${esc(d.id)}" aria-label="${esc(d.targetBuild.name)} 열기"`)}</article>`).join("") || "저장된 SS14 빌드가 없습니다.";

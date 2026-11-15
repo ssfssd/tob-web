@@ -2,7 +2,7 @@ import { setPlannerHtml } from "./offlinePresentation.js";
 import { createSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
 import { prepareSeasonMigration } from "./seasonMigration.js";
 import { calculateEditorSeasonBuild } from "./seasonAssumedDps.js";
-import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources, renderBoardComparison } from "./seasonPlannerView.js";
+import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources, renderBoardComparison, renderDrawerBar } from "./seasonPlannerView.js";
 import { filterSeasonSelection } from "./seasonSelectionSearch.js";
 import { createSeasonEditHistory } from "./seasonEditHistory.js";
 import { rebindLogGear } from "./seasonLogGear.js";
@@ -49,6 +49,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     history: createSeasonEditHistory(), gearIndex: 0, skillIndex: 0, supportIndex: null, picker: null, logImport: null, slateEditor:createSlateEditorState(), resultTab:'stats', analysisMetric:'fullDps', analysis:null };
   let savedTarget = document ? JSON.stringify(document.targetBuild) : "", logRequest = 0;
   let root;
+  let viewportEvents;
   let editComparison;
   const recalculate = () => {
     state.analysis = null;
@@ -126,6 +127,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const listScroll=previousList?.scrollTop??0;
       const open = [...(globalThis.document.querySelectorAll?.(".season-native details[open][data-role], .season-native-backdrop details[open][data-role]") ?? [])].map(el => el.dataset.role);
       setPlannerHtml(root, renderSeasonPlanner(state));
+      viewportEvents?.abort();
+      const backdrop=root.querySelector?.('.gear-drawer-backdrop'), viewport=globalThis.visualViewport;
+      if(backdrop && viewport){
+        viewportEvents=new AbortController();
+        const fit=()=>{
+          backdrop.style.setProperty('--editor-top',viewport.offsetTop+'px');
+          backdrop.style.setProperty('--editor-height',viewport.height+'px');
+        };
+        fit();
+        viewport.addEventListener('resize',fit,{signal:viewportEvents.signal});
+        viewport.addEventListener('scroll',fit,{signal:viewportEvents.signal});
+      }
       const cards=root.querySelector?.('.pact-cards');
       if(cards)cards.scrollTop=cardScroll;
       const gearList=root.querySelector?.('.gear-drawer .native-picker-list');
@@ -171,14 +184,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (!Number.isInteger(index)||index<0||index>=10) return;
       state.section='gear';
       state.gearIndex=index;
-      state.overlay={type:'gear',index};
+      state.overlay={type:'gear',index,initial:{document:state.document,report:state.report}};
       state.picker=browse?{candidate:'',query:''}:null;
       state.focusRole='gear-drawer-heading';
     },
     openSkill(index,support=null) {
       if(!Number.isInteger(index)||index<0||index>=9)return;
       state.section='skills';state.skillIndex=index;state.supportIndex=support;
-      state.overlay={type:'skills',index,supportIndex:support};state.picker=null;
+      state.overlay={type:'skills',index,supportIndex:support,initial:{document:state.document,report:state.report}};state.picker=null;
       state.focusRole='slot-detail-heading';
     },
     openMemory(index) {
@@ -295,11 +308,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         state.overlay.pending.set(editKey(edit),edit);
         const comparison=event.target.type==='number'&&root?.querySelector?.('.board-comparison');
         if(comparison){
+          const bar=root.querySelector('.drawer-dps');
           try {
             api.flush();
             setPlannerHtml(comparison,renderBoardComparison(state));
+            if(bar)bar.outerHTML=renderDrawerBar(state);
           } catch(error) {
             comparison.textContent=error.message;
+            if(bar){bar.querySelector('strong').textContent='입력 확인';bar.querySelector('small').textContent='전체 DPS';bar.querySelector('button').disabled=true;}
           }
         }
         return;
@@ -329,6 +345,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(draft.kind==='memory')edit.enhancedBase=true;
           if (edit.kind === 'workshop-affix') edit.value=input.value;
           draft.pending.set(editKey(edit),edit);
+          const bar=root?.querySelector?.('.drawer-dps');
+          if(bar){bar.querySelector('strong').textContent='입력 적용 대기';bar.querySelector('small').textContent='전체 DPS';}
           return;
         }
       }
@@ -366,6 +384,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (!input.dataset?.seasonEdit) return;
       const edit = readSeasonPlannerEdit(input);
       state.pending.set(editKey(edit), edit);
+      const bar=root?.querySelector?.('.drawer-dps');
+      if(bar){bar.querySelector('strong').textContent='입력 적용 대기';bar.querySelector('small').textContent='전체 DPS';}
       const output = globalThis.document.querySelector?.('[data-role="native-dps"]');
       if (output) output.textContent = "입력 적용 대기";
       const mobile=root?.querySelector?.('[data-mobile-dps]');
@@ -449,6 +469,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (event.target.tagName === "INPUT") {
         try { api.flush(); state.error = ""; }
         catch (error) { state.error = error.message; }
+        const bar=root?.querySelector?.('.drawer-dps');
+        if(bar&&['gear','skills'].includes(state.overlay?.type))bar.outerHTML=renderDrawerBar(state);
         if(!state.error && root?.querySelectorAll){
           const committed=readSeasonPlannerEdit(event.target);
           for(const field of root.querySelectorAll('input[data-season-edit]')){
