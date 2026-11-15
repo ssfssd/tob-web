@@ -263,6 +263,14 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .slot-side-editor [data-item-workshop] label {display:grid;gap:4px;min-width:0}
 .slot-side-editor [data-item-workshop] :is(input,select,fieldset) {min-width:0;max-width:100%;box-sizing:border-box}
 .memory-base-result,.memory-preview {padding:10px;background:#202a30;border-left:2px solid #b39260}
+.memory-fields,.memory-decisions {display:grid;gap:8px;align-content:start;min-width:0}
+.memory-decisions .memory-preview {margin:0}
+.memory-decisions .memory-preview ul {padding-left:18px}
+.memory-decisions>button {width:100%}
+@media(min-width:761px){
+  .slot-side-editor .memory-workbench {grid-template-columns:minmax(0,3fr) minmax(250px,2fr);gap:18px;align-items:start}
+  .memory-decisions {position:sticky;top:0;max-height:calc(100dvh - 95px);overflow:auto}
+}
 @media(max-width:640px){
   .skill-chain {grid-template-columns:1fr;gap:4px}
   .chain-supports {margin-left:12px}

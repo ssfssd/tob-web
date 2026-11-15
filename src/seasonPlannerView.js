@@ -372,6 +372,7 @@ function workshopView(s) {
     }
   } else {
     form=slotEditor({...s,document:doc,report,overlay:{type:'memory',index}});
+    let preview='';
     const level=[45,60,75][index];
     const tier=(build,calculation)=>{
       const choices=buildTraitSlots(build,level);
@@ -382,10 +383,11 @@ function workshopView(s) {
     if(item || draft.slotDraft&&s.document.targetBuild.hero.memories?.[index]) {
       const edit=item?{kind:'shelf-apply',slotIndex:index,value:finishedWorkshopItem(draft)}:{kind:'memory-selection',slotIndex:index,value:''};
       const p=previewSlotEdit(s.document,s.report,edit);
-      form+=`<section class="memory-preview"><strong>${level}레벨 특성 · ${tier(s.document.targetBuild,s.report)} → ${tier(build,report)}</strong>${renderSlotPreview(p,sourceStats,esc)}</section>`
+      preview=`<section class="memory-preview"><strong>${level}레벨 특성 · ${tier(s.document.targetBuild,s.report)} → ${tier(build,report)}</strong>${renderSlotPreview(p,sourceStats,esc)}</section>`
         +button(item?'이 슬롯에 장착':'추억 해제','workshop-equip');
     }
-    if(draft.slotDraft)form+=button('보관함에서 장착','shelf-open',`data-kind="memory" data-index="${index}"`);
+    const shelf=draft.slotDraft?button('보관함에서 장착','shelf-open',`data-kind="memory" data-index="${index}"`):'';
+    return `<section data-item-workshop class="memory-workbench"><div class="memory-fields">${form}</div><div class="memory-decisions">${preview}${shelf}<details><summary>보관함에 저장</summary><label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',item?'':'disabled')}</details></div></section>`;
   }
   return `<section data-item-workshop>${form}<label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',(gear?item?.itemId:item?.baseAttributeId)?'':'disabled')}</section>`;
 }
