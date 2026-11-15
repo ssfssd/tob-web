@@ -95,6 +95,11 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .trait-choice > span:last-child { font-size: 13px; line-height: 1.55; color: #cdd7dc; white-space: pre-line; }
 .season-native .trait-choice[aria-pressed="true"] { border: 2px solid #a1da73; padding: 13px 11px; background-image: url("../assets/ingame-ui/game/core-card-selected.png"); }
 .trait-clear { display: flex; gap: 6px; margin-top: 10px; }
+.season-native .memory-loadout h2,.season-native .equipped-list h2 { margin: 12px 0 7px; font-size: 16px; color: var(--scene-gold); }
+.memory-slots { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(135px,100%),1fr)); gap: 6px; }
+.season-native .memory-slot,.season-native .linked-skills button { display: grid; align-content: center; gap: 2px; text-align: left; padding: 7px 10px; background: #1e2a32; border: 1px solid #4b5861; }
+.memory-slot small,.linked-skills small,.equipped-list small { display: block; font-size: 12px; color: #c8bda9; }
+.memory-slot span { font-size: 13px; color: #d7dfe2; }
 .season-native .trait-clear button { min-height: 32px; padding: 4px 10px; }
 
 .loadout-scene { display: grid; gap: 12px; align-items: start; grid-template-columns: minmax(0,1.05fr) minmax(0,1fr); }
@@ -178,4 +183,21 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
   .skill-rail { grid-template-columns: repeat(2,minmax(0,1fr)); }.skill-scene .loadout-stage { grid-template-columns: 82px minmax(0,1fr); }
   .socket-constellation { max-width: 310px; margin-inline: auto; aspect-ratio: 1.1; }
   .season-native .pact-circle .native-board { min-height: 90px !important; gap: 3px; padding: 4px; }
+}
+
+.slot-loadout { display: grid; grid-template-columns: minmax(175px,.65fr) minmax(0,1.35fr); align-items: start; }
+.equipped-list { min-width: 0; }
+.season-native .equipped-list h2 { margin-top: 0; }
+.equipped-list > div { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(165px,100%),1fr)); gap: 4px; }
+.season-native .equipped-list button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left; min-width: 0; background: #1e2a32; border: 1px solid #47545d; }
+.equipped-list button > :first-child { width: 30px; height: 32px; flex: none; object-fit: contain; display: grid; place-items: center; color: #aeb8be; }
+.equipped-list strong,.linked-skills strong { display: block; font-size: 14px; line-height: 1.35; }
+.linked-skills { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(110px,100%),1fr)); gap: 4px; margin-block: 8px; }
+.native-save-row:has([aria-label="장착 전 수치 비교"]) { display:flex; flex-wrap:wrap; }
+.native-save-row [aria-label="장착 전 수치 비교"] { flex-basis:100%; min-width:0; }
+.season-native :is(.equipped-list,.linked-skills) button[aria-pressed=true] { border-color: #dbb677; background: #3b352b; box-shadow: inset 3px 0 #dbb677; }
+@media (max-width:760px) {
+  .slot-loadout { grid-template-columns: minmax(0,1fr); }
+  .equipped-list > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .slot-loadout .native-slot-detail { box-sizing: border-box; }
 }

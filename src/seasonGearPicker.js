@@ -26,7 +26,10 @@ export function gearFilters(id) {
 
 // Run the same edit and calculation as equipping. Never publish the trial to history or storage.
 export function previewSeasonGear(document,report,index,id) {
-  const next=editSeasonWorkspace(document,{kind:'gear-selection',slotIndex:index,value:id});
+  return previewSlotEdit(document,report,{kind:'gear-selection',slotIndex:index,value:id});
+}
+export function previewSlotEdit(document,report,edit) {
+  const next=editSeasonWorkspace(document,edit);
   const after=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
   const comparison=compareSeasonDpsSnapshots({document,report},{document:next,report:after});
   const stats=[];
@@ -34,7 +37,8 @@ export function previewSeasonGear(document,report,index,id) {
     const a=report.character.values[key], b=after.character.values[key];
     if(Number.isFinite(a)&&Number.isFinite(b)&&a!==b)stats.push({label,a,b});
   }
-  const slotEffects=r=>(r.components.flatMap(c=>c.category==='gear'?c.calculations??[]:[]).find(e=>e.slotIndex===index)?.effects??[]);
+  const gear=edit.kind==='gear-selection'||(edit.kind==='shelf-apply'&&edit.value.kind==='gear');
+  const slotEffects=r=>gear?(r.components.flatMap(c=>c.category==='gear'?c.calculations??[]:[]).find(e=>e.slotIndex===edit.slotIndex)?.effects??[]):[];
   const effects=r=>slotEffects(r).filter(e=>e.applied&&Number.isFinite(e.value)&&!e.condition&&!e.per&&!e.conditionRequirements)
     .map(e=>({stat:e.stat,operation:e.operation,unit:e.unit,value:e.value}));
   return {comparison,assumed:[report.assumedDps?.dps,after.assumedDps?.dps],stats,before:effects(report),after:effects(after)};

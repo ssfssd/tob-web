@@ -1,6 +1,6 @@
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
-export function renderGearPreview(p,labels){
+export function renderSlotPreview(p,labels,esc){
   const line=(label,a,b)=>`<li>${label} · ${fmt(a)} → ${fmt(b)} (${signed(b-a)})</li>`;
   const sums=effects=>{
     const map=new Map();
@@ -16,12 +16,15 @@ export function renderGearPreview(p,labels){
     const [stat,op,unit]=JSON.parse(k);
     return Object.hasOwn(labels,stat)?line(labels[stat]+(unit==='percent'||op==='add_percent'?' (%)':''),a.get(k)??0,b.get(k)??0):'';
   }).join('');
-  return `<section aria-label="장착 전 수치 비교"><h4>장착 전 → 장착 후</h4><ul>${p.assumed?.every(Number.isFinite)?line('가동률 100% · 방어 적용 전 DPS',...p.assumed):''}${p.comparison.supported?line('입력 조건 전체 DPS',p.comparison.baseValue,p.comparison.value):'<li>전체 DPS 비교 보류</li>'}${p.stats.map(v=>line(v.label,v.a,v.b)).join('')}</ul>${contributions?'<p>확인된 장비 옵션 기여</p><ul>'+contributions+'</ul>':''}</section>`;
+  const {supported,baseValue,value,reasons}=p.comparison;
+  const amount=n=>Number.isFinite(n)?fmt(n):'미확정';
+  const total=supported?line('입력 조건 전체 DPS',baseValue,value):`<li>입력 조건 전체 DPS · ${amount(baseValue)} → ${amount(value)}<details><summary>전체 DPS 비교 보류</summary><ul>${reasons.map(r=>`<li>${esc(r.replace(/^현재:/u,'장착 후:').replace(/^기준:/u,'장착 전:'))}</li>`).join('')}</ul></details></li>`;
+  return `<section aria-label="장착 전 수치 비교"><h4>장착 전 → 장착 후</h4><ul>${p.assumed?.every(Number.isFinite)?line('가동률 100% · 방어 적용 전 DPS',...p.assumed):''}${total}${p.stats.map(v=>line(v.label,v.a,v.b)).join('')}</ul>${contributions?'<p>확인된 장비 옵션 기여</p><ul>'+contributions+'</ul>':''}</section>`;
 }
 export function shelfTools(kind,index,filled,button){
   const attrs=`data-kind="${kind}" data-index="${index}"`;
   const create = kind === 'gear' || kind === 'memory' ? button(kind === 'gear' ? '장비 제작' : '추억 제작', 'workshop-open', attrs) : '';
-  return `<div class="native-slot-actions">${create}${button('보관함 열기','shelf-open',attrs)}${filled?button('보관함에 저장','shelf-save',attrs):''}</div>`;
+  return `<div class="native-slot-actions">${create}${button(create?'보관함에서 장착':'보관함 열기','shelf-open',attrs)}${filled?button(create?'장착 중인 '+(kind==='gear'?'장비':'추억')+' 보관':'보관함에 저장','shelf-save',attrs):''}</div>`;
 }
 export function mobileDpsBar(s){
   const assumed=s.report.assumedDps, delta=s.editComparison?.assumedDelta;

@@ -14,7 +14,7 @@ import { RESULT_TABS } from './seasonResultPanels.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
 import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem } from './seasonItemWorkshop.js';
-import { previewSeasonGear } from './seasonGearPicker.js';
+import { previewSlotEdit } from './seasonGearPicker.js';
 import { getSeasonSelectionOptions } from './seasonSelections.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
 import { encodeBuildCode, decodeBuildCode, buildShareUrl, sharedCodeFromHash } from './seasonBuildCode.js';
@@ -53,8 +53,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   const recalculate = () => {
     state.analysis = null;
     state.report = state.document ? calculateEditorSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
-    if(state.section==='gear'&&state.picker?.preview&&state.document)
-      state.picker.preview=previewSeasonGear(state.document,state.report,state.gearIndex,state.picker.candidate);
+    if(state.picker?.edit&&state.document)
+      state.picker.preview=previewSlotEdit(state.document,state.report,state.picker.edit);
     if (editComparison) state.editComparison = editComparison.update(state.document, state.report);
   };
   recalculate();
@@ -304,7 +304,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       if(event.target.hasAttribute?.('data-gear-filter')){
-        state.picker={...state.picker,query:state.picker?.query??'',filter:event.target.value,candidate:'',preview:null};api.render();return;
+        state.picker={...state.picker,query:state.picker?.query??'',filter:event.target.value,candidate:'',preview:null,edit:null};api.render();return;
       }
       if (event.target.hasAttribute?.('data-analysis-metric')) {
         if (Object.hasOwn(SEASON_ADVISOR_METRICS, event.target.value)) {
@@ -442,6 +442,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const pos=list.findIndex(v=>v.id===d.id&&v.kind===kind);
           if(pos<0)throw Error('보관 항목을 찾을 수 없습니다.');
           if(action==='shelf-remove'){list.splice(pos,1);storage.setItem(SHELF_KEY,JSON.stringify(list));refresh();return;}
+          if(action==='shelf-preview'){
+            state.overlay={type:'shelf',kind,index,candidate:d.id,preview:previewSlotEdit(state.document,state.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]})};
+            return;
+          }
           if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=kind==='memory'?{type:'memory',index}:null;state.picker=null;state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
         }
         if (handleSlateEditorAction(api,action,d)) {
@@ -489,6 +493,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'compare-builds') { api.compare(); return; }
         if (action === 'reset-comparison') { api.resetComparison(); return; }
         if (["section", "advisor-open-section", "inspect-skill", "inspect-gear", "inspect-socket", "edit-slot", "requirement"].includes(action)) state.picker = null;
+        if (["inspect-skill","inspect-gear"].includes(action) && globalThis.matchMedia?.("(max-width:760px)").matches) state.focusRole = "slot-detail-heading";
         if (action === "section" || action === "advisor-open-section") { state.section = d.section === "dps" ? "combat" : d.section; state.overlay = null; }
         else if (action === "pick-hunter") {
           if (state.document.targetBuild.ss14Inputs.heroSelection?.heroId !== d.id) api.edit({ kind: "hero-selection", value: d.id });
@@ -517,13 +522,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         else if (action === "picker-gear-kind") state.picker={gearKind:d.category,filter:'',candidate:'',query:state.picker?.query??''};
         else if (action === "open-picker") state.picker = { candidate: "", query: "" };
         else if (action === "cancel-picker") state.picker = null;
-        else if (action === "preview-item") state.picker = { ...state.picker, candidate: d.id,
-          preview:state.section==='gear'?previewSeasonGear(state.document,state.report,state.gearIndex,d.id):null };
+        else if (action === "preview-item") {
+          const gear=state.section==='gear', index=gear?state.gearIndex:state.skillIndex;
+          const kind=gear?'gear-selection':Number.isInteger(state.supportIndex)?'support-selection':'skill-selection';
+          const edit={kind,slotIndex:index,rowIndex:index,supportIndex:state.supportIndex??0,value:d.id};
+          const preview=previewSlotEdit(state.document,state.report,edit);
+          state.picker={...state.picker,candidate:d.id,edit,preview};
+        }
         else if (action === "equip-item" || action === "clear-slot") {
           if (!["gear-selection", "skill-selection", "support-selection"].includes(d.kind)) throw new Error("선택할 슬롯을 확인하세요.");
+          state.picker = null;
           api.edit({ kind: d.kind, slotIndex: Number(d.index), rowIndex: Number(d.index),
             supportIndex: Number(d.support), value: action === "clear-slot" ? "" : d.id });
-          state.picker = null;
         }
         else if (action === "effect-sources") state.overlay = { type: "effects" };
         else if (action === "save") api.save();
