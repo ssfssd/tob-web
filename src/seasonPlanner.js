@@ -100,10 +100,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const resultScroll = globalThis.document.querySelector?.('.native-dps-dock')?.scrollTop ?? 0;
       const modalScroll = globalThis.document.querySelector?.(".season-native-modal-body")?.scrollTop ?? 0;
       const cardScroll = root.querySelector?.('.pact-cards')?.scrollTop ?? 0;
+      const previousList=root.querySelector?.('.gear-drawer .native-picker-list');
+      const listScroll=previousList?.scrollTop??0;
       const open = [...(globalThis.document.querySelectorAll?.(".season-native details[open][data-role], .season-native-backdrop details[open][data-role]") ?? [])].map(el => el.dataset.role);
       setPlannerHtml(root, renderSeasonPlanner(state));
       const cards=root.querySelector?.('.pact-cards');
       if(cards)cards.scrollTop=cardScroll;
+      const gearList=root.querySelector?.('.gear-drawer .native-picker-list');
+      if(gearList && state.picker?.candidate)gearList.scrollTop=listScroll;
       for (const field of globalThis.document.querySelectorAll?.("[data-season-edit]") ?? []) {
         const pending = state.pending.get(editKey(readSeasonPlannerEdit(field)));
         if (pending) field.value = pending.value;
@@ -124,7 +128,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         const detail = globalThis.document.querySelector?.(`[data-role="${state.focusRole}"]`);
         if (detail) {
           if (detail.tagName === 'DETAILS') detail.open = true;
-          const focusTarget=detail.hasAttribute?.('tabindex') ? detail : detail.querySelector?.('input, select');
+          const focusTarget=detail.matches?.('button,[tabindex]') ? detail : detail.querySelector?.('input, select');
           focusTarget?.focus({preventScroll:true});
           detail.scrollIntoView?.({ block: "nearest" });
         }
@@ -140,6 +144,24 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         state.focusField=null;
       }
+    },
+    openGear(index, browse=true) {
+      if (!Number.isInteger(index)||index<0||index>=10) return;
+      state.section='gear';
+      state.gearIndex=index;
+      state.overlay={type:'gear',index};
+      state.picker=browse?{candidate:'',query:''}:null;
+      state.focusRole='gear-drawer-heading';
+    },
+    closeOverlay() {
+      if (state.overlay?.type==='gear') {
+        state.picker=null;
+        state.focusRole='gear-slot-'+state.gearIndex;
+      } else if (state.section==='gear'&&state.overlay?.kind==='gear') {
+        api.openGear(state.overlay.index,false);
+        return;
+      }
+      state.overlay=null; state.logImport=null; ++logRequest;
     },
     edit(edit) {
       const next = editSeasonWorkspace(state.document, edit);
@@ -413,7 +435,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if (state.overlay?.type === 'workshop') {
           const draft=state.overlay;
-          if (action === 'close') {state.overlay=null;return;}
+          if (action === 'close') {api.closeOverlay();return;}
           if (action === 'workshop-category') {
             if (draft.category !== d.category) state.overlay={...createItemWorkshop(draft.kind,draft.index),category:d.category,name:draft.name};
             return;
@@ -446,7 +468,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             state.overlay={type:'shelf',kind,index,candidate:d.id,preview:previewSlotEdit(state.document,state.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]})};
             return;
           }
-          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=kind==='memory'?{type:'memory',index}:null;state.picker=null;state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
+          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=kind==='memory'?{type:'memory',index}:null;state.picker=null;if(kind==='gear')api.openGear(index,false);state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
         }
         if (handleSlateEditorAction(api,action,d)) {
           if (['slate-type','slate-select','slate-socket'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
@@ -503,10 +525,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           api.edit({ kind: "hero-choice", key: d.level, choiceIndex:Number(d.choiceIndex??0), value: d.value });
         }
         else if (action === "inspect-skill") { const i = Number(d.index); if (Number.isInteger(i) && i >= 0 && i < 9) { state.skillIndex = i; state.supportIndex = null; } }
-        else if (action === "inspect-gear") { const i = Number(d.index); if (Number.isInteger(i) && i >= 0 && i < 10) state.gearIndex = i; }
+        else if (action === "inspect-gear") api.openGear(Number(d.index));
         else if (action === "inspect-socket") { const i = Number(d.index); state.supportIndex = Number.isInteger(i) && i >= 0 && i < 5 ? i : null; }
         else if (action === "edit-slot") {
-          if (["skills", "gear"].includes(d.type)) { state.section = d.type; state[d.type === "skills" ? "skillIndex" : "gearIndex"] = Number(d.index); state.supportIndex = null; state.overlay = null; }
+          if (d.type === "gear") api.openGear(Number(d.index));
+          else if (d.type === "skills") { state.section = d.type; state.skillIndex = Number(d.index); state.supportIndex = null; state.overlay = null; }
           else state.overlay = { type: d.type, index: Number(d.index), ...(d.choiceIndex!==undefined?{choiceIndex:Number(d.choiceIndex)}:{}) };
         }
         else if (action === "requirement") {
@@ -515,10 +538,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(d.section==='gear')state.gearIndex=index;
           if(d.section==='skills'){state.skillIndex=index;state.supportIndex=null;}
           state.overlay = d.type ? { type: d.type, index } : null;
+          if(d.section==='gear' && (!d.type || d.type==='gear')) api.openGear(index,false);
           state.focusField=d.field?{edit:d.field,key:d.fieldKey}:null;
           state.focusRole = d.focusRole;
         }
-        else if (action === "close") { state.overlay = null; state.logImport = null; ++logRequest; }
+        else if (action === "close") api.closeOverlay();
         else if (action === "picker-gear-kind") state.picker={gearKind:d.category,filter:'',candidate:'',query:state.picker?.query??''};
         else if (action === "open-picker") state.picker = { candidate: "", query: "" };
         else if (action === "cancel-picker") state.picker = null;
@@ -528,12 +552,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const edit={kind,slotIndex:index,rowIndex:index,supportIndex:state.supportIndex??0,value:d.id};
           const preview=previewSlotEdit(state.document,state.report,edit);
           state.picker={...state.picker,candidate:d.id,edit,preview};
+          if (gear) state.focusRole='candidate-detail';
         }
         else if (action === "equip-item" || action === "clear-slot") {
           if (!["gear-selection", "skill-selection", "support-selection"].includes(d.kind)) throw new Error("선택할 슬롯을 확인하세요.");
           state.picker = null;
           api.edit({ kind: d.kind, slotIndex: Number(d.index), rowIndex: Number(d.index),
             supportIndex: Number(d.support), value: action === "clear-slot" ? "" : d.id });
+          if (d.kind==='gear-selection'&&state.overlay?.type==='gear') state.focusRole='gear-drawer-heading';
         }
         else if (action === "effect-sources") state.overlay = { type: "effects" };
         else if (action === "save") api.save();
@@ -658,7 +684,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         event.preventDefault(); api.run(() => api.restore(event.shiftKey || event.key.toLowerCase() === "y")); return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); api.run(() => api.save()); }
-      if (event.key === "Escape" && state.overlay) { event.preventDefault(); api.run(() => { api.flush(); state.overlay = null; state.logImport = null; ++logRequest; }); }
+      if (event.key === "Escape" && state.overlay) { event.preventDefault(); api.run(() => { api.flush(); api.closeOverlay(); }); }
       if (event.key === "Tab" && state.overlay) {
         const nodes = [...(globalThis.document.querySelectorAll?.('.season-native-modal button:not([disabled]), .season-native-modal input, .season-native-modal select, .season-native-modal textarea') ?? [])].filter(el => el.getClientRects?.().length);
         const first = nodes[0], last = nodes.at(-1);

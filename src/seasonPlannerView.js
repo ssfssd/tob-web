@@ -128,13 +128,18 @@ function itemPicker(s, category, index, supportIndex, current) {
   const key = value => String(value).normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
   const match = option => key(`${option.name} ${(SS14_CARDS.records[option.id] ?? SS14_SUPPORTS.records[option.id])?.detail ?? ""}`).includes(key(query));
   const card = SS14_CARDS.records[selected] ?? SS14_SUPPORTS.records[selected];
+  const equip = button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`);
+  const detail = card && `<p>${card.koreanTextVerified ? esc(card.detail) : "한국어 원문 미제공"}</p>`;
+  const preview = s.picker?.preview ? renderSlotPreview(s.picker.preview,sourceStats,esc) : "";
+  const oldOptions = category==="gear" && current && selected!==current ? `<details><summary>현재 장비 옵션 · ${esc(title(current))}</summary><p>${SS14_CARDS.records[current]?.koreanTextVerified?esc(SS14_CARDS.records[current].detail):'한국어 원문 미제공'}</p></details>` : "";
   return `<div class="native-item-picker" aria-label="슬롯 아이템 선택">
     ${category==='gear'?`<nav class="native-slot-actions" aria-label="장비 종류">${[['','전체'],['base','제작 장비'],['legendary','레전드 장비']].map(([id,label])=>button(label,'picker-gear-kind',`data-category="${id}" aria-pressed="${family===id}"`)).join('')}</nav>`:''}
-    <header>${filters.length?`<label>장비 분류<select data-gear-filter aria-label="장비 분류"><option value="">전체</option>${filters.map(f=>`<option${f===s.picker?.filter?' selected':''}>${esc(f)}</option>`).join('')}</select></label>`:''}<label>이름·효과 검색<input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" /></label>${current ? button("고른 아이템 보기", "cancel-picker") : ""}<small data-picker-count>${options.filter(match).length}개</small></header>
+    <header>${filters.length?`<label>장비 분류<select data-gear-filter aria-label="장비 분류"><option value="">전체</option>${filters.map(f=>`<option${f===s.picker?.filter?' selected':''}>${esc(f)}</option>`).join('')}</select></label>`:''}<label>이름·효과 검색<input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" /></label>${current ? button(category==='gear'?'장착 옵션 편집':'고른 아이템 보기', "cancel-picker") : ""}<small data-picker-count>${options.filter(match).length}개</small></header>
     <div class="native-picker-columns"><div class="native-picker-list" aria-label="아이템 후보">${options.map(o => button(`${icon(o.id)}<span>${esc(o.name)}</span>`, "preview-item",
       `data-id="${esc(o.id)}" data-picker-option data-search="${esc(`${o.name} ${(SS14_CARDS.records[o.id] ?? SS14_SUPPORTS.records[o.id])?.detail ?? ""}`)}" aria-pressed="${selected === o.id}"${match(o) ? "" : " hidden"}`)).join("")}</div>
-    <article class="native-picker-card" aria-label="아이템 미리보기">${card ? `${icon(selected)}<h3>${esc(title(selected))}</h3>
-      ${s.picker?.preview?renderSlotPreview(s.picker.preview,sourceStats,esc):""}${button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`)}<p>${card.koreanTextVerified ? esc(card.detail) : "한국어 원문 미제공"}</p>`
+    <article class="native-picker-card" aria-label="아이템 미리보기" data-role="candidate-detail" tabindex="-1">${card ? category==="gear"
+      ? `<h3>${esc(title(selected))}</h3><div class="gear-comparison-body" tabindex="0" aria-label="옵션 및 수치 비교">${detail}${preview}${oldOptions}</div>${equip}`
+      : `${icon(selected)}<h3>${esc(title(selected))}</h3>${preview}${equip}${detail}`
       : "<p>후보를 선택하면 효과와 설명을 확인할 수 있습니다.</p>"}</article></div></div>`;
 }
 function equipmentPanel(s, category) {
@@ -146,12 +151,13 @@ function equipmentPanel(s, category) {
   const row = rows[selected], support = !gear && Number.isInteger(s.supportIndex) && s.supportIndex < row.unlockedSupportCount ? s.supportIndex : null;
   const selectedId = support === null ? id : row.supports[support]?.supportId;
   const positions = gear ? [0,1,2,3,4,5,6,9,7,8] : rows.map((_, i) => i);
-  return `<div class="loadout-scene slot-loadout" data-role="slot-workspace">
-    <nav class="equipped-list" aria-label="${gear ? "장비" : "스킬"} 슬롯"><h2>${gear ? "장비 슬롯" : "스킬 슬롯"}</h2><div>${positions.map(i => {
+  const slots = `<nav class="equipped-list" aria-label="${gear ? "장비" : "스킬"} 슬롯"><h2>${gear ? "장비 슬롯" : "스킬 슬롯"}</h2><div>${positions.map(i => {
       const current = gear ? b.gear.slots[i]?.itemId : rows[i]?.skillId;
       return button(`${icon(current)}<span><small>${esc(label(i))}</small><strong>${current ? esc(title(current)) : "미장착"}</strong></span>`,
-        gear ? "inspect-gear" : "inspect-skill", `data-index="${i}" aria-pressed="${selected === i}"`);
-    }).join("")}</div></nav>
+        gear ? "inspect-gear" : "inspect-skill", `data-index="${i}" ${gear?`data-role="gear-slot-${i}" aria-haspopup="dialog" aria-expanded="${s.overlay?.type==='gear'&&selected===i}"`:`aria-pressed="${selected===i}"`}`);
+    }).join("")}</div></nav>`;
+  if (gear) return `<div class="gear-slot-overview" data-role="slot-workspace">${slots}${selected<2&&id?weaponSummary(s.document.targetBuild,selected):''}</div>`;
+  return `<div class="loadout-scene slot-loadout" data-role="slot-workspace">${slots}
     <section class="native-slot-detail" aria-label="선택 슬롯 편집">
       <header data-role="slot-detail-heading" tabindex="-1">${selectedId ? `<span class="detail-icon" aria-hidden="true">${icon(selectedId)}</span>` : ""}<small>${esc(label(selected))}${support===null?"":` · 보조 ${support+1}`}</small><h2>${selectedId ? esc(title(selectedId)) : gear ? "장비 선택" : support === null ? "스킬 선택" : `보조 ${support + 1} 선택`}</h2></header>
       ${gear?"":skillSockets(row,id,support)}
@@ -365,6 +371,17 @@ function workshopView(s) {
 function overlay(s) {
   if (!s.overlay) return "";
   const type = s.overlay.type;
+  if (type === "gear") {
+    const index=s.overlay.index, id=normalizeBuild(s.document.targetBuild).gear.slots[index]?.itemId;
+    const label=SEASON_GEAR_SLOT_LABELS[index], picking=!!s.picker || !id;
+    return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="장비창 닫기"></button>
+      <section role="dialog" aria-modal="true" aria-label="${esc(label)} 장비 편집" class="season-native-modal gear-drawer">
+      <header><div><h2 data-role="gear-drawer-heading" tabindex="-1">${esc(label)}</h2><p>현재 장착 · <strong>${id?esc(title(id)):'미장착'}</strong></p></div>${button("닫기","close",'aria-label="편집 닫기"')}</header>
+      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}
+      <div class="season-native-modal-body">${shelfTools("gear",index,!!id,button)}${slotEditor(s)}
+      ${id&&!picking?`<details class="native-slot-effects"><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s,`gear.slots.${index}`)}</details>${itemSource(id,label)}`:''}
+      </div></section></div>`;
+  }
   let content;
   if (type === "saves") content = s.documents.map(d => `<article class="native-save-row"><span>${esc(d.targetBuild.name)}</span>${button("열기", "open", `data-id="${esc(d.id)}" aria-label="${esc(d.targetBuild.name)} 열기"`)}</article>`).join("") || "저장된 SS14 빌드가 없습니다.";
   else if(type==="workshop") content=workshopView(s);

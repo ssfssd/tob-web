@@ -195,6 +195,58 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .linked-skills { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(110px,100%),1fr)); gap: 4px; margin-block: 8px; }
 .native-save-row:has([aria-label="장착 전 수치 비교"]) { display:flex; flex-wrap:wrap; }
 .native-save-row [aria-label="장착 전 수치 비교"] { flex-basis:100%; min-width:0; }
+.gear-slot-overview .equipped-list > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(195px,100%),1fr)); gap:8px; }
+.gear-slot-overview .equipped-list button { min-height:62px; }
+.season-native .gear-drawer-backdrop { justify-content:flex-start; align-items:stretch; padding:0; }
+.season-native .gear-drawer-scrim { position:absolute; inset:0; width:100%; height:100%; background:transparent; border:0; border-radius:0; }
+.season-native .gear-drawer { position:relative; width:min(920px,94vw); max-width:100%; max-height:100%; height:100%; box-sizing:border-box; border:0; border-right:1px solid #73624a; background:#171d22; color:#e8e7e4; }
+.gear-drawer > header { padding:12px 18px; background:#11171c; }
+.gear-drawer > header h2 { margin:0; font-size:20px; }
+.gear-drawer > header p { margin:4px 0 0; font-size:13px; color:#c7c2b9; }
+.gear-drawer .season-native-modal-body { padding:12px 18px 20px; overflow:auto; overscroll-behavior:contain; }
+.gear-drawer .native-slot-actions { margin:0 0 10px; }
+.gear-drawer .native-item-picker > header { align-items:end; padding-block:8px; border-block:1px solid #36424a; }
+.gear-drawer .native-picker-columns { grid-template-columns:minmax(170px,0.85fr) minmax(220px,1.15fr); align-items:start; }
+.gear-drawer .native-picker-list { max-height:min(65dvh,640px); overscroll-behavior:contain; }
+.gear-drawer .native-picker-card { background:#20272b; border:1px solid #5c5141; border-radius:2px; position:static; overflow-wrap:anywhere; }
+.gear-drawer .native-picker-card > button { min-height:40px; color:#191610; background:#e1bc7d; border:1px solid #f0cc91; font-weight:700; }
+.gear-drawer .native-picker-card details { margin-block:8px; }
+.gear-comparison-body > p:first-child { margin-top:0; }
+.gear-drawer .native-picker-list button > span[aria-hidden] { display:none; }
+@media (min-width:601px) and (min-height:440px) {
+  .gear-drawer .season-native-modal-body:has(.native-item-picker) { display:flex; flex:1; flex-direction:column; overflow:hidden; }
+  .gear-drawer .native-item-picker { display:flex; flex:1; min-height:0; flex-direction:column; }
+  .gear-drawer .native-picker-columns { flex:1; min-height:0; grid-template-rows:minmax(0,1fr); }
+  .gear-drawer .native-picker-list { max-height:100%; }
+  .gear-drawer .native-picker-card { display:flex; flex-direction:column; align-self:stretch; min-height:0; }
+  .gear-drawer .native-picker-card h3 { margin:0 0 8px; text-align:left; }
+  .gear-drawer .gear-comparison-body { flex:1; min-height:0; overflow:auto; }
+  .gear-drawer .gear-comparison-body p { max-height:none; overflow:visible; }
+  .gear-drawer .native-picker-card > button { flex:none; margin-top:8px; }
+}
+.gear-drawer :is(button,input,select,summary):focus-visible { outline:2px solid #e1bc7d; outline-offset:-2px; }
+@media (max-width:600px) {
+  .season-native .gear-drawer { width:100%; }
+  .gear-slot-overview .equipped-list > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .gear-drawer .season-native-modal-body { padding:10px; }
+  .gear-drawer .native-picker-columns { grid-template-columns:minmax(0,1fr); }
+  .gear-drawer .native-picker-list { max-height:23dvh; }
+  .gear-drawer .native-picker-card > img { float:left; width:32px; height:32px; margin:0 8px 0 0; }
+  .gear-drawer .native-picker-card h3 { min-height:32px; margin:0; text-align:left; }
+}
+@media (max-width:600px) and (min-height:580px) {
+  .gear-drawer .season-native-modal-body:has(.native-item-picker) { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .gear-drawer .native-item-picker { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .gear-drawer .native-slot-actions { gap:4px; margin-bottom:4px; }
+  .gear-drawer .native-slot-actions button { min-height:32px; padding:4px 7px; }
+  .gear-drawer .native-item-picker > header { gap:4px; margin-bottom:4px; padding-block:4px; }
+  .gear-drawer .native-item-picker > header label { margin:0; }
+  .gear-drawer .native-picker-columns { flex:1; min-height:0; gap:5px; grid-template-rows:minmax(36px,max-content) minmax(0,1fr); }
+  .gear-drawer .native-picker-list { max-height:16dvh; }
+  .gear-drawer .native-picker-card { min-height:0; display:flex; flex-direction:column; align-self:stretch; padding:8px; }
+  .gear-drawer .gear-comparison-body { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; }
+  .gear-drawer .native-picker-card > button { flex:none; margin-top:4px; }
+}
 .season-native :is(.equipped-list,.linked-skills) button[aria-pressed=true] { border-color: #dbb677; background: #3b352b; box-shadow: inset 3px 0 #dbb677; }
 @media (max-width:760px) {
   .slot-loadout { grid-template-columns: minmax(0,1fr); }
