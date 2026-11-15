@@ -10,6 +10,25 @@ import { gearFilters } from '../src/seasonGearPicker.js';
 const change = (draft, input) => { draft.document = editItemWorkshop(draft,draft.document,input); };
 const roundTrip = doc => importSeasonWorkspace(exportSeasonWorkspace(doc));
 
+test('추억 강화와 희귀도는 설치 표로 계산하고 장착한 사본만 저장된다',()=>{
+  const draft=createItemWorkshop('memory',0),original=draft.document,before=exportSeasonWorkspace(original);
+  const base=seasonMemoryOptions(0).bases.find(b=>b.name==='대미지');
+  const set=(kind,value)=>change(draft,{kind,value,slotIndex:0,enhancedBase:true});
+  const detail=doc=>calculateSeasonBuild(doc.targetBuild).componentProjection.rows.find(r=>r.path==='hero.memories.0.base');
+  set('memory-selection',base.id);
+  set('memory-quality',5);
+  assert.equal(detail(draft.document).detail,'대미지 +44%');
+  set('memory-enhancement',30);
+  assert.equal(detail(draft.document).detail,'대미지 +96.1%');
+  set('memory-quality',3);
+  assert.notEqual(detail(draft.document).detail,'대미지 +96.1%');
+  set('memory-quality',5);
+  const restored=roundTrip(edit(original,{kind:'shelf-apply',slotIndex:0,value:finishedWorkshopItem(draft)}));
+  assert.equal(detail(restored).detail,'대미지 +96.1%');
+  assert.equal(detail(restored).receipt.authorityScope,'installed-ss14');
+  assert.equal(exportSeasonWorkspace(original),before);
+});
+
 test('일반 완드 제작 옵션과 선택 수치를 보관하고 반대쪽 무기 칸에 장착해 계산한다', () => {
   const draft=createItemWorkshop('gear',0), destination=createItemWorkshop('gear',1).document;
   const original=structuredClone(destination), id='gear-tlidb-com-cn-headless-cleric-wand';

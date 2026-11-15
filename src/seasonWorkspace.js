@@ -1,4 +1,5 @@
 import { normalizeBuild } from "./engine.js";
+import { memoryBaseSource } from './seasonMemoryQuality.js';
 import { calculateSeasonBuild } from "./seasonBuild.js";
 import { validTheaInputs } from "./seasonTheaCycle.js";
 import { validTheaEventValue, THEA_EVENT_FIELDS } from "./seasonTheaEvents.js";
@@ -122,7 +123,7 @@ function validDocument(document) {
   if (target.ss14Inputs.ruleReceipts !== undefined && (!object(target.ss14Inputs.ruleReceipts)
     || !Object.entries(target.ss14Inputs.ruleReceipts).every(([url, hash]) => /^https:\/\/tlidb\.com\/(en|ko)\/[^?#]+$/u.test(url) && /^[a-f0-9]{64}$/u.test(hash)))) return false;
   if (target.ss14Inputs.componentReceipts !== undefined && (!object(target.ss14Inputs.componentReceipts)
-    || !Object.entries(target.ss14Inputs.componentReceipts).every(([url, hash]) => /^https:\/\/tlidb\.com\/en\/[^?#]+$/u.test(url) && /^[a-f0-9]{64}$/u.test(hash)))) return false;
+    || !Object.entries(target.ss14Inputs.componentReceipts).every(([url, hash]) => url===memoryBaseSource.sourceUrl ? hash===memoryBaseSource.sourcePageSha256 : /^https:\/\/tlidb\.com\/en\/[^?#]+$/u.test(url) && /^[a-f0-9]{64}$/u.test(hash)))) return false;
   if (target.ss14Inputs.heroTiers !== undefined && (!object(target.ss14Inputs.heroTiers)
     || !Object.values(target.ss14Inputs.heroTiers).every((binding) => object(binding) && Number.isInteger(binding.tier)
       && binding.tier >= 1 && binding.tier <= 6 && /^[a-f0-9]{64}$/u.test(binding.sourcePageSha256)))) return false;

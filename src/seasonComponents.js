@@ -71,7 +71,7 @@ stats['curse effect']='curse_effect';
 const safeKo = (text) => typeof text === "string" && /[가-힣]/u.test(text) && !/\p{Script=Han}/u.test(text) ? text : "한국어 원문 미제공";
 const populated = (x) => x && typeof x === "object" && Object.keys(x).length > 0;
 const receipt = (page, key) => page && ({ season: "SS14", sourceUrl: page.sourceUrl,
-  sourcePageSha256: page.sourcePageSha256, sourceRecordKey: key, authorityScope: "preview-site-deployment" });
+  sourcePageSha256: page.sourcePageSha256, sourceRecordKey: key, authorityScope: key?.startsWith('installed-modifier:')?'installed-ss14':'preview-site-deployment' });
 
 export const validSeasonConditionValue = (control, value) => value === "" || Number.isInteger(value)
   && value >= 0 && value <= (control.kind === "count" ? control.max : 1);

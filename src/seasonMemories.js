@@ -1,6 +1,7 @@
 import { SS14_MEMORIES } from "./data/ss14Memories.generated.js";
 import { normalizeHeroMemoryTypeId } from "./heroMemoryIdentity.js";
 import { bindMemoryRolls, validMemoryRollValue } from "./seasonMemoryRolls.js";
+import { enhancedMemoryBase, memoryBaseSource } from './seasonMemoryQuality.js';
 
 const safeKo = (text) => typeof text === "string" && /[가-힣]/u.test(text) && !/\p{Script=Han}/u.test(text) ? text : "한국어 원문 미제공";
 function resolve(ref, type, data) {
@@ -40,17 +41,24 @@ export function seasonMemoryRows(build, data = SS14_MEMORIES) {
       continue;
     }
     const base = type.baseGroups.find((g) => g.id === memory.baseAttributeId);
-    const options = (base?.rows ?? []).map((ref) => ({ ref, ...resolve(ref, type, data) })).filter((r) => r.row);
-    const binding = build.ss14Inputs?.memoryBases?.[index];
-    const selected = options.find((o) => Number(o.row.id) === binding?.modifierId);
-    const bound = selected && binding.instanceId === memory.instanceId && binding.baseAttributeId === base.id
-      && binding.enhancement === memory.enhancement && binding.sourcePageSha256 === selected.page.sourcePageSha256;
-    push("base", bound ? selected.ref : base?.rows[0], bound ? "" : "강화 환산은 추정하지 않습니다. SS14 현재 기본 옵션 수치를 직접 확인하세요.", {
-      koText: { name: item.tlidbText.ko.name, detail: bound ? selected.ko?.text : "기본 옵션 수치 확인 필요" },
-      memoryControl: options.length ? { key: String(index), instanceId: memory.instanceId, baseAttributeId: base.id,
-        enhancement: memory.enhancement, value: bound ? binding.modifierId : "",
-        options: options.map((o) => ({ value: Number(o.row.id), label: safeKo(o.ko?.text), sourcePageSha256: o.page.sourcePageSha256 })) } : null,
-    });
+    if (memory.ss14BaseModel === 1) {
+      const current=enhancedMemoryBase(base,memory.ss14Quality,memory.enhancement);
+      result.push({path:path+'.base',item,page:memoryBaseSource,record:current?.record,text:current?.text??'',
+        koText:{name:item.tlidbText.ko.name,detail:current?.ko??'추억 희귀도 선택 필요'},
+        reason:current?'':'기본 속성 계산에 필요한 추억 희귀도를 선택하세요.'});
+    } else {
+      const options = (base?.rows ?? []).map((ref) => ({ ref, ...resolve(ref, type, data) })).filter((r) => r.row);
+      const binding = build.ss14Inputs?.memoryBases?.[index];
+      const selected = options.find((o) => Number(o.row.id) === binding?.modifierId);
+      const bound = selected && binding.instanceId === memory.instanceId && binding.baseAttributeId === base.id
+        && binding.enhancement === memory.enhancement && binding.sourcePageSha256 === selected.page.sourcePageSha256;
+      push("base", bound ? selected.ref : base?.rows[0], bound ? "" : "강화 환산은 추정하지 않습니다. SS14 현재 기본 옵션 수치를 직접 확인하세요.", {
+        koText: { name: item.tlidbText.ko.name, detail: bound ? selected.ko?.text : "기본 옵션 수치 확인 필요" },
+        memoryControl: options.length ? { key: String(index), instanceId: memory.instanceId, baseAttributeId: base.id,
+          enhancement: memory.enhancement, value: bound ? binding.modifierId : "",
+          options: options.map((o) => ({ value: Number(o.row.id), label: safeKo(o.ko?.text), sourcePageSha256: o.page.sourcePageSha256 })) } : null,
+      });
+    }
     for (const [kind, ids] of [["fixed", fixed], ["random", random]]) for (const id of ids) {
       const group = type.affixGroups.find((g) => g.kind === kind && g.id === id);
       const config = memory.affixRolls?.[id];

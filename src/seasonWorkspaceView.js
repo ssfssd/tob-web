@@ -152,11 +152,11 @@ function componentControls(report, formValues) {
   }).join("")}</fieldset>` : "";
 }
 
-function memoryControls(report, formValues, slot) {
+function memoryControls(report, formValues, slot, automatic=false) {
   const own = report.componentProjection.rows.filter(r => slot === undefined || r.path.startsWith('hero.memories.'+slot+'.'));
-  const rows = own.filter(r => r.memoryControl);
+  const rows = automatic?[]:own.filter(r => r.memoryControl);
   const ranges = own.filter(r => r.memoryRollControls?.length);
-  return rows.length || ranges.length ? `<fieldset><legend>SS14 추억 수치 확인</legend><p id="season-memory-scope">특성 단계는 장착한 추억의 강화와 옵션으로 계산합니다. 기본 옵션은 게임 카드에 표시된 수치를 선택하세요. 목록에 없으면 미확인으로 남기세요. 부활 추억의 보정은 미확인입니다.</p>${rows.map((r) => {
+  return rows.length || ranges.length ? `<fieldset><legend>${automatic?'옵션 범위':'SS14 추억 수치 확인'}</legend><p id="season-memory-scope">${automatic?'범위가 있는 옵션은 장착할 추억에 표시된 값을 입력하세요.':'특성 단계는 장착한 추억의 강화와 옵션으로 계산합니다. 기본 옵션은 게임 카드에 표시된 수치를 선택하세요. 목록에 없으면 미확인으로 남기세요. 부활 추억의 보정은 미확인입니다.'}</p>${rows.map((r) => {
     const c = r.memoryControl; const value = formValues[`memory-base:${c.key}`] ?? c.value;
     return `<label>${escape(r.name)}<select data-season-edit="memory-base" data-key="${escape(c.key)}" aria-label="SS14 추억 ${Number(c.key) + 1} 기본 수치" aria-describedby="season-memory-scope"><option value=""${value === "" ? " selected" : ""}>수치 확인 필요</option>${c.options.map((o) => `<option value="${o.value}"${Number(value) === o.value ? " selected" : ""}>${escape(o.label)}</option>`).join("")}</select></label>`;
   }).join("")}${ranges.map((r, optionIndex) => `<p>${escape(r.name)} · ${escape(r.detail)} ${sourceLink(r.receipt)}</p>${r.memoryRollControls.map((c, index) => {

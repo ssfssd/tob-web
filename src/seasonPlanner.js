@@ -153,10 +153,24 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.picker=browse?{candidate:'',query:''}:null;
       state.focusRole='gear-drawer-heading';
     },
+    openSkill(index,support=null) {
+      if(!Number.isInteger(index)||index<0||index>=9)return;
+      state.section='skills';state.skillIndex=index;state.supportIndex=support;
+      state.overlay={type:'skills',index,supportIndex:support};state.picker=null;
+      state.focusRole='slot-detail-heading';
+    },
+    openMemory(index) {
+      state.overlay={...createItemWorkshop('memory',index),document:state.document,slotDraft:true};
+      state.focusRole='memory-drawer-heading';
+    },
     closeOverlay() {
       if (state.overlay?.type==='gear') {
         state.picker=null;
         state.focusRole='gear-slot-'+state.gearIndex;
+      } else if(state.overlay?.type==='skills') {
+        state.picker=null;state.focusRole='skill-slot-'+state.skillIndex;
+      } else if(state.overlay?.kind==='memory') {
+        state.focusRole='memory-slot-'+state.overlay.index;
       } else if (state.section==='gear'&&state.overlay?.kind==='gear') {
         api.openGear(state.overlay.index,false);
         return;
@@ -265,6 +279,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (input.hasAttribute('data-workshop-name')) {draft.name=input.value;return;}
         if (input.dataset.seasonEdit) {
           const edit=readSeasonPlannerEdit(input);
+          if(draft.kind==='memory')edit.enhancedBase=true;
           if (edit.kind === 'workshop-affix') edit.value=input.value;
           draft.pending.set(editKey(edit),edit);
           return;
@@ -322,6 +337,17 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     change(event) {
       const input = event.target;
       if (state.overlay?.type === 'workshop' && input.closest?.('[data-item-workshop]')) {
+        if(input.hasAttribute('data-memory-option')) {
+          api.run(()=>{
+            api.flushWorkshop();
+            const draft=state.overlay,index=draft.index,previous=input.dataset.previous;
+            let doc=draft.document;
+            if(previous)doc=editSeasonWorkspace(doc,{kind:'memory-affix',slotIndex:index,key:previous,value:0});
+            if(input.value)doc=editSeasonWorkspace(doc,{kind:'memory-affix',slotIndex:index,key:input.value,value:1});
+            draft.document=doc;
+          });
+          return;
+        }
         if (input.dataset.seasonEdit) api.run(() => {api.input(event);api.flushWorkshop();});
         return;
       }
@@ -364,6 +390,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       if (!event.target.dataset?.seasonEdit) return;
       api.input(event);
+      if (input.dataset.seasonEdit==='support-count' && state.overlay?.type==='skills') {
+        api.run(()=>api.flush());
+        return;
+      }
       // Number/text fields commit on blur without removing the button that the
       // user is clicking. Selects rebuild their dependent option controls.
       if (event.target.tagName === "INPUT") {
@@ -433,7 +463,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.overlay=createItemWorkshop(d.kind??state.overlay?.kind, Number(d.index??state.overlay?.index));
           return;
         }
-        if (state.overlay?.type === 'workshop') {
+        if (state.overlay?.type === 'workshop' && !action.startsWith('shelf-')) {
           const draft=state.overlay;
           if (action === 'close') {api.closeOverlay();return;}
           if (action === 'workshop-category') {
@@ -441,7 +471,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             return;
           }
           api.flushWorkshop();
-          if (action === 'workshop-remove') {
+          if (action === 'workshop-equip') {
+            api.edit(draft.document.targetBuild.hero.memories[draft.index]
+              ? {kind:'shelf-apply',slotIndex:draft.index,value:finishedWorkshopItem(draft)}
+              : {kind:'memory-selection',slotIndex:draft.index,value:''});
+            api.closeOverlay();
+          } else if (action === 'workshop-remove') {
             draft.document=editItemWorkshop(draft,draft.document,{kind:action,value:d.key});
           } else if (action === 'workshop-store') {
             const entry=finishedWorkshopItem(draft), list=readShelf(storage);
@@ -468,7 +503,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             state.overlay={type:'shelf',kind,index,candidate:d.id,preview:previewSlotEdit(state.document,state.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]})};
             return;
           }
-          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=kind==='memory'?{type:'memory',index}:null;state.picker=null;if(kind==='gear')api.openGear(index,false);state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
+          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=null;state.picker=null;if(kind==='memory')api.openMemory(index);if(kind==='gear')api.openGear(index,false);state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
         }
         if (handleSlateEditorAction(api,action,d)) {
           if (['slate-type','slate-select','slate-socket'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
@@ -524,12 +559,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         else if (action === "pick-trait") {
           api.edit({ kind: "hero-choice", key: d.level, choiceIndex:Number(d.choiceIndex??0), value: d.value });
         }
-        else if (action === "inspect-skill") { const i = Number(d.index); if (Number.isInteger(i) && i >= 0 && i < 9) { state.skillIndex = i; state.supportIndex = null; } }
+        else if (action === "inspect-skill") api.openSkill(Number(d.index));
         else if (action === "inspect-gear") api.openGear(Number(d.index));
-        else if (action === "inspect-socket") { const i = Number(d.index); state.supportIndex = Number.isInteger(i) && i >= 0 && i < 5 ? i : null; }
+        else if (action === "inspect-socket") { const i = Number(d.index); api.openSkill(Number(d.row??state.skillIndex),Number.isInteger(i) && i >= 0 && i < 5 ? i : null); }
         else if (action === "edit-slot") {
           if (d.type === "gear") api.openGear(Number(d.index));
-          else if (d.type === "skills") { state.section = d.type; state.skillIndex = Number(d.index); state.supportIndex = null; state.overlay = null; }
+          else if (d.type === "skills") api.openSkill(Number(d.index));
+          else if (d.type === "memory") api.openMemory(Number(d.index));
           else state.overlay = { type: d.type, index: Number(d.index), ...(d.choiceIndex!==undefined?{choiceIndex:Number(d.choiceIndex)}:{}) };
         }
         else if (action === "requirement") {
@@ -538,6 +574,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(d.section==='gear')state.gearIndex=index;
           if(d.section==='skills'){state.skillIndex=index;state.supportIndex=null;}
           state.overlay = d.type ? { type: d.type, index } : null;
+          if(d.type==='memory')api.openMemory(index);
+          if(d.section==='skills'&&(!d.type||d.type==='skills'))api.openSkill(index);
           if(d.section==='gear' && (!d.type || d.type==='gear')) api.openGear(index,false);
           state.focusField=d.field?{edit:d.field,key:d.fieldKey}:null;
           state.focusRole = d.focusRole;

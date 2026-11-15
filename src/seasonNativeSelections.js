@@ -93,7 +93,7 @@ export function editNativeSeasonSelection(target, edit) {
     const memory = target.hero.memories[index];
     if (edit.kind === "memory-selection") {
       if (edit.value && !options.bases.some(row => row.id === edit.value)) throw new Error("SS14 추억의 기본 옵션을 선택하세요.");
-      target.hero.memories[index] = edit.value ? { instanceId: `ss14-memory-${index}`, memoryTypeId: options.flatCatalogId,
+      target.hero.memories[index] = edit.value && edit.enhancedBase && memory ? {...memory,baseAttributeId:edit.value,ss14BaseModel:1} : edit.value ? { instanceId: `ss14-memory-${index}`, memoryTypeId: options.flatCatalogId, ...(edit.enhancedBase?{ss14BaseModel:1}:{}),
         baseAttributeId: edit.value, enhancement: 1, fixedAffixIds: [], randomAffixIds: [], affixRolls: {} } : null;
       const choices = target.ss14Inputs.heroSelection?.choices;
       const level = [45, 60, 75][index];
@@ -104,6 +104,10 @@ export function editNativeSeasonSelection(target, edit) {
       }
     } else {
       if (!memory) throw new Error("추억 기본 옵션을 먼저 선택하세요.");
+      if(edit.enhancedBase && ['memory-enhancement','memory-quality'].includes(edit.kind)) {
+        memory.ss14BaseModel=1;
+        if(target.ss14Inputs.memoryBases)delete target.ss14Inputs.memoryBases[index];
+      }
       if (edit.kind === "memory-quality") {
         const quality = memoryQuality(edit.value);
         if (edit.value !== "" && !quality) throw new Error("추억 희귀도를 확인하세요.");
@@ -135,7 +139,9 @@ export function editNativeSeasonSelection(target, edit) {
     }
     if (edit.kind!=='memory-affix' && target.ss14Inputs.memoryBases) delete target.ss14Inputs.memoryBases[index];
     const prefix=edit.kind==='memory-affix'?`hero.memories.${index}.${options.affixes.find(o=>o.id===edit.key).kind}.${options.affixes.find(o=>o.id===edit.key).groupId}:`:`hero.memories.${index}.`;
-    for (const key of Object.keys(target.ss14Inputs.memoryRolls ?? {})) if (key.startsWith(prefix)) delete target.ss14Inputs.memoryRolls[key];
+    if (!(edit.enhancedBase && (edit.kind==='memory-enhancement'||edit.kind==='memory-selection'&&memory&&edit.value))) {
+      for (const key of Object.keys(target.ss14Inputs.memoryRolls ?? {})) if (key.startsWith(prefix)) delete target.ss14Inputs.memoryRolls[key];
+    }
     capture(target, "hero");
   } else if (["talent-board", "talent-node"].includes(edit.kind)) {
     if (!Number.isInteger(index) || index < 0 || index > 2) throw new Error("재능 패널을 확인하세요. 4번째 패널은 계시의 예언에서 편집하세요.");

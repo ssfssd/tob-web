@@ -248,6 +248,26 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
   .gear-drawer .native-picker-card > button { flex:none; margin-top:4px; }
 }
 .season-native :is(.equipped-list,.linked-skills) button[aria-pressed=true] { border-color: #dbb677; background: #3b352b; box-shadow: inset 3px 0 #dbb677; }
+.skill-chain {display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr);align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #384149}
+.skill-chain>button {min-height:52px}
+.chain-supports {display:flex;flex-wrap:wrap;gap:4px;border-left:2px solid #827153;padding-left:8px}
+.chain-supports:empty {display:none}
+.chain-supports button {flex:1 1 112px;max-width:200px}
+.slot-side-editor .linked-skills {flex-wrap:wrap}
+.season-native .slot-side-editor .season-native-modal-body {display:block;overflow:auto;overscroll-behavior:contain}
+.slot-side-editor .native-picker-columns {align-items:start}
+.slot-side-editor .native-picker-list {max-height:50dvh;overflow:auto}
+.slot-side-editor .native-picker-card {display:block}
+.slot-side-editor .native-picker-card p {overflow:visible;max-height:none}
+.slot-side-editor [data-item-workshop] {display:grid;gap:10px;min-width:0}
+.slot-side-editor [data-item-workshop] label {display:grid;gap:4px;min-width:0}
+.slot-side-editor [data-item-workshop] :is(input,select,fieldset) {min-width:0;max-width:100%;box-sizing:border-box}
+.memory-base-result,.memory-preview {padding:10px;background:#202a30;border-left:2px solid #b39260}
+@media(max-width:640px){
+  .skill-chain {grid-template-columns:1fr;gap:4px}
+  .chain-supports {margin-left:12px}
+  .slot-side-editor .native-picker-list {max-height:25dvh}
+}
 @media (max-width:760px) {
   .slot-loadout { grid-template-columns: minmax(0,1fr); }
   .equipped-list > div { grid-template-columns: repeat(2,minmax(0,1fr)); }

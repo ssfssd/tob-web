@@ -7,7 +7,9 @@ import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { seasonHeroOptions, seasonHeroTraitOptions, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlotCount, buildTraitSlots } from "./seasonHeroSelection.js";
 import { seasonMemoryOptions, seasonTalentBoards, seasonTalentNodes, seasonSpiritOptions } from "./seasonNativeSelections.js";
-import { memoryQualities, memoryQuality } from './seasonMemoryQuality.js';
+import { memoryQualities, memoryQuality, enhancedMemoryBase } from './seasonMemoryQuality.js';
+import { memoryTraitTier } from './seasonMemories.js';
+import { finishedWorkshopItem } from './seasonItemWorkshop.js';
 import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { seasonSupportOptions } from "./seasonSupport.js";
 import { seasonDestinyOptions } from './seasonDestiny.js';
@@ -18,7 +20,7 @@ import { seasonEffectSources, effectSourceLabel } from "./seasonEffectSources.js
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
-import { gearFilters } from './seasonGearPicker.js';
+import { gearFilters, previewSlotEdit } from './seasonGearPicker.js';
 import { craftOptions, itemGearKind } from './seasonItemCraft.js';
 import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
@@ -61,8 +63,9 @@ function heroPanel(s) {
     <section class="memory-loadout"><h2>장착한 추억</h2><div class="memory-slots">${[45,60,75].map((level,i)=>{
       const options=seasonMemoryOptions(i), memory=b.hero?.memories?.[i];
       const base=options.bases.find(option=>option.id===memory?.baseAttributeId);
-      const detail=memory?[base?.name, memoryQuality(memory.ss14Quality)?.name, `강화 +${memory.enhancement}`].filter(Boolean).join(" · "):"미장착";
-      return button(`<small>${level}레벨 특성</small><strong>${esc(options.name)}</strong><span>${esc(detail)}</span>`,"edit-slot",`data-type="memory" data-index="${i}" class="memory-slot"`);
+      const native=memory?.ss14BaseModel===1&&enhancedMemoryBase(options.baseGroups.find(g=>g.id===memory.baseAttributeId),memory.ss14Quality,memory.enhancement);
+      const detail=memory?[native?.ko||base?.name, memoryQuality(memory.ss14Quality)?.name, `강화 +${memory.enhancement}`].filter(Boolean).join(" · "):"미장착";
+      return button(`<small>${level}레벨 특성</small><strong>${esc(options.name)}</strong><span>${esc(detail)}</span>`,"edit-slot",`data-type="memory" data-role="memory-slot-${i}" data-index="${i}" aria-haspopup="dialog" class="memory-slot"`);
     }).join("")}</div></section>
     <div class="hunter-path"><h2>히어로 특성</h2>${[1, 45, 60, 75].map(level => {
       const slots=buildTraitSlots(b,level), count=traitSlotCount(id,level);
@@ -148,24 +151,16 @@ function equipmentPanel(s, category) {
   const selected = gear ? s.gearIndex ?? 0 : s.skillIndex ?? 0;
   const id = gear ? b.gear.slots[selected]?.itemId : rows[selected]?.skillId;
   const label = i => gear ? SEASON_GEAR_SLOT_LABELS[i] : `${i < 5 ? i === 0 ? "주력" : "액티브" : "패시브"} ${i < 5 ? i + 1 : i - 4}`;
-  const row = rows[selected], support = !gear && Number.isInteger(s.supportIndex) && s.supportIndex < row.unlockedSupportCount ? s.supportIndex : null;
-  const selectedId = support === null ? id : row.supports[support]?.supportId;
   const positions = gear ? [0,1,2,3,4,5,6,9,7,8] : rows.map((_, i) => i);
+  if (!gear) return `<div class="skill-overview" data-role="slot-workspace"><nav class="equipped-list" aria-label="스킬 슬롯"><h2>스킬 슬롯</h2>${rows.map((r,i)=>`<section class="skill-chain">
+    ${button(`${icon(r.skillId)}<span><small>${label(i)}</small><strong>${r.skillId?esc(title(r.skillId)):'미장착'}</strong></span>`,'inspect-skill',`data-index="${i}" data-role="skill-slot-${i}" aria-haspopup="dialog"`)}
+    <div class="chain-supports">${Array.from({length:r.unlockedSupportCount},(_,n)=>button(`${icon(r.supports[n]?.supportId)}<span><small>보조 ${n+1}</small><strong>${r.supports[n]?.supportId?esc(title(r.supports[n].supportId)):'미장착'}</strong></span>`,'inspect-socket',`data-row="${i}" data-index="${n}" aria-haspopup="dialog"`)).join('')}</div></section>`).join('')}</nav>${button("영약·모듈화 편집", "edit-slot", 'data-type="extensions"')}</div>`;
   const slots = `<nav class="equipped-list" aria-label="${gear ? "장비" : "스킬"} 슬롯"><h2>${gear ? "장비 슬롯" : "스킬 슬롯"}</h2><div>${positions.map(i => {
       const current = gear ? b.gear.slots[i]?.itemId : rows[i]?.skillId;
       return button(`${icon(current)}<span><small>${esc(label(i))}</small><strong>${current ? esc(title(current)) : "미장착"}</strong></span>`,
         gear ? "inspect-gear" : "inspect-skill", `data-index="${i}" ${gear?`data-role="gear-slot-${i}" aria-haspopup="dialog" aria-expanded="${s.overlay?.type==='gear'&&selected===i}"`:`aria-pressed="${selected===i}"`}`);
     }).join("")}</div></nav>`;
-  if (gear) return `<div class="gear-slot-overview" data-role="slot-workspace">${slots}${selected<2&&id?weaponSummary(s.document.targetBuild,selected):''}</div>`;
-  return `<div class="loadout-scene slot-loadout" data-role="slot-workspace">${slots}
-    <section class="native-slot-detail" aria-label="선택 슬롯 편집">
-      <header data-role="slot-detail-heading" tabindex="-1">${selectedId ? `<span class="detail-icon" aria-hidden="true">${icon(selectedId)}</span>` : ""}<small>${esc(label(selected))}${support===null?"":` · 보조 ${support+1}`}</small><h2>${selectedId ? esc(title(selectedId)) : gear ? "장비 선택" : support === null ? "스킬 선택" : `보조 ${support + 1} 선택`}</h2></header>
-      ${gear?"":skillSockets(row,id,support)}
-      ${gear?shelfTools("gear",selected,!!selectedId,button):""}${slotEditor({ ...s, overlay: { type: category, index: selected, supportIndex: support } })}
-      ${selectedId && !s.picker ? `<details class="native-slot-effects" data-role="selected-slot-effects"><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s, gear ? `gear.slots.${selected}` : `skills.rows.${selected}${support === null ? "" : `.supports.${support}`}`)}</details>` : ""}
-      ${itemSource(selectedId, support === null ? label(selected) : `${label(selected)} · 보조 ${support + 1}`)}
-      ${!gear ? button("영약·모듈화 편집", "edit-slot", 'data-type="extensions"') : ""}
-    </section></div>`;
+  return `<div class="gear-slot-overview" data-role="slot-workspace">${slots}${selected<2&&id?weaponSummary(s.document.targetBuild,selected):''}</div>`;
 }
 function skillSockets(row, id, selectedSupport) {
   if (!id && !row.unlockedSupportCount) return "";
@@ -248,22 +243,32 @@ function slotEditor(s) {
   }
   if (type === "memory") {
     const options = seasonMemoryOptions(index), memory = b.hero.memories[index];
-    const base = select("기본 속성", "native-memory", "memory-selection", memory?.baseAttributeId, options.bases, `data-slot="${index}"`);
+    const seen=new Set();
+    const bases=options.baseGroups.map(group=>({id:group.id,name:enhancedMemoryBase(group,1,1)?.label})).filter(o=>{
+      if(seen.has(o.name)&&o.id!==memory?.baseAttributeId)return false;
+      seen.add(o.name);return true;
+    });
+    const base = select("기본 속성", "native-memory", "memory-selection", memory?.baseAttributeId, bases, `data-slot="${index}"`);
     if (!memory) return base;
     const quality = memoryQuality(memory.ss14Quality);
-    const tiers = options.affixGroups.map(({id}) => {
-      const choices = options.affixes.filter(o=>o.groupId === id);
-      if (!choices.length) return '';
-      const first = choices[0];
-      const label = first.name.replace(/\s*[+(–\d].*$/u, '').trim() || first.name;
-      return select((first.kind === 'fixed' ? '고유' : '랜덤')+' · '+label, 'tier-'+id, 'memory-tier',
-        memory.affixRolls?.[id]?.tierId, choices.map(o=>({id:o.tierId,name:`T${o.tier} · ${o.name}`})), `data-slot="${index}" data-key="${esc(id)}"`);
+    const tiers = ['fixed','random'].map(kind=>{
+      const ids=memory[kind+'AffixIds']??[], count=kind==='fixed'?2:quality?.randomLimit??2;
+      return Array.from({length:Math.min(count,ids.length+1)},(_,n)=>{
+        const id=ids[n],previous=id?id+'|'+memory.affixRolls?.[id]?.tierId:'';
+        const choices=options.affixes.filter(o=>o.kind===kind&&(o.groupId===id||!ids.includes(o.groupId)));
+        const label=(kind==='fixed'?'고유':'랜덤')+' 옵션 '+(n+1);
+        const families=new Map();
+        for(const o of choices)if(!families.has(o.groupId)||o.id===previous)families.set(o.groupId,o);
+        const levels=choices.filter(o=>o.groupId===id);
+        return `<div class="memory-affix-line"><label>${label}<select data-memory-option data-previous="${esc(previous)}" aria-label="${label}"><option value="">미장착</option>${[...families.values()].map(o=>`<option value="${esc(o.id)}"${o.id===previous?' selected':''}>${esc(o.name)}</option>`).join('')}</select></label>${levels.length>1?select(label+' 등급','memory-tier-'+kind+n,'memory-tier',memory.affixRolls[id].tierId,levels.map(o=>({id:o.tierId,name:'T'+o.tier+' · '+o.name})),`data-slot="${index}" data-key="${esc(id)}"`):''}</div>`;
+      }).join('');
     }).join('');
+    const baseRow=s.report.componentProjection.rows.find(r=>r.path==='hero.memories.'+index+'.base');
     return base + select('추억 희귀도','native-memory-quality','memory-quality',memory.ss14Quality,
       memoryQualities.map(q=>({id:q.id,name:q.name+' · 최대 강화 '+q.maxLevel})), `data-slot="${index}"`)
-      + field("강화 단계", "memory-enhancement", memory.enhancement, `data-slot="${index}" min="1" max="${quality?.maxLevel ?? 50}" step="1"`)
-      + `<details data-role="native-memory-affixes"><summary>고유·랜덤 옵션 티어</summary>${tiers}</details>`
-      + memoryControls(s.report, {}, index);
+      + `<label>강화 단계<select aria-label="강화 단계" data-season-edit="memory-enhancement" data-slot="${index}">${Array.from({length:quality?.maxLevel??50},(_,i)=>`<option value="${i+1}"${i+1===memory.enhancement?' selected':''}>+${i+1}</option>`).join('')}</select></label>`
+      + `<p class="memory-base-result">기본 속성 · <strong>${esc(baseRow?.detail??'희귀도 선택 필요')}</strong></p><fieldset data-role="native-memory-affixes"><legend>추억 옵션</legend>${tiers}</fieldset>`
+      + memoryControls(s.report, {}, index,true);
   }
   if (type === "skills" || type === "gear") {
     const isGear = type === "gear", row = index < 5 ? b.skills.active[index] : b.skills.passive[index - 5];
@@ -365,12 +370,36 @@ function workshopView(s) {
         form+=craftFields(report,index,choices);
       }
     }
-  } else form=slotEditor({...s,document:doc,report,overlay:{type:'memory',index}});
+  } else {
+    form=slotEditor({...s,document:doc,report,overlay:{type:'memory',index}});
+    const level=[45,60,75][index];
+    const tier=(build,calculation)=>{
+      const choices=buildTraitSlots(build,level);
+      const actual=calculation.componentProjection.rows.find(r=>r.control?.recordKey&&choices.includes(r.control.recordKey)&&r.control.tier);
+      const value=actual?.control.tier??memoryTraitTier(build,level).tier;
+      return value?value+'단계':build.hero?.memories?.[index]?'확인 필요':'미장착';
+    };
+    if(item || draft.slotDraft&&s.document.targetBuild.hero.memories?.[index]) {
+      const edit=item?{kind:'shelf-apply',slotIndex:index,value:finishedWorkshopItem(draft)}:{kind:'memory-selection',slotIndex:index,value:''};
+      const p=previewSlotEdit(s.document,s.report,edit);
+      form+=`<section class="memory-preview"><strong>${level}레벨 특성 · ${tier(s.document.targetBuild,s.report)} → ${tier(build,report)}</strong>${renderSlotPreview(p,sourceStats,esc)}</section>`
+        +button(item?'이 슬롯에 장착':'추억 해제','workshop-equip');
+    }
+    if(draft.slotDraft)form+=button('보관함에서 장착','shelf-open',`data-kind="memory" data-index="${index}"`);
+  }
   return `<section data-item-workshop>${form}<label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',(gear?item?.itemId:item?.baseAttributeId)?'':'disabled')}</section>`;
 }
 function overlay(s) {
   if (!s.overlay) return "";
   const type = s.overlay.type;
+  if(type==='skills'||type==='workshop'&&s.overlay.kind==='memory'){
+    const index=s.overlay.index,skill=type==='skills',b=normalizeBuild(s.document.targetBuild),row=[...b.skills.active,...b.skills.passive][index];
+    const name=skill?(index===0?'주력 스킬':index<5?'액티브 '+(index+1):'패시브 '+(index-4)):seasonMemoryOptions(index).name;
+    const id=skill&&(Number.isInteger(s.supportIndex)?row.supports[s.supportIndex]?.supportId:row.skillId);
+    return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="편집창 닫기"></button>
+      <section role="dialog" aria-modal="true" aria-label="SS14 ${esc(name)}" class="season-native-modal gear-drawer slot-side-editor"><header><h2 data-role="${skill?'slot-detail-heading':'memory-drawer-heading'}" tabindex="-1">${esc(name)}</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
+      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?skillSockets(row,row.skillId,s.supportIndex)+slotEditor(s)+(id&&!s.picker?itemSource(id,s.supportIndex==null?name:name+' · 보조 '+(s.supportIndex+1))+`<details><summary>이 슬롯의 효과별 출처</summary>${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:''):workshopView(s)}</div></section></div>`;
+  }
   if (type === "gear") {
     const index=s.overlay.index, id=normalizeBuild(s.document.targetBuild).gear.slots[index]?.itemId;
     const label=SEASON_GEAR_SLOT_LABELS[index], picking=!!s.picker || !id;
