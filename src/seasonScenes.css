@@ -281,3 +281,25 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
   .equipped-list > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .slot-loadout .native-slot-detail { box-sizing: border-box; }
 }
+.board-slot-list {display:flex;flex-wrap:wrap;gap:6px;align-items:start}
+.board-slot-list button {display:grid;gap:4px;min-width:110px;text-align:left}
+[data-board-overview]>button {margin-bottom:8px}
+[data-board-overview] .slate-editor-columns {grid-template-columns:minmax(0,1fr)}
+.season-native .board-drawer {width:min(1120px,96vw)}
+.season-native .board-workbench {display:grid;grid-template-columns:minmax(0,1fr) minmax(235px,29%);gap:14px;align-items:start;overflow:auto}
+.board-edit-fields,.board-comparison {min-width:0}
+.board-comparison {position:sticky;top:0;background:#202a30;border-left:2px solid #ae8b54;padding:12px;display:grid;gap:7px;max-height:calc(100dvh - 100px);overflow:auto}
+.board-comparison :is(h3,h4,p) {margin:0}
+.board-comparison p :is(span,strong,b) {display:block}
+.board-comparison strong {font-size:18px;font-variant-numeric:tabular-nums}
+.board-delta {color:#f2ce91}
+.board-option-diff {margin:0;padding:0;overflow:auto;max-height:36dvh;list-style:none}
+.board-option-diff li {padding:6px 0;border-top:1px solid #46515a;overflow-wrap:anywhere}
+.board-option-diff small {color:#cfba94}
+.board-comparison [data-ss14-action="board-apply"] {border-color:#b99157}
+@media(max-width:760px){
+  .season-native .board-drawer {width:100%}
+  .season-native .board-workbench {display:flex;flex-direction:column;align-items:stretch}
+  .board-comparison {order:-1;position:static;max-height:none}
+  .board-option-diff {max-height:20dvh}
+}

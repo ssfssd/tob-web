@@ -2,7 +2,7 @@ import { setPlannerHtml } from "./offlinePresentation.js";
 import { createSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
 import { prepareSeasonMigration } from "./seasonMigration.js";
 import { calculateEditorSeasonBuild } from "./seasonAssumedDps.js";
-import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources } from "./seasonPlannerView.js";
+import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources, renderBoardComparison } from "./seasonPlannerView.js";
 import { filterSeasonSelection } from "./seasonSelectionSearch.js";
 import { createSeasonEditHistory } from "./seasonEditHistory.js";
 import { rebindLogGear } from "./seasonLogGear.js";
@@ -64,6 +64,28 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   }
   const api = {
     active: true, state,
+    workingDocument() {
+      return state.overlay?.type==='board' ? state.overlay.document : state.document;
+    },
+    openBoard(section) {
+      api.flush();
+      state.section=section;
+      state.overlay={type:'board',section,document:state.document,report:state.report,pending:new Map()};
+      state.focusRole='board-heading';
+    },
+    stageBoard(next) {
+      const report=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
+      Object.assign(state.overlay,{document:next,report});
+    },
+    applyBoard() {
+      api.flush();
+      const next=state.overlay.document;
+      if(next!==state.document && JSON.stringify(next.targetBuild)!==JSON.stringify(state.document.targetBuild)) {
+        state.history.record(state.document.targetBuild,next.targetBuild);
+        state.document=next;state.dirty=true;recalculate();
+      }
+      api.closeOverlay();
+    },
     flushWorkshop() {
       const draft = state.overlay;
       let doc = draft.document;
@@ -164,7 +186,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.focusRole='memory-drawer-heading';
     },
     closeOverlay() {
-      if (state.overlay?.type==='gear') {
+      if(state.overlay?.type==='board') {
+        state.slateEditor=createSlateEditorState();state.pactRoster=null;state.slateDrag=null;
+        state.focusRole='board-open-'+state.section;
+      } else if (state.overlay?.type==='gear') {
         state.picker=null;
         state.focusRole='gear-slot-'+state.gearIndex;
       } else if(state.overlay?.type==='skills') {
@@ -178,12 +203,20 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.overlay=null; state.logImport=null; ++logRequest;
     },
     edit(edit) {
-      const next = editSeasonWorkspace(state.document, edit);
+      const next = editSeasonWorkspace(api.workingDocument(), edit);
+      if(state.overlay?.type==='board'){api.stageBoard(next);return;}
       state.history.record(state.document.targetBuild, next.targetBuild);
       state.document = next; state.dirty = true; state.error = ""; state.notice = "";
       recalculate();
     },
     flush() {
+      if(state.overlay?.type==='board') {
+        const draft=state.overlay;
+        if(!draft.pending.size)return;
+        let next=draft.document;
+        for(const edit of draft.pending.values())next=editSeasonWorkspace(next,edit);
+        api.stageBoard(next);draft.pending.clear();return;
+      }
       if (!state.pending.size) return;
       let next = state.document;
       for (const edit of state.pending.values()) next = editSeasonWorkspace(next, edit);
@@ -257,6 +290,20 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       api.render();
     },
     input(event) {
+      if(state.overlay?.type==='board' && event.target.dataset?.seasonEdit) {
+        const edit=readSeasonPlannerEdit(event.target);
+        state.overlay.pending.set(editKey(edit),edit);
+        const comparison=event.target.type==='number'&&root?.querySelector?.('.board-comparison');
+        if(comparison){
+          try {
+            api.flush();
+            setPlannerHtml(comparison,renderBoardComparison(state));
+          } catch(error) {
+            comparison.textContent=error.message;
+          }
+        }
+        return;
+      }
       if (event.target.hasAttribute?.('data-slate-search')) {
         state.slateEditor.query=event.target.value;
         const query=event.target.value.replace(/\s/gu,'').toLowerCase();let count=0;
@@ -336,6 +383,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     },
     change(event) {
       const input = event.target;
+      if(state.overlay?.type==='board' && input.dataset?.seasonEdit) {
+        api.run(()=>{api.input(event);api.flush();});return;
+      }
       if (state.overlay?.type === 'workshop' && input.closest?.('[data-item-workshop]')) {
         if(input.hasAttribute('data-memory-option')) {
           api.run(()=>{
@@ -458,6 +508,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return true;
       }
       api.run(() => {
+        if(state.overlay?.type==='board' && action==='close'){api.closeOverlay();return;}
+        if(action==='board-apply' && state.overlay?.type==='board'){api.applyBoard();return;}
+        if(!state.overlay && ['talents','pact','divinity'].includes(state.section) && (action==='board-open'||target?.closest?.('[data-board-overview]'))) {
+          api.openBoard(state.section);
+          if(action==='board-open')return;
+        }
         if (action === 'workshop-open') {
           api.flush();
           state.overlay=createItemWorkshop(d.kind??state.overlay?.kind, Number(d.index??state.overlay?.index));
@@ -498,6 +554,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(action==='shelf-save'){list.push(captureShelf(state.document.targetBuild,kind,index));storage.setItem(SHELF_KEY,JSON.stringify(list));state.notice='보관함에 저장했습니다.';return;}
           const pos=list.findIndex(v=>v.id===d.id&&v.kind===kind);
           if(pos<0)throw Error('보관 항목을 찾을 수 없습니다.');
+          if(action==='shelf-use' && ['prism','divinity'].includes(kind)){
+            api.openBoard(kind==='prism'?'talents':'divinity');
+            api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});return;
+          }
           if(action==='shelf-remove'){list.splice(pos,1);storage.setItem(SHELF_KEY,JSON.stringify(list));refresh();return;}
           if(action==='shelf-preview'){
             state.overlay={type:'shelf',kind,index,candidate:d.id,preview:previewSlotEdit(state.document,state.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]})};
@@ -512,12 +572,27 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'talent-slot') { state.talentIndex=Number(d.index); state.talentNode=null; return; }
         if (action === 'talent-inspect') { state.talentNode=d.id; return; }
         if (action === 'pact-inspect') {
+          if(state.overlay?.rosterBase){
+            api.stageBoard(state.overlay.rosterBase);delete state.overlay.rosterBase;
+          }
           state.pactRoster=null; state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
         }
-        if (action === 'pact-roster') { state.pactIndex=Number(d.index);state.pactRoster={index:state.pactIndex,id:d.id||null,query:state.pactRoster?.query??''}; return; }
+        if (action === 'pact-roster') {
+          const index=Number(d.index);
+          if(state.overlay?.type==='board'){
+            const original=state.overlay.rosterBase??=state.overlay.document;
+            if(d.id){
+              const candidate=d.id===original.targetBuild.pact?.slots?.[index]?.spirit?.spiritId?original
+                :editSeasonWorkspace(original,{kind:'spirit-selection',slotIndex:index,value:d.id});
+              api.stageBoard(candidate);
+            }
+          }
+          state.pactIndex=index;state.pactRoster={index,id:d.id||null,query:state.pactRoster?.query??''};return;
+        }
         if (action === 'pact-clear') {api.edit({kind:'spirit-selection',slotIndex:Number(d.index),value:''});state.pactRing=null;return;}
         if (action === 'pact-roster-apply') {
-          if (state.pactRoster?.id) api.edit({kind:'spirit-selection',slotIndex:state.pactRoster.index,value:state.pactRoster.id});
+          if(state.overlay?.type==='board')delete state.overlay.rosterBase;
+          if (state.pactRoster?.id && state.pactRoster.id!==api.workingDocument().targetBuild.pact?.slots?.[state.pactRoster.index]?.spirit?.spiritId) api.edit({kind:'spirit-selection',slotIndex:state.pactRoster.index,value:state.pactRoster.id});
           state.pactRoster=null; state.pactRing=null; return;
         }
         if (action === 'pact-spend') {
@@ -527,7 +602,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (action === 'fate-slot') {
           const index=Number(d.index);
           api.edit({kind:'fate-slot',slotIndex:index,value:d.value});
-          const count=state.document.targetBuild.pact.slots[index].undeterminedFate?.slots?.length ?? 0;
+          const count=api.workingDocument().targetBuild.pact.slots[index].undeterminedFate?.slots?.length ?? 0;
           state.pactRing=count ? 'extra-'+(count-1) : 'undetermined';
           state.focusRole='pact-inspector';
           return;
@@ -537,7 +612,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           return;
         }
         if (action === 'talent-step') {
-          const index=Number(d.index), board=state.document.targetBuild.talents.boards[index];
+          const index=Number(d.index), board=api.workingDocument().targetBuild.talents.boards[index];
           const n=seasonTalentNodes(board?.treeSlug).find(n=>n.id===d.id);
           if(!n || ![-1,1].includes(Number(d.step))) return;
           const count=n.core?Number(!!board.coreTalentIds?.includes(n.id)):(board.nodePoints?.[n.id]??0);
@@ -566,6 +641,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if (d.type === "gear") api.openGear(Number(d.index));
           else if (d.type === "skills") api.openSkill(Number(d.index));
           else if (d.type === "memory") api.openMemory(Number(d.index));
+          else if(['talents','pact','divinity'].includes(d.type)) {
+            if(d.type==='talents')state.talentIndex=Number(d.index)||0;
+            if(d.type==='pact')state.pactIndex=Number(d.index)||0;
+            api.openBoard(d.type);
+          }
           else state.overlay = { type: d.type, index: Number(d.index), ...(d.choiceIndex!==undefined?{choiceIndex:Number(d.choiceIndex)}:{}) };
         }
         else if (action === "requirement") {
@@ -575,6 +655,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(d.section==='skills'){state.skillIndex=index;state.supportIndex=null;}
           state.overlay = d.type ? { type: d.type, index } : null;
           if(d.type==='memory')api.openMemory(index);
+          if(['talents','pact','divinity'].includes(d.section)){
+            if(d.section==='talents')state.talentIndex=index;
+            if(d.section==='pact')state.pactIndex=index;
+            api.openBoard(d.section);
+          }
           if(d.section==='skills'&&(!d.type||d.type==='skills'))api.openSkill(index);
           if(d.section==='gear' && (!d.type || d.type==='gear')) api.openGear(index,false);
           state.focusField=d.field?{edit:d.field,key:d.fieldKey}:null;
@@ -701,7 +786,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     },
     slateDragStart(event) {
       const cell=event.target.closest?.('[data-slate-id][draggable="true"]');
-      const slate=slateEditorBoard(state.document.targetBuild).slateInventory.find(s=>s.instanceId===cell?.dataset.slateId);
+      const slate=slateEditorBoard(api.workingDocument().targetBuild).slateInventory.find(s=>s.instanceId===cell?.dataset.slateId);
       if(!slate?.anchor)return;
       state.slateDrag={id:slate.instanceId,dx:Number(cell.dataset.x)-slate.anchor.x,dy:Number(cell.dataset.y)-slate.anchor.y,offsets:slatePreviewOffsets(slate)};
       event.dataTransfer?.setData('text/plain','TOB 석판 이동');
@@ -712,11 +797,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.slateDrag=null;if(!cell||!drag)return;
       event.preventDefault();
       api.run(()=>{
+        if(!state.overlay)api.openBoard('divinity');
         api.flush();api.edit({kind:'slate-move',key:drag.id,value:{x:Number(cell.dataset.x)-drag.dx,y:Number(cell.dataset.y)-drag.dy}});
         Object.assign(state.slateEditor,{selectedId:drag.id,draft:null,moving:false});
       });
     },
     keydown(event) {
+      if(state.overlay?.type==='board'){
+        if(event.key==='Escape'){event.preventDefault();api.run(()=>api.closeOverlay());return;}
+        if((event.ctrlKey||event.metaKey)&&['s','z','y'].includes(event.key.toLowerCase())){
+          if(event.key.toLowerCase()==='s'||!event.target?.closest?.('input,textarea'))event.preventDefault();
+          return;
+        }
+      }
       const editingText = event.target?.closest?.("input, textarea, select, [contenteditable=true]");
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !editingText && ["z", "y"].includes(event.key.toLowerCase())) {
         event.preventDefault(); api.run(() => api.restore(event.shiftKey || event.key.toLowerCase() === "y")); return;

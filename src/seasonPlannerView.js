@@ -25,7 +25,10 @@ import { craftOptions, itemGearKind } from './seasonItemCraft.js';
 import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
 import { renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
-import { renderSlateEditor } from './seasonSlateEditor.js';
+import { renderSlateEditor,slateEditorBoard } from './seasonSlateEditor.js';
+import { regularSlateFamilies } from './seasonDivinity.js';
+import { nativeSlateOptions } from './seasonNativeDivinity.js';
+import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
 import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison } from './seasonResultPanels.js';
 import { RUNTIME_POLICY, LOCAL_LOG_ONLY_MESSAGE } from "./runtimePolicy.js";
 import { rollControls, componentControls, memoryControls, destinyControls, extensionControls, characterControls,
@@ -167,12 +170,6 @@ function skillSockets(row, id, selectedSupport) {
   const socket=(label,item,index)=>button(`<small>${label}</small><strong>${item?esc(title(item)):"미장착"}</strong>`,"inspect-socket",
     `data-index="${index}" aria-pressed="${(selectedSupport??-1)===index}"`);
   return `<nav class="linked-skills" aria-label="선택 스킬 소켓">${socket("메인 스킬",id,-1)}${Array.from({length:row.unlockedSupportCount},(_,i)=>socket("보조 "+(i+1),row.supports[i]?.supportId,i)).join("")}</nav>`;
-}
-function talentPanel(s) {
-  return renderTalentScene(s,{button,esc,select,icon})+shelfTools("prism",s.talentIndex??0,s.document.targetBuild.talents?.placedPrism?.boardIndex===(s.talentIndex??0),button)+theaControls(s.document,s.report,{});
-}
-function pactPanel(s) {
-  return renderPactScene(s,{button,esc,select,icon});
 }
 function combatPanel(s) {
   const recovery=s.report.fullDps.burstRecovery;
@@ -391,9 +388,81 @@ function workshopView(s) {
   }
   return `<section data-item-workshop>${form}<label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',(gear?item?.itemId:item?.baseAttributeId)?'':'disabled')}</section>`;
 }
+const boardTitles={talents:'재능',pact:'정령',divinity:'신격 석판'};
+function boardScene(s){
+  const helpers={button,esc,select,icon};
+  if(s.section==='talents')return renderTalentScene(s,helpers)+(s.boardOverview?'':theaControls(s.document,s.report,{}));
+  if(s.section==='pact')return renderPactScene(s,helpers);
+  return s.boardOverview?renderSlateEditor(s):divinityPanel(s);
+}
+function boardOverview(s){
+  const open=button(boardTitles[s.section]+' 편집','board-open',`aria-haspopup="dialog" data-role="board-open-${s.section}"`);
+  const build=s.document.targetBuild;
+  const shelf=s.section==='talents'?shelfTools('prism',s.talentIndex??0,build.talents?.placedPrism?.boardIndex===(s.talentIndex??0),button)
+    :s.section==='divinity'?shelfTools('divinity',0,!!slateEditorBoard(build).slateInventory.length,button):'';
+  return `<section data-board-overview>${open}${s.overlay?.type==='board'?'':boardScene({...s,boardOverview:true})}</section>${shelf}`;
+}
+function boardOptions(snapshot,section){
+  const entries=new Map();
+  const build=snapshot.document.targetBuild;
+  if(section==='talents'){
+    const trees=seasonTalentBoards();
+    for(const [i,b] of (build.talents?.boards??[]).entries()){
+      const tree=trees.find(t=>t.id===b?.treeSlug);
+      if(tree)entries.set('panel'+i,{name:'재능 패널 '+(i+1),value:tree.name});
+    }
+  }else if(section==='divinity'){
+    const types=nativeSlateOptions();
+    for(const [i,slate] of slateEditorBoard(build).slateInventory.entries()){
+      const pos=slate.anchor;
+      const name=regularSlateFamilies.find(f=>f.id===slate.regularFamily)?.name??types.find(t=>t.id===slate.slateId)?.name;
+      entries.set('piece'+slate.instanceId,{name:'석판 '+(i+1),value:[name,pos?`${pos.x+1}열 ${pos.y+1}행`:'미배치',slate.shape.length+'칸',((slate.rotation??0)*90)+'°'].filter(Boolean).join(' · ')});
+    }
+  }
+  for(const row of snapshot.report.componentProjection.rows.filter(r=>r.group===section)){
+    const ring=/\.rings\.(inner|mid)Ring(\d+)/u.exec(row.path);
+    const name=ring?(ring[1]==='inner'?'내환 ':'중환 ')+ring[2]+' · '+row.name:row.name;
+    const slot=/^pact\.slots\.(\d+)\.spirit$/u.exec(row.path);
+    const level=slot&&build.pact.slots[Number(slot[1])]?.spirit?.level;
+    const value=[row.detail,section==='talents'?row.selectionCount+'포인트':'',level?level+'레벨':'',row.inactive?.length?'비활성':''].filter(Boolean).join(' · ');
+    const amounts=row.effects.filter(e=>sourceStats[e.stat]&&Number.isFinite(e.value)).map(e=>sourceStats[e.stat]+' '+e.value+(e.unit==='percent'?'%':'')).join(' · ');
+    if(value||amounts)entries.set(row.path,{name,value,amounts});
+  }
+  return entries;
+}
+export function renderBoardComparison(s){
+  const draft=s.overlay,section=draft.section;
+  const after={...s,document:draft.document,report:draft.report,boardOverview:false};
+  const result=compareSeasonDpsSnapshots(s,after),fmt=n=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:2}):'미확정';
+  const beforeRows=boardOptions(s,section),afterRows=boardOptions(after,section);
+  const changed=[];
+  for(const key of new Set([...beforeRows.keys(),...afterRows.keys()])){
+    const a=beforeRows.get(key),b=afterRows.get(key);
+    if(a?.value===b?.value&&a?.name===b?.name&&a?.amounts===b?.amounts)continue;
+    const scaled=a&&b&&a.amounts!==b.amounts&&a.value===b.value;
+    const label=v=>v?(a&&b&&a.name!==b.name?v.name+' · ':'')+((scaled?v.amounts:v.value)||v.amounts||'없음'):'없음';
+    changed.push(`<li><b>${esc(b?.name??a.name)}</b><div><small>현재</small> ${esc(label(a))}</div><div><small>변경</small> ${esc(label(b))}</div></li>`);
+  }
+  const amount=result.supported?`<b class="board-delta">${result.delta>0?'+':''}${fmt(result.delta)} DPS</b>`:'';
+  const reasons=result.reasons.length?`<details><summary>비교 보류 사유</summary><ul>${result.reasons.map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></details>`:'';
+  return `<h3>전체 DPS</h3><p><span>현재 → 변경 후</span><strong>${fmt(result.baseValue)} → ${fmt(result.value)}</strong>${amount}</p>${reasons}
+    <h4>변경 옵션</h4>${changed.length?`<ul class="board-option-diff">${changed.join('')}</ul>`:'<p>변경된 옵션이 없습니다.</p>'}
+    ${button('빌드에 적용','board-apply',draft.document===s.document&&!draft.pending.size?'disabled':'')}${button('취소','close')}`;
+}
+function boardDrawer(s){
+  const draft=s.overlay,section=draft.section;
+  const after={...s,document:draft.document,report:draft.report,boardOverview:false};
+  return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="편집창 닫기"></button>
+    <section role="dialog" aria-modal="true" aria-label="${boardTitles[section]} 편집" class="season-native-modal gear-drawer board-drawer">
+    <header><h2 data-role="board-heading" tabindex="-1">${boardTitles[section]} 편집</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
+    ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}
+    <div class="season-native-modal-body board-workbench"><div class="board-edit-fields">${boardScene(after)}</div>
+    <aside class="board-comparison" aria-label="적용 전후 비교">${renderBoardComparison(s)}</aside></div></section></div>`;
+}
 function overlay(s) {
   if (!s.overlay) return "";
   const type = s.overlay.type;
+  if(type==='board')return boardDrawer(s);
   if(type==='skills'||type==='workshop'&&s.overlay.kind==='memory'){
     const index=s.overlay.index,skill=type==='skills',b=normalizeBuild(s.document.targetBuild),row=[...b.skills.active,...b.skills.passive][index];
     const name=skill?(index===0?'주력 스킬':index<5?'액티브 '+(index+1):'패시브 '+(index-4)):seasonMemoryOptions(index).name;
@@ -471,11 +540,10 @@ export function renderSeasonPlanner(s) {
   if (!s.document) return `<main class="season-native"><h1>TOB · SS14</h1><p role="alert">${esc(s.error)}</p><button data-action="open-preserved-build">이전 시즌 빌드 열기</button></main>`;
   const report = s.report, dps = report.fullDps;
   const body = s.section === "hero" ? heroPanel(s) : ["skills", "gear"].includes(s.section) ? equipmentPanel(s, s.section)
-    : s.section === "talents" ? talentPanel(s) : s.section === "pact" ? pactPanel(s)
-      : s.section === "divinity" ? shelfTools("divinity",0,!!s.document.targetBuild.divinity?.boards?.find(b=>b.boardId===s.document.targetBuild.divinity.activeBoardId)?.slateInventory?.length,button)+divinityPanel(s) : combatPanel(s);
-  return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves")}${button("공유", "share")}${button("빌드 파일", "files")}</div><span role="status" data-role="native-save-status">${esc(s.notice || (s.dirty ? "저장하지 않은 변경" : s.document.revision ? "저장됨" : "새 SS14 사본"))}</span></header>
-    <nav class="quick-category-menu" aria-label="빌드 편집 메뉴">${tabs.map(([id, label]) => button(label, "section", `data-section="${id}" aria-pressed="${s.section === id}"`)).join("")}</nav>
-    <div class="native-content"><main class="season-native-scroll"><section class="planner-section ${s.section === "hero" ? "hero-section" : ""}"><a class="scene-dps-jump" href="#native-dps-summary">전체 DPS ↓</a><h1>${esc(tabs.find(([id]) => id === s.section)?.[1])}</h1>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>
+    : boardTitles[s.section] ? boardOverview(s) : combatPanel(s);
+  return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"${s.overlay?.type==='board'?' inert':''}><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves")}${button("공유", "share")}${button("빌드 파일", "files")}</div><span role="status" data-role="native-save-status">${esc(s.notice || (s.dirty ? "저장하지 않은 변경" : s.document.revision ? "저장됨" : "새 SS14 사본"))}</span></header>
+    <nav class="quick-category-menu"${s.overlay?.type==='board'?' inert':''} aria-label="빌드 편집 메뉴">${tabs.map(([id, label]) => button(label, "section", `data-section="${id}" aria-pressed="${s.section === id}"`)).join("")}</nav>
+    <div class="native-content"${s.overlay?.type==='board'?' inert':''}><main class="season-native-scroll"><section class="planner-section ${s.section === "hero" ? "hero-section" : ""}"><a class="scene-dps-jump" href="#native-dps-summary">전체 DPS ↓</a><h1>${esc(tabs.find(([id]) => id === s.section)?.[1])}</h1>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>
     ${renderNativeDps(s)}</div>
     ${overlay(s)}</div>`;
 }

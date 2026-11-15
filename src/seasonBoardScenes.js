@@ -33,22 +33,22 @@ export function renderTalentScene(s,{button,esc,select,icon}) {
   const paths=cells.filter(c=>c.prerequisite && cells.some(p=>p.x===c.prerequisite.x&&p.y===c.prerequisite.y)).map(c=>
     `<line x1="${c.prerequisite.x+.5}" y1="${c.prerequisite.y+.5}" x2="${c.x+.5}" y2="${c.y+.5}"/>`).join('');
   const count=active?points(board,active):0;
-  return `<div class="ss-board-scene tree-scene"><nav class="tree-rail" aria-label="재능 패널">${rail}</nav><div class="tree-stage"><div class="board-picker">${select('재능 패널 '+(i+1),'scene-tree','talent-board',board?.treeSlug,options,`data-slot="${i}"`)}<b>${Object.values(board?.nodePoints??{}).reduce((a,b)=>a+b,0)} 포인트</b></div>
+  return `<div class="ss-board-scene tree-scene"><nav class="tree-rail" aria-label="재능 패널">${rail}</nav><div class="tree-stage"><div class="board-picker">${s.boardOverview?'':select('재능 패널 '+(i+1),'scene-tree','talent-board',board?.treeSlug,options,`data-slot="${i}"`)}<b>${Object.values(board?.nodePoints??{}).reduce((a,b)=>a+b,0)} 포인트</b></div>
     ${nodes.length?`<div class="tree-thresholds" aria-label="열별 필요 포인트">${Array.from({length:7},(_,x)=>`<span>${cells.find(c=>c.x===x)?.node.required??'·'}</span>`).join('')}</div><div class="tree-map" role="group" aria-label="재능 노드"><svg viewBox="0 0 7 5" preserveAspectRatio="none" aria-hidden="true">${paths}</svg>${cells.map(({node,x,y})=>nodeButton(node,`grid-area:${y+1}/${x+1}`,true)).join('')}</div>
     ${extra.length?`<div class="tree-extra">${extra.map(n=>nodeButton(n)).join('')}</div>`:''}${cores.length?`<div class="tree-core"><h3>핵심 재능</h3>${cores.map(n=>nodeButton(n)).join('')}</div>`:''}`:'<p class="board-empty">패널을 선택하면 재능을 배분할 수 있습니다.</p>'}</div>
-    ${active?`<aside class="board-inspector"><header>${icon(active.id)}<h3>${esc(active.name)}</h3></header><p>${esc(active.detail)}</p><small>필요 포인트 ${active.required}</small><div class="points-stepper">${[-1,0,1].map(d=>d?button(d<0?'−':'+','talent-step',`data-index="${i}" data-id="${esc(active.id)}" data-step="${d}" aria-label="포인트 ${d<0?'회수':'투자'}"${count+d<0||count+d>active.max?' disabled':''}`):`<output>${count} / ${active.max}</output>`).join('')}</div></aside>`:''}</div>`;
+    ${active&&!s.boardOverview?`<aside class="board-inspector"><header>${icon(active.id)}<h3>${esc(active.name)}</h3></header><p>${esc(active.detail)}</p><small>필요 포인트 ${active.required}</small><div class="points-stepper">${[-1,0,1].map(d=>d?button(d<0?'−':'+','talent-step',`data-index="${i}" data-id="${esc(active.id)}" data-step="${d}" aria-label="포인트 ${d<0?'회수':'투자'}"${count+d<0||count+d>active.max?' disabled':''}`):`<output>${count} / ${active.max}</output>`).join('')}</div></aside>`:''}</div>`;
 }
 export function renderPactScene(s,{button,esc,select,icon}) {
   const i=s.pactIndex??0, slots=s.document.targetBuild.pact?.slots??[], options=seasonSpiritOptions();
   const option=j=>selectedSeasonSpirit(slots[j]?.spirit?.spiritId,options);
   const o=option(i), slot=slots[i], ring=o?.korean.parsed.rings.find(r=>r.slotId===s.pactRing);
-  if(s.pactRoster?.index===i) {
+  if(!s.boardOverview && s.pactRoster?.index===i) {
     const candidate=selectedSeasonSpirit(s.pactRoster.id,options);
     const card=p=>button(`${icon(p.id)}<span>${esc(p.name)}</span>`,'pact-roster',
       `data-spirit-name="${esc(p.name)}"${s.pactRoster.query&&!p.name.includes(s.pactRoster.query)?' hidden':''} data-index="${i}" data-id="${esc(p.id)}" aria-pressed="${p.id===candidate?.id}"`);
     return `<div class="ss-board-scene pact-roster"><div><h3>정령 목록</h3><div class="pact-cards" role="group" aria-label="정령 목록"><label>정령 검색<input type="search" data-spirit-filter value="${esc(s.pactRoster.query??'')}" aria-label="정령 이름 검색"></label>${options.map(card).join('')}</div></div>
       <aside class="board-inspector"><header>${candidate?icon(candidate.id):''}<h3>${esc(candidate?.name??'정령 선택')}</h3></header>
-      ${candidate?`<p>${esc(candidate.korean.parsed.levelAffixes.find(r=>r.level===(candidate.id===o?.id?slot.spirit.level:candidate.levels[0]))?.affixes.join('\n'))}</p>${button('정령 '+(i+1)+'에 장착','pact-roster-apply')}`:''}
+      ${candidate?`<p>${esc(candidate.korean.parsed.levelAffixes.find(r=>r.level===(candidate.id===o?.id?slot.spirit.level:candidate.levels[0]))?.affixes.join('\n'))}</p>${button(s.overlay?.type==='board'?'선택한 정령 설정':'정령 '+(i+1)+'에 장착','pact-roster-apply')}`:''}
       ${button('계약판으로','pact-inspect',`data-index="${i}"`)}</aside></div>`;
   }
   const outer=o && s.pactRing==='outer';
@@ -74,6 +74,7 @@ export function renderPactScene(s,{button,esc,select,icon}) {
       return button(installed?icon(installed.destinyId):art,'pact-inspect',`${attrs} data-index="${j}" data-key="${key}" aria-pressed="${j===i&&ring?.slotId===key}" aria-label="정령 ${j+1} · ${esc(r.name)} · ${esc(r.category)} ${key.at(-1)}" title="${esc(r.name)}"`);
     }).join('');
   }).join('');
+  if(s.boardOverview) return `<div class="ss-board-scene pact-overview"><div class="contract-stage"><div class="contract-wheel" role="group" aria-label="정령 계약 경로">${renderPactConnections()}${branches}</div></div><nav class="board-slot-list" aria-label="장착한 정령">${[0,1,2].map(j=>button('<small>정령 '+(j+1)+'</small><strong>'+esc(option(j)?.name??'미장착')+'</strong>',option(j)?'pact-inspect':'pact-roster',`data-index="${j}" aria-haspopup="dialog"`)).join('')}</nav></div>`;
   const installed=slot?.rings?.[ring?.slotId]?.installedDestiny?.destinyId;
   const choices=ring?seasonDestinyOptions(ring.slotId):[], destiny=choices.find(d=>d.id===installed);
   const ringList=(o?.korean.parsed.rings??[]).map(r=>{

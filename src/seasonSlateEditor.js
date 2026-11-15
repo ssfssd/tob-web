@@ -114,12 +114,12 @@ export function renderSlateEditor(s) {
   } else detail='<h2>석판 배치</h2><p>일반 석판 또는 특수·명왕 석판을 선택한 뒤 보드에 놓으세요.</p>';
   return `<section class="native-slate-editor${ui.draft?' is-placing':''}" aria-label="신격 석판 편집"><div class="slate-editor-heading"><strong>신격 석판 ${placed.size}개</strong><span>사용 ${board.cells.length}칸 / ${board.mask.flat().filter(Boolean).length}칸</span></div>
     <div class="slate-add-tools">${button('＋ 일반 석판 추가','slate-type',`class="regular-slate-add" data-id="six_gods" aria-pressed="${ui.draft?.type==='six_gods'}"`)}<details class="slate-inventory" data-role="slate-inventory"><summary>특수·명왕 석판 추가</summary><div class="slate-palette" aria-label="특수·명왕 석판">${palette}</div></details></div>
-    <div class="slate-editor-columns"><div class="slate-board-panel"><div class="slate-interactive-board" role="group" aria-label="신격 석판 보드" data-offsets="${slatePreviewOffsets(placing).map(p=>p.join(',')).join(';')}" style="--slate-columns:${board.width}">${boardHtml}</div><p class="slate-board-hint" role="status">${preview?'강조된 위치를 누르면 새 석판을 놓습니다.':ui.moving?'강조된 위치를 누르면 선택한 석판을 옮깁니다.':'석판을 눌러 옵션 편집 · 끌어서 이동'}</p><div class="slate-placed-list" aria-label="배치된 석판">${board.slateInventory.map((slate,i)=>button(`<b>${i+1}</b><span>${esc(nameOf(slate))}</span><small>${placed.has(slate.instanceId)?'배치됨':'미배치'}</small>`,'slate-select',`data-id="${esc(slate.instanceId)}" aria-pressed="${selected?.instanceId===slate.instanceId}"`)).join('')}</div></div><section class="slate-detail-panel" aria-label="선택한 석판" data-role="slate-inspector" tabindex="-1">${detail}</section></div></section>`;
+    <div class="slate-editor-columns"><div class="slate-board-panel"><div class="slate-interactive-board" role="group" aria-label="신격 석판 보드" data-offsets="${slatePreviewOffsets(placing).map(p=>p.join(',')).join(';')}" style="--slate-columns:${board.width}">${boardHtml}</div><p class="slate-board-hint" role="status">${preview?'강조된 위치를 누르면 새 석판을 놓습니다.':ui.moving?'강조된 위치를 누르면 선택한 석판을 옮깁니다.':'석판을 눌러 옵션 편집 · 끌어서 이동'}</p><div class="slate-placed-list" aria-label="배치된 석판">${board.slateInventory.map((slate,i)=>button(`<b>${i+1}</b><span>${esc(nameOf(slate))}</span><small>${placed.has(slate.instanceId)?'배치됨':'미배치'}</small>`,'slate-select',`data-id="${esc(slate.instanceId)}" aria-pressed="${selected?.instanceId===slate.instanceId}"`)).join('')}</div></div>${s.boardOverview?'':`<section class="slate-detail-panel" aria-label="선택한 석판" data-role="slate-inspector" tabindex="-1">${detail}</section>`}</div></section>`;
 }
 
 export function handleSlateEditorAction(api, action, data) {
   if (!action.startsWith('slate-')) return false;
-  const state=api.state,ui=state.slateEditor??=createSlateEditorState(),board=slateEditorBoard(state.document.targetBuild);
+  const state=api.state,ui=state.slateEditor??=createSlateEditorState(),build=()=>api.workingDocument?.().targetBuild??state.document.targetBuild,board=slateEditorBoard(build());
   if (action==='slate-type') {
     const shapes=shapesFor(data.id),shape=shapes.find(l=>l.shape.length===3)??shapes[0];
     if (!shape) throw new Error('석판 모양을 확인할 수 없습니다.');
@@ -141,7 +141,7 @@ export function handleSlateEditorAction(api, action, data) {
     if (ui.draft) {
       const draft=ui.draft;
       api.edit({kind:draft.editingId?'slate-shape':'slate-add',value:draft.editingId?draft.shape:draft.type,key:draft.editingId??draft.shape,regularFamily:draft.regularFamily,layout:isSeasonNether(draft.type)?draft.shape:undefined,rotation:draft.rotation,anchor});
-      Object.assign(ui,{selectedId:draft.editingId??slateEditorBoard(state.document.targetBuild).slateInventory.at(-1).instanceId,draft:null,socket:null,query:''});
+      Object.assign(ui,{selectedId:draft.editingId??slateEditorBoard(build()).slateInventory.at(-1).instanceId,draft:null,socket:null,query:''});
     } else if (ui.moving&&ui.selectedId) {
       api.edit({kind:'slate-move',key:ui.selectedId,value:anchor});ui.moving=false;
     } else if (data.slateId) Object.assign(ui,{selectedId:data.slateId,socket:null,query:''});
