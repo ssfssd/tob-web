@@ -1,12 +1,11 @@
 import {normalizeBuild} from './engine.js';
-import {getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS} from './seasonSelections.js';
+import {getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS, isTwoHandedWeapon} from './seasonSelections.js';
 import {seasonTalentNodes, selectedSeasonSpirit} from './seasonNativeSelections.js';
 import {memoryQuality} from './seasonMemoryQuality.js';
 import {editSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace} from './seasonWorkspace.js';
 import {calculateEditorSeasonBuild} from './seasonAssumedDps.js';
 import {compareSeasonDpsSnapshots} from './seasonAdvisor.js';
 import {labeledGearRolls} from './seasonWorkspaceView.js';
-import {gearFilters} from './seasonGearPicker.js';
 
 function optionCandidates(document,report){
   const build=normalizeBuild(document.targetBuild), rows=[];
@@ -65,15 +64,14 @@ function gearCandidates(document,slot,shelf){
   const gear=normalizeBuild(document.targetBuild).gear.slots, rows=[];
   for(const [slotIndex,name] of SEASON_GEAR_SLOT_LABELS.entries()){
     if(slot!=='all' && Number(slot)!==slotIndex)continue;
+    if(slotIndex===1 && isTwoHandedWeapon(gear[0]?.itemId))continue;
     const choices=new Map(getSeasonSelectionOptions('gear',slotIndex).map(o=>[o.id,o.name]));
     const current=gear[slotIndex]?.itemId;
     const before=current?(choices.get(current)??'현재 장비'):'미장착';
-    const fits=id=>!(slotIndex===0 && gear[1]?.itemId && gearFilters(id).includes('양손')
-      ||slotIndex===1 && gear[0]?.itemId && gearFilters(gear[0].itemId).includes('양손'));
     for(const [id,title] of choices){
-      if(id!==current && fits(id))rows.push({label:name+' · '+title,detail:before+' → '+title+' (도감)',catalog:true,edits:[{kind:'gear-selection',slotIndex,value:id}]});
+      if(id!==current)rows.push({label:name+' · '+title,detail:before+' → '+title+' (도감)',catalog:true,edits:[{kind:'gear-selection',slotIndex,value:id}]});
     }
-    for(const item of shelf)if(item.kind==='gear'&&choices.has(item.item?.itemId)&&fits(item.item.itemId))
+    for(const item of shelf)if(item.kind==='gear'&&choices.has(item.item?.itemId))
       rows.push({label:name+' · '+item.name,detail:before+' → '+item.name+' (보관함 저장 수치)',edits:[{kind:'shelf-apply',slotIndex,value:item}]});
   }
   return rows;

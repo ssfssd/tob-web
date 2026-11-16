@@ -7,7 +7,7 @@ import { theaEffectsPin } from "./seasonTheaSpecials.js";
 import { theaCombatPin } from "./seasonTheaCombatInputs.js";
 import { isThea, revelationBoardOptions, revelationNodeOptions, theaRulePin } from "./seasonTheaRevelation.js";
 import { prepareSeasonMigration, reopenSeasonResearchCopy, isSeasonMigrationSource } from "./seasonMigration.js";
-import { applySeasonSelections, getSeasonSelectionOptions, getSeasonSelectionRecord } from "./seasonSelections.js";
+import { applySeasonSelections, getSeasonSelectionOptions, getSeasonSelectionRecord, isTwoHandedWeapon } from "./seasonSelections.js";
 import { parseTlidbGearTooltip } from "./tlidbGearTooltipCalculation.js";
 import { validLogGear, editLogGearRoll } from "./seasonLogGear.js";
 import { applyLogSlates } from "./seasonLogSlates.js";
@@ -212,6 +212,17 @@ export function createSeasonWorkspace(draft, { now = new Date(), id = globalThis
 export function editSeasonWorkspace(document, edit) {
   if (!validDocument(document)) throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
   const next = structuredClone(document);
+  const gearId = edit.kind === 'gear-selection' ? edit.value : edit.kind === 'shelf-apply' && edit.value?.kind === 'gear' ? edit.value.item?.itemId : null;
+  if (gearId && (edit.slotIndex === 0 || edit.slotIndex === 1)) {
+    const slots = normalizeBuild(next.targetBuild).gear.slots;
+    if (edit.slotIndex === 1 && isTwoHandedWeapon(slots[0]?.itemId))
+      throw new Error("양손 무기를 먼저 교체하거나 해제하세요.");
+    if (edit.slotIndex === 0 && slots[1]?.itemId && isTwoHandedWeapon(gearId)) {
+      // Use the ordinary unequip operation on the private copy before capturing
+      // a crafted item or rebuilding the main slot. Both edits share one undo.
+      next.targetBuild = editSeasonWorkspace(document, {kind:'gear-selection', slotIndex:1, value:''}).targetBuild;
+    }
+  }
   const target = next.targetBuild;
   if (edit.kind === "name") {
     if (typeof edit.value !== "string" || !edit.value.trim() || edit.value.trim().length > 160) throw new Error("빌드 이름을 1~160자로 입력하세요.");
@@ -315,6 +326,12 @@ export function editSeasonWorkspace(document, edit) {
     target.ss14Inputs.selections ??= { gear: {}, skills: {} };
     target.ss14Inputs.selectionMode = "isolated-v1";
     target.ss14Inputs.selections[category][index] = id;
+    if (category === "gear") {
+      for (const key of Object.keys(target.ss14Inputs.extensionInputs ?? {}))
+        if (key.startsWith('craft:'+index+':')) delete target.ss14Inputs.extensionInputs[key];
+      for (const key of Object.keys(target.ss14Inputs.componentConditions ?? {}))
+        if (key.startsWith('gear.slots.'+index+'.')) delete target.ss14Inputs.componentConditions[key];
+    }
     // Equipment changes preserve encounter inputs. Weapon-dependent values are
     // derived from the selected SS14 weapon, so stale manual values are ignored.
     delete target.ss14Inputs[category][index];

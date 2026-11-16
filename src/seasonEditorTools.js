@@ -19,7 +19,7 @@ export function renderSlotPreview(p,labels,esc){
   const {supported,baseValue,value,reasons}=p.comparison;
   const amount=n=>Number.isFinite(n)?fmt(n):'미확정';
   const total=supported?line('입력 조건 전체 DPS',baseValue,value):`<li>입력 조건 전체 DPS · ${amount(baseValue)} → ${amount(value)}<details><summary>전체 DPS 비교 보류</summary><ul>${reasons.map(r=>`<li>${esc(r.replace(/^현재:/u,'장착 후:').replace(/^기준:/u,'장착 전:'))}</li>`).join('')}</ul></details></li>`;
-  return `<section aria-label="장착 전 수치 비교"><h4>장착 전 → 장착 후</h4><ul>${p.assumed?.every(Number.isFinite)?line('가동률 100% · 방어 적용 전 DPS',...p.assumed):''}${total}${p.stats.map(v=>line(v.label,v.a,v.b)).join('')}</ul>${contributions?'<p>확인된 장비 옵션 기여</p><ul>'+contributions+'</ul>':''}</section>`;
+  return `<section aria-label="장착 전 수치 비교"><h4>장착 전 → 장착 후</h4>${p.offhandRemoved?'<p>양손 무기 장착 시 서브 무기가 자동 해제됩니다.</p>':''}<ul>${p.assumed?.every(Number.isFinite)?line('가동률 100% · 방어 적용 전 DPS',...p.assumed):''}${total}${p.stats.map(v=>line(v.label,v.a,v.b)).join('')}</ul>${contributions?'<p>확인된 장비 옵션 기여</p><ul>'+contributions+'</ul>':''}</section>`;
 }
 export function shelfTools(kind,index,filled,button){
   const attrs=`data-kind="${kind}" data-index="${index}"`;

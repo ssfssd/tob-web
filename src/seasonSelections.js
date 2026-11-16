@@ -14,6 +14,10 @@ SS14_GEAR_EN.requested = Object.keys(SS14_GEAR_EN.records).length;
 export const SEASON_GEAR_SLOT_LABELS = GEAR_SLOT_KEYS.map((key) => t("ko", key));
 const cache = new Map();
 
+export function isTwoHandedWeapon(id) {
+  return !!id && findItemById(id)?.tags?.includes("twoHand") === true;
+}
+
 export function getSeasonSelectionRecord(category, id) {
   const record = (category === "gear" ? SS14_GEAR_EN : SS14_CARDS_EN).records[id];
   const item = findItemById(id);

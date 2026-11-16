@@ -10,7 +10,7 @@ import { seasonMemoryOptions, seasonTalentBoards, seasonTalentNodes, seasonSpiri
 import { memoryQualities, memoryQuality, enhancedMemoryBase } from './seasonMemoryQuality.js';
 import { memoryTraitTier } from './seasonMemories.js';
 import { finishedWorkshopItem } from './seasonItemWorkshop.js';
-import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
+import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS, isTwoHandedWeapon } from "./seasonSelections.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
@@ -133,6 +133,8 @@ function drawerDps(s, comparison, action, status='') {
   return `<div class="drawer-dps" aria-label="전체 DPS와 적용"><div aria-live="polite"><small>전체 DPS ${delta?'<b>'+delta+'</b>':''}</small><strong>${status||values}</strong></div>${action}</div>`;
 }
 function itemPicker(s, category, index, supportIndex, current) {
+  if (category==='gear' && index===1 && isTwoHandedWeapon(normalizeBuild(s.document.targetBuild).gear.slots[0]?.itemId))
+    return '<p>양손 무기를 먼저 교체하거나 해제하세요.</p>'+ (current ? button('서브 무기 해제','clear-slot','data-kind="gear-selection" data-index="1"') : '');
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";
   const host = support ? [...s.document.targetBuild.skills.active, ...s.document.targetBuild.skills.passive][index] : null;
   const all = support ? seasonSupportOptions().filter(o => supportFitsSocket(o.id, SS14_CARDS_EN.records[host?.skillId], index, supportIndex)) : getSeasonSelectionOptions(category, index);
@@ -411,8 +413,10 @@ function workshopView(s) {
     return `<section data-item-workshop class="memory-workbench"><div class="memory-fields">${form}</div><div class="memory-decisions">${preview}${shelf}<details><summary>보관함에 저장</summary><label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',item?'':'disabled')}</details></div></section>`;
   }
   const edit = item?.itemId ? {kind:'shelf-apply',slotIndex:index,value:finishedWorkshopItem(draft)} : null;
-  const preview = edit && previewSlotEdit(s.document,s.report,edit);
-  const equip = button('이 슬롯에 장착','workshop-equip',edit?'':'disabled');
+  const locked = index===1 && isTwoHandedWeapon(normalizeBuild(s.document.targetBuild).gear.slots[0]?.itemId);
+  const preview = edit && !locked && previewSlotEdit(s.document,s.report,edit);
+  if (locked) form+='<p>서브 무기를 장착하려면 양손 무기를 먼저 교체하거나 해제하세요.</p>';
+  const equip = button('이 슬롯에 장착','workshop-equip',edit&&!locked?'':'disabled');
   s.drawer.bar=drawerDps(s,preview?.comparison,equip);
   return `<section data-item-workshop class="memory-workbench"><div class="memory-fields">${form}</div><div class="memory-decisions">${preview ? renderSlotPreview(preview,sourceStats,esc) : ''}${equip}<label>보관할 이름<input type="text" data-workshop-name maxlength="100" value="${esc(draft.name)}" placeholder="아이템 이름 사용"></label>${button('제작 후 보관함에 넣기','workshop-store',edit?'':'disabled')}</div></section>`;
 }

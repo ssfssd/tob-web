@@ -4,6 +4,7 @@ import { calculateEditorSeasonBuild } from './seasonAssumedDps.js';
 import { editSeasonWorkspace } from './seasonWorkspace.js';
 import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
 import { itemGearKind } from './seasonItemCraft.js';
+import { normalizeBuild } from './engine.js';
 
 const indexes = new Map(SS14_CURRENT_DATABASE.inventory.filter(r=>r.category==='gear').map(r=>[r.runtimeId,r.indexes]));
 const labels = {Claw:'클로',Dagger:'단검',Sword:'검',Axe:'도끼',Hammer:'해머',Wand:'마법 지팡이',Rod:'지팡이',Scepter:'지팡이',Cane:'지팡이',Pistol:'권총',Bow:'활',Crossbow:'석궁',Musket:'머스킷',Fire_Cannon:'화포',Tin_Staff:'주석 지팡이',Cudgel:'무사의 스틱',STR:'힘',DEX:'민첩',INT:'지혜',Legendary_Gear:'레전드',Craft:'제작'};
@@ -38,8 +39,11 @@ export function previewSlotEdit(document,report,edit) {
     if(Number.isFinite(a)&&Number.isFinite(b)&&a!==b)stats.push({label,a,b});
   }
   const gear=edit.kind==='gear-selection'||(edit.kind==='shelf-apply'&&edit.value.kind==='gear');
-  const slotEffects=r=>gear?(r.components.flatMap(c=>c.category==='gear'?c.calculations??[]:[]).find(e=>e.slotIndex===edit.slotIndex)?.effects??[]):[];
+  const offhandRemoved=gear && edit.slotIndex===0 && !!normalizeBuild(document.targetBuild).gear.slots[1]?.itemId && !next.targetBuild.gear?.slots?.[1]?.itemId;
+  const slotEffects=r=>gear?r.components.flatMap(c=>c.category==='gear'?c.calculations??[]:[])
+    .filter(entry=>entry.slotIndex===edit.slotIndex || offhandRemoved && entry.slotIndex===1)
+    .flatMap(entry=>entry.effects??[]):[];
   const effects=r=>slotEffects(r).filter(e=>e.applied&&Number.isFinite(e.value)&&!e.condition&&!e.per&&!e.conditionRequirements)
     .map(e=>({stat:e.stat,operation:e.operation,unit:e.unit,value:e.value}));
-  return {comparison,assumed:[report.assumedDps?.dps,after.assumedDps?.dps],stats,before:effects(report),after:effects(after)};
+  return {comparison,offhandRemoved,assumed:[report.assumedDps?.dps,after.assumedDps?.dps],stats,before:effects(report),after:effects(after)};
 }
