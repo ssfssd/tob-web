@@ -2,6 +2,7 @@ import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { SEASON_DPS_ENEMY_FIELDS } from './seasonDps.js';
 import { inputDestinations } from './seasonInputRequirements.js';
 import { renderTrainingDummyPicker } from './seasonTrainingDummy.js';
+import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 
 const esc = v => String(v ?? '').replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const number = v => Number.isFinite(v) ? v.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : '미지원';
@@ -62,11 +63,33 @@ export function renderResultConditions(s) {
   </section>`;
 }
 
+function renderUpgradeRanking(s){
+  const job=s.pending.size?null:s.upgrades;
+  let content='';
+  if(job?.busy)content=`<p role="status">계산 중 <span data-upgrade-progress>${job.checked} / ${job.total}</span></p>${button('계산 중지','rank-cancel')}`;
+  else if(job?.error)content=`<p role="alert">${esc(job.error)}</p>`;
+  else if(job?.reasons?.length)content='<h3>전체 DPS 비교 보류</h3>'+renderReasons(s,job.reasons);
+  else if(job){
+    const rows=job.rows.map((r,i)=>`<li><strong>${esc(r.label)}</strong><div>${esc(r.detail)}</div>
+      <div>전체 DPS ${number(job.base)} → <b>${number(r.value)}</b></div><strong class="native-comparison-delta">+${number(r.delta)} DPS${r.percent==null?'':' (+'+number(r.percent)+'%)'}</strong>
+      ${r.saved?(s.dirty?'사본 저장됨':button('저장된 사본 열기','open',`data-id="${esc(r.saved)}"`)):button('사본에 적용','rank-copy',`data-index="${i}" aria-label="${i+1}위 사본에 적용"`)}</li>`).join('');
+    content=`<h3>${job.mode==='gear'?'장비 추천':'한계효용'} Top 20</h3><p>비교한 후보 ${job.checked}개 · 계산 보류 ${job.blocked}개</p>
+      ${rows?'<ol class="upgrade-ranking">'+rows+'</ol>':'<p>비교 가능한 후보 중 전체 DPS가 오르는 변경이 없습니다.</p>'}`;
+  }
+  return `<section aria-label="전체 DPS 추천"><h2>전체 DPS 추천</h2>
+    <p>한계효용은 장착한 옵션 수치·레벨·강화·재능을 한 번에 한 단계씩 바꿔 비교합니다.</p>
+    ${button('한계효용 Top 20','rank-options')}
+    <label>장비 추천 부위<select data-upgrade-slot>${[['all','전체 부위'],...SEASON_GEAR_SLOT_LABELS.map((n,i)=>[String(i),n])].map(([v,n])=>`<option value="${v}"${v===(s.upgradeSlot??'all')?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
+    ${button('장비 추천 계산','rank-gear')}
+    <small>장비 한 부위를 교체합니다. 도감 장비의 빈 옵션 수치는 SS14 범위 상한, 보관함 장비는 저장값으로 계산합니다.</small>
+    <div data-upgrade-results>${content}</div></section>`;
+}
 export function renderResultAnalysis(s) {
   const result = s.pending.size ? null : s.analysis;
   const metric = s.analysisMetric ?? 'fullDps';
   const rows = [...(result?.rows ?? [])].sort((a,b) => Number(!!a.reasons.length) - Number(!!b.reasons.length) || (b.delta ?? 0) - (a.delta ?? 0));
   return `<section class="native-result-analysis" aria-label="저장 빌드 비교">
+    ${renderUpgradeRanking(s)}
     ${renderEditDpsComparison(s)}
     <h2>저장 빌드 비교</h2>
     <label>비교 지표<select data-analysis-metric aria-label="비교 지표">${Object.entries(SEASON_ADVISOR_METRICS).map(([key,label]) => `<option value="${key}"${metric === key ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>

@@ -122,7 +122,7 @@ function supportControls(document, formValues) {
       }).join("")}</fieldset>`).join("")}</details>`;
 }
 
-function rollControls(row, entry, formValues) {
+export function labeledGearRolls(row, entry) {
   const ko = koreanRecord(row.id);
   const en = SS14_GEAR_EN.records[row.id];
   const koreanEffects = ko && en?.sourceRecordKey === ko.sourceRecordKey ? parseTlidbGearTooltip({ id: row.id,
@@ -138,6 +138,13 @@ function rollControls(row, entry, formValues) {
       && effect.roll?.min === control.min && effect.roll?.max === control.max);
     const label = control.label ?? (matching.length === 1 && !/\p{Script=Han}/u.test(matching[0].sourceText)
       ? matching[0].sourceText : `옵션 ${index + 1} · 한국어 원문 미제공`);
+    return {...control,label};
+  });
+}
+function rollControls(row, entry, formValues) {
+  const ko=koreanRecord(row.id), en=SS14_GEAR_EN.records[row.id];
+  return labeledGearRolls(row,entry).map((control,index)=>{
+    const label=control.label;
     return `<div class="native-roll-option"><label>${escape(label)}<input type="number" step="any" min="${control.min}" max="${control.max}"
       aria-label="장비 칸 ${entry.slotIndex + 1} ${escape(label)}" data-season-edit="gear-roll" data-slot="${entry.slotIndex}"
       data-roll="${escape(control.key)}" value="${escape(formValues[`gear-roll:${entry.slotIndex}:${control.key}`] ?? control.value)}" /><small>SS14 선택 범위 ${number(control.min)}~${number(control.max)}</small></label>

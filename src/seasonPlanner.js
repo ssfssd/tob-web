@@ -11,6 +11,7 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
+import {rankSeasonUpgrades,copySeasonUpgrade} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
 import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem } from './seasonItemWorkshop.js';
@@ -52,6 +53,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   let viewportEvents;
   let editComparison;
   const recalculate = () => {
+    state.upgrades=null;
     state.analysis = null;
     state.report = state.document ? calculateEditorSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
     if(state.picker?.edit&&state.document)
@@ -270,6 +272,24 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.documents = loaded.documents;
       state.analysis = recommendSeasonWorkspaces(state.document, loaded.documents, state.analysisMetric);
     },
+    async rank(mode){
+      const job={mode,busy:true,checked:0,total:0};
+      state.upgrades=job;
+      const active=()=>state.upgrades===job;
+      try{
+        const result=await rankSeasonUpgrades(state.document,state.report,{mode,slot:state.upgradeSlot??'all',
+          shelf:mode==='gear'?readShelf(storage):[],active,
+          progress(checked,total){
+            Object.assign(job,{checked,total});
+            const out=root?.querySelector?.('[data-upgrade-progress]');
+            if(active()&&out)out.textContent=checked+' / '+total;
+          }});
+        if(active()&&result)Object.assign(job,result,{busy:false});
+      }catch(e){
+        if(active())Object.assign(job,{busy:false,error:e.message});
+      }
+      if(active())api.render();
+    },
     resetComparison() {
       api.flush();
       state.editComparison = editComparison.reset(state.document, state.report);
@@ -382,6 +402,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       if (!input.dataset?.seasonEdit) return;
+      state.upgrades=null;
+      const ranking=root?.querySelector?.('[data-upgrade-results]');
+      if(ranking)ranking.hidden=true;
       const edit = readSeasonPlannerEdit(input);
       state.pending.set(editKey(edit), edit);
       const bar=root?.querySelector?.('.drawer-dps');
@@ -403,6 +426,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     },
     change(event) {
       const input = event.target;
+      if(input.hasAttribute?.('data-upgrade-slot')){
+        state.upgradeSlot=input.value;
+        state.upgrades=null;
+        api.render();
+        return;
+      }
       if(state.overlay?.type==='board' && input.dataset?.seasonEdit) {
         api.run(()=>{api.input(event);api.flush();});return;
       }
@@ -642,6 +671,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if (action === 'result-tab') {
           if (RESULT_TABS.some(([key]) => key === d.tab)) state.resultTab = d.tab;
+          if(d.tab==='analysis'&&!state.upgrades)void api.rank('options');
+          return;
+        }
+        if(action==='rank-options'||action==='rank-gear'){void api.rank(action==='rank-gear'?'gear':'options');return;}
+        if(action==='rank-cancel'){state.upgrades=null;return;}
+        if(action==='rank-copy'){
+          const row=state.upgrades?.rows?.[Number(d.index)];
+          if(!row||row.saved)return;
+          const copy=copySeasonUpgrade(state.document,state.report,row);
+          const saved=saveSeasonWorkspace(storage,copy);
+          row.saved=saved.id;
+          state.notice=saved.targetBuild.name+' 저장됨';
           return;
         }
         if (action === 'compare-builds') { api.compare(); return; }
