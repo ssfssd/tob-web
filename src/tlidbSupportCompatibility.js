@@ -235,12 +235,17 @@ function canonicalHostTag(value) {
 export function isCurrentTlidbSupportCompatible(item, host, options = {}) {
   const compatibility = getCurrentTlidbSupportCompatibility(item, options);
   if (!compatibility) return null;
-  const tags = new Set((host?.tags ?? []).map(canonicalHostTag));
-  const role = String(host?.role ?? "any").trim().toLowerCase();
-  if (compatibility.hostRole !== "any" && role !== compatibility.hostRole) return false;
+  if (!matchesSupportHostType(compatibility, host)) return false;
   if (compatibility.requiresDamage && host?.canDealDamage !== true) return false;
   if (compatibility.requiresHit && host?.canHit !== true) return false;
   if (compatibility.requiresAilmentOrDot && host?.canAilmentOrDot !== true) return false;
+  return true;
+}
+
+export function matchesSupportHostType(compatibility, host) {
+  const tags = new Set((host?.tags ?? []).map(canonicalHostTag));
+  const role = String(host?.role ?? "any").trim().toLowerCase();
+  if (compatibility.hostRole !== "any" && role !== compatibility.hostRole) return false;
   if (compatibility.excludedTags.some((tag) => tags.has(tag))) return false;
   if (
     compatibility.requiredTagGroups.length

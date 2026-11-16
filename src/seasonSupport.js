@@ -2,7 +2,7 @@ import { findItemById } from "./catalog.js";
 import { SS14_SUPPORTS_EN } from "./data/ss14Supports.en.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { parseTlidbSkillTooltipCalculation } from "./tlidbSkillTooltipCalculation.js";
-import { getCurrentTlidbSupportCompatibility, isCurrentTlidbSupportCompatible } from "./tlidbSupportCompatibility.js";
+import { getCurrentTlidbSupportCompatibility, isCurrentTlidbSupportCompatible, matchesSupportHostType } from "./tlidbSupportCompatibility.js";
 import { resolveSeasonSkillLevel } from "./seasonSkillLevels.js";
 import { SS14_LOG_COMPLETION } from "./data/ss14LogCompletion.generated.js";
 import "./seasonCurrentDatabase.js";
@@ -12,6 +12,7 @@ import { boundBlessingStacks } from './seasonBlessings.js';
 import { ICE_LANCES_REBOUND_TEXT } from './seasonIceLancesShotgun.js';
 
 export const CLOCKWORK_CORE_ID = "supports-ss14-clockwork-core";
+const clockworkSocket = (rowIndex,supportIndex) => rowIndex === 0 && supportIndex === 1;
 export function seasonSupportRequiredSlot(record) {
   const ordinal = record?.detail?.match(/This skill can only be installed in the (first|second|third|fourth|fifth) Support Skill Slot of each (?:Active|Passive) Skill(?:\.|$)/mu)?.[1];
   return ({first:0,second:1,third:2,fourth:3,fifth:4})[ordinal] ?? null;
@@ -63,7 +64,7 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
   if (!item) return { ...base, blockers: ["SS14 보조 스킬 원문 미확보"] };
   if (isTarget && (binding?.itemId !== item.id || binding.sourcePageSha256 !== record.sourcePageSha256)) return { ...base, blockers: ["SS14 보조 입력의 원문 근거가 바뀌었거나 연결되지 않았습니다."] };
   if (item.id === CLOCKWORK_CORE_ID) {
-    if (rowIndex !== 0 || supportIndex !== 1 || support.level !== 20 || record.detail !== SS14_LOG_COMPLETION.records[item.id].en.detail)
+    if (!clockworkSocket(rowIndex,supportIndex) || support.level !== 20 || record.detail !== SS14_LOG_COMPLETION.records[item.id].en.detail)
       return { ...base, blockers: ['클락워크 코어는 메인 스킬의 두 번째 보조 칸에 20레벨로 연결하세요.'] };
     return { ...base, mechanics: [{ kind: "clockwork-core", sourceText: record.detail }] };
   }
@@ -189,12 +190,27 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
 
 export function checkSeasonSupportHost(id, hostRecord, evaluation, rowIndex) {
   if (id === CLOCKWORK_CORE_ID) return rowIndex === 0 && hostRecord?.tags?.includes("Spell") === true;
-  const tags = (hostRecord?.tags ?? []).map(tag => ({ Horizontal: 'straight_shot', Vertical:'falling', Parabolic:'lob',
-    Restoration:'recovery',Defensive:'guard',Focus:'infuse',Barrage:'bombardment',Terra:'ground',
-    'Synthetic Troop':'synthetic','Spirit Magus':'spirit','Shadow Strike':'shadow_strike','Slash-Strike':'steep_strike',Demolisher:'strike' })[tag] ?? tag);
   return isCurrentTlidbSupportCompatible(seasonSupportItem(id), {
-    tags, role: rowIndex < 5 ? "active" : "passive", names: [hostRecord?.name],
+    ...supportHostType(hostRecord, rowIndex),
     canDealDamage: evaluation?.values?.baseDps > 0, canHit: evaluation?.values?.averageHit > 0,
     canAilmentOrDot: evaluation?.damageCapabilities?.dot === true,
   }, { season: "SS14" });
+}
+
+// Only reject fixed card restrictions in the picker. Hit and damage may depend on pending inputs.
+export function supportFitsSocket(id, hostRecord, rowIndex, supportIndex) {
+  if (!hostRecord) return false;
+  if (id === CLOCKWORK_CORE_ID) return clockworkSocket(rowIndex,supportIndex) && hostRecord.tags?.includes("Spell") === true;
+  const item = seasonSupportItem(id), record = item?.tlidbText.en;
+  const position = seasonSupportRequiredSlot(record);
+  if (position !== null && (position !== supportIndex || record.detail.includes("Slot of each Passive Skill") !== (rowIndex >= 5))) return false;
+  const rules = getCurrentTlidbSupportCompatibility(item, {season:"SS14"});
+  return !!rules && matchesSupportHostType(rules, supportHostType(hostRecord, rowIndex));
+}
+
+function supportHostType(hostRecord, rowIndex) {
+  const tags = (hostRecord?.tags ?? []).map(tag => ({ Horizontal: 'straight_shot', Vertical:'falling', Parabolic:'lob',
+    Restoration:'recovery',Defensive:'guard',Focus:'infuse',Barrage:'bombardment',Terra:'ground',
+    'Synthetic Troop':'synthetic','Spirit Magus':'spirit','Shadow Strike':'shadow_strike','Slash-Strike':'steep_strike',Demolisher:'strike' })[tag] ?? tag);
+  return { tags, role: rowIndex < 5 ? "active" : "passive", names: [hostRecord?.name] };
 }

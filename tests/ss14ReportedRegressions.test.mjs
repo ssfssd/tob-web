@@ -9,7 +9,7 @@ import { getSeasonSelectionOptions } from '../src/seasonSelections.js';
 import { SS14_CARDS_EN } from '../src/data/ss14Cards.en.generated.js';
 import { RUNTIME_CATALOG } from '../src/data/runtimeCatalog.generated.js';
 import { createSkillRuntimeModel, getSkillEnergyUsage, updateUnlockedSupportCount } from '../src/skillRuntimeModel.js';
-import { checkSeasonSupportHost, inspectSeasonSupport, seasonSupportItem } from '../src/seasonSupport.js';
+import { checkSeasonSupportHost, inspectSeasonSupport, seasonSupportItem, supportFitsSocket } from '../src/seasonSupport.js';
 
 function workspace(energyMax = 525) {
   const build = createDefaultBuild();
@@ -121,6 +121,15 @@ test('both activation media bind every tier and its roll endpoints without claim
       assert.throws(() => edit(doc, { ...change(pick.controls[1].key), value: max + 1 }));
       doc = edit(doc, { ...change(pick.controls[0].key), value: min });
       doc = edit(doc, { ...change(pick.controls[1].key), value: max });
+      const binding = structuredClone(doc.targetBuild.ss14Inputs.supports['0:0']);
+      doc = edit(doc, { kind:'support-level', ...slot, value:21 });
+      doc = edit(doc, { kind:'support-selection', ...slot, value:id });
+      doc = edit(doc, { kind:'support-tier', ...slot, value:tier });
+      assert.equal(doc.targetBuild.skills.active[0].supports[0].level,21);
+      assert.deepEqual(doc.targetBuild.ss14Inputs.supports['0:0'],binding);
+      doc = edit(doc, {kind:'support-level', ...slot, value:20});
+      const other = edit(doc, {kind:'support-selection', ...slot, value:'supports-ss14-current-turmoil-burst'});
+      assert.equal(other.targetBuild.ss14Inputs.supports['0:0'].rolls,undefined);
       const result = support(restored(doc));
       assert.deepEqual(result.controls.map(c => c.value), [min, max]);
       assert.ok(result.blockers.some(r => r.includes('효과 해석 미완료')));
@@ -137,6 +146,11 @@ test('Turmoil Burst rejects a minion spell while allowing an ordinary spell', ()
   const host = key => checkSeasonSupportHost(id, SS14_CARDS_EN.records['skills-tlidb-com-cn-' + key], evaluation, 0);
   assert.equal(host('summon-machine-guard'), false);
   assert.equal(host('ring-of-ice'), true);
+  const spell=SS14_CARDS_EN.records['skills-tlidb-com-cn-ring-of-ice'];
+  for(const pos of [0,1,2,3,4]) assert.equal(supportFitsSocket('supports-ss14-clockwork-core',spell,0,pos),pos===1);
+  assert.equal(supportFitsSocket('supports-ss14-clockwork-core',spell,1,1),false);
+  assert.equal(supportFitsSocket(id, SS14_CARDS_EN.records['skills-tlidb-com-cn-ring-of-ice'],0,0),true);
+  assert.equal(supportFitsSocket(id, SS14_CARDS_EN.records['skills-tlidb-com-cn-summon-machine-guard'],0,0),false);
   const actual = inspectSeasonSupport({ supportId: id, level: 20 }, { rowIndex: 0, supportIndex: 0 });
   assert.ok(actual.blockers.length);
   assert.deepEqual(actual.effects, []);

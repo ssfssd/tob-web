@@ -346,7 +346,10 @@ export function editSeasonWorkspace(document, edit) {
     const key = `${edit.rowIndex}:${edit.supportIndex}`, binding = target.ss14Inputs.supports?.[key];
     if (!binding || !seasonSupportItem(binding.itemId)?.tlidbText.en.supportTiers?.some(t => t.tier === edit.value))
       throw new Error("보조 옵션 등급을 확인하세요.");
-    binding.tier = edit.value; delete binding.rolls;
+    if (binding.tier !== edit.value) {
+      binding.tier = edit.value;
+      delete binding.rolls;
+    }
   } else if (["support-selection", "support-level"].includes(edit.kind)) {
     const key = `${edit.rowIndex}:${edit.supportIndex}`;
     const normalized = normalizeBuild(target);
@@ -354,14 +357,19 @@ export function editSeasonWorkspace(document, edit) {
     if (!/^[0-8]:[0-4]$/u.test(key) || !slot?.skillId) throw new Error("선택 스킬의 보조 칸을 확인하세요.");
     const old = slot.supports?.[edit.supportIndex];
     const id = edit.kind === "support-selection" ? edit.value || null : old?.supportId;
-    const level = edit.kind === "support-level" ? edit.value : seasonSupportItem(id)?.tlidbText.en.cardLevel ?? 20;
+    const level = edit.kind === "support-level" ? edit.value : old?.supportId === id && id ? old.level : seasonSupportItem(id)?.tlidbText.en.cardLevel ?? 20;
     if ((id && !seasonSupportOptions().some((row) => row.id === id)) || !Number.isInteger(level) || level < 1 || level > 100
       || (id && edit.supportIndex >= slot.unlockedSupportCount)) throw new Error("열린 보조 칸과 SS14 보조·레벨(1~100)을 확인하세요.");
     target.ss14Inputs.supportSelections ??= {};
     target.ss14Inputs.supports ??= {};
     target.ss14Inputs.supportSelections[key] = id ? { supportId: id, level } : null;
-    delete target.ss14Inputs.supports[key];
-    if (id) target.ss14Inputs.supports[key] = { itemId: id, sourcePageSha256: seasonSupportItem(id).tlidbText.en.sourcePageSha256 };
+    const binding = target.ss14Inputs.supports[key];
+    if (!id) delete target.ss14Inputs.supports[key];
+    else {
+      const sourcePageSha256 = seasonSupportItem(id).tlidbText.en.sourcePageSha256;
+      if (binding?.itemId !== id || binding.sourcePageSha256 !== sourcePageSha256)
+        target.ss14Inputs.supports[key] = { itemId: id, sourcePageSha256 };
+    }
   } else if (edit.kind === "extension-input") {
     const row = projectSeasonComponents(target).rows.find((r) => r.extensionControls?.some((c) => c.key === edit.key));
     const c = row?.extensionControls.find((c) => c.key === edit.key);
