@@ -4,43 +4,133 @@ const safeName = v => v && !/\p{Script=Han}/u.test(v) ? v : "한국어 이름 �
 const link = r => /^https:\/\/tlidb\.com\/(en|ko)\//u.test(r?.sourceUrl ?? "")
   ? `<a href="${esc(r.sourceUrl)}" target="_blank" rel="noreferrer">SS14 근거</a>` : "";
 const cell = (label, value, key, suffix = "") => `<div class="native-stat-cell"><dt>${label}</dt><dd data-stat="${key}">${number(value)}${Number.isFinite(value) ? suffix : ""}</dd></div>`;
+function skillCosts(cost, key) {
+  if(cost?.manaPerUse==null)return '';
+  const values=[];
+  if(cost.manaPerUse>0||!cost.lifePerUse)values.push(['MP','mana',cost.manaPerUse,cost.manualManaPerSecond]);
+  if(cost.lifePerUse>0)values.push(['HP','life',cost.lifePerUse,cost.manualLifePerSecond]);
+  return values.map(([label,resource,perUse,perSecond])=>cell(`시전당 ${label}`,perUse,`${key}-${resource}-per-use`)
+    +(perSecond!=null?cell(`수동 시전 ${label}`,perSecond,`${key}-${resource}-per-second`,'/초'):'')).join('');
+}
+function manaBalance(budget, measured, assumed, otherBudget) {
+  if(!budget)return '';
+  const net=value=>!Number.isFinite(value)?'확인 필요':`${value<0?'부족':value>0?'여유':'균형'} ${number(Math.abs(value))}`;
+  const channels=budget.channels??[];
+  const unknown=budget.unresolvedRows.filter(index=>!channels.some(row=>row.rowIndex===index));
+  const observed=budget.recovery.find(row=>row.id==='observed');
+  const basisRows=observed?[observed]:budget.recovery;
+  const assumptions=observed?budget.recovery.filter(row=>row!==observed):[];
+  const otherMana=otherBudget?.manaPerSecond;
+  const compareMana=Number.isFinite(otherMana)&&otherMana!==budget.manaPerSecond;
+  const table=rows=>`<table aria-label="초당 MP 자연 회복과 차이"><thead><tr><th scope="col">${measured ? '측정 구간 평균 자연 회복' : '자연 회복'}</th><th scope="col">MP/초</th><th scope="col">소모 대비</th></tr></thead><tbody>
+    ${rows.map(row=>`<tr><th scope="row">${esc(row.label)}</th><td>${number(row.value)}</td><td data-stat="mana-balance-${esc(row.id)}">${net(row.balance)}</td></tr>`).join('')}</tbody></table>`;
+  return `<section aria-label="수동 시전 자원 수급"><h3>수동 시전 자원 수급</h3><dl class="native-stat-list">
+    ${cell('MP 소모',budget.manaPerSecond,'manual-mana-total','/초')}${compareMana?cell(assumed?'입력 조건 MP 소모':'방어 전 MP 소모',otherMana,'manual-mana-other','/초'):''}${budget.lifePerSecond>0?cell('HP 소모',budget.lifePerSecond,'manual-life-total','/초'):''}</dl>
+    ${budget.shareOverflow?`<p>시전 배분 ${number(budget.shareOverflow)}% / 최대 100%</p><button type="button" data-ss14-action="result-tab" data-tab="conditions">시전 배분 확인</button>`:''}
+    ${unknown.length?`<p class="native-stat-note">스킬 ${unknown.map(row=>row+1).join('·')}의 비용 또는 시전 횟수를 확인하세요.</p>`:''}
+    ${channels.map(({rowIndex,rate,max,valid,variable})=>valid?'':rate!==null&&rate<=max&&variable
+      ? `<p class="native-stat-note">스킬 ${rowIndex+1}의 비용이 전투 중 바뀌어 평균 차감 횟수로는 소모량을 확정할 수 없습니다.</p>`
+      : `<p class="native-stat-note">${rate===null?'채널링 비용 차감 횟수가 비어 있습니다.':`채널링 비용 차감은 최대 ${number(max)}회/초입니다.`} <button type="button" data-ss14-action="requirement" data-section="combat" data-field="dps-input" data-field-key="${rowIndex}:channelCostRate">스킬 ${rowIndex+1} 비용 횟수 입력</button></p>`).join('')}
+    ${table(basisRows)}
+    ${assumptions.length?`<details data-role="mana-formula-alternatives"><summary>공식별 회복값</summary>${table(assumptions)}</details>`:''}
+    ${!assumed?'<button type="button" data-ss14-action="requirement" data-section="combat" data-field="character-input" data-field-key="observedManaRecovery">관측 MP 회복 입력</button>':''}
+    <p class="native-stat-note">${budget.manaStatus==='deficit'?'표시 DPS를 유지하려면 부족한 MP를 보충해야 합니다. ':''}${budget.manaStatus==='mixed'?'회복 공식에 따라 소모 충당 여부가 달라집니다. ':''}${channels.some(row=>row.observed&&row.valid)?'채널링은 입력한 평균 차감 횟수 기준입니다. ':''}자동 발동과 즉시 회복은 제외합니다.</p></section>`;
+}
+function manaReservationRows(rows) {
+  if (!rows?.length) return '';
+  const percent = value => Number.isFinite(value) ? number(value)+'%' : '확인 필요';
+  const sourceLabel=rows.some(row=>Number.isInteger(row.supportIndex))?'스킬·보조':'오라';
+  return `<table aria-label="${sourceLabel}별 MP 봉인"><thead><tr><th scope="col">${sourceLabel}</th><th scope="col">기본 봉인</th><th scope="col">적용 봉인</th></tr></thead><tbody>
+    ${rows.map(row=>`<tr data-role="mana-reservation-${row.rowIndex}${Number.isInteger(row.supportIndex)?'-support-'+row.supportIndex:''}"><th scope="row">${esc(safeName(row.name))}</th><td>${row.active===false?'—':percent(row.base)}</td><td>${row.blocked?'확인 필요':row.active===false?'꺼짐':percent(row.applied)}</td></tr>`).join('')}</tbody></table>`;
+}
 const signed = v => `${v > 0 ? "+" : ""}${number(v)}`;
 function sourceValue(source, stat) {
   if (stat === "mana-cost-multiplier") return `×${number(source.value / 100)}`;
   return `${source.operation === "set" ? number(source.value) : signed(source.value)}${source.unit === "percent" || ["add_percent", "more", "more_percent"].includes(source.operation) ? "%" : ""}${["more", "more_percent"].includes(source.operation) ? " 별도" : source.operation === "set" ? " 고정" : ""}`;
 }
-function optionValue(row) {
+export function formatSeasonOptionTotals(row) {
   if (row.conflict) return "고정값 충돌";
   return [row.flat === null ? "" : signed(row.flat), row.increased === null ? "" : `${signed(row.increased)}% 증가`,
     row.more === null ? "" : `×${row.more.toLocaleString("ko-KR", { maximumFractionDigits: 6 })} 별도`, row.fixed === null ? "" : `${number(row.fixed)} 고정`].filter(Boolean).join(" · ");
+}
+
+export function describeSeasonOptionChange({before,after}) {
+  const from=before?formatSeasonOptionTotals(before):'—';
+  const to=after?formatSeasonOptionTotals(after):'—';
+  return from===to?'':`${(after??before).label} · ${from} → ${to}`;
 }
 
 export function renderSeasonNumericStats(report) {
   const stats = report.numericStats;
   if (!stats) return "";
   const c = report.character, unavailable = stats.unresolved.length + stats.excluded.length;
+  const primary = stats.skills.find(skill => skill.rowIndex === 0);
+  const assumed = !report.fullDps.supported && report.assumedDps?.supported ? report.assumedDps : null;
+  const displayedDps = assumed ?? report.fullDps;
+  const mana = assumed?.manaReservation ?? c.values;
+  const manaReservations = assumed?.manaReservations ?? c.manaReservations;
+  const primaryCalculation = assumed?.rows.find(row => row.rowIndex === 0);
+  const primaryRate = assumed ? primaryCalculation?.useRate : primary?.values.rate;
+  const primaryCritical = assumed ? primaryCalculation?.detail?.critical?.effectiveCriticalChance : primary?.values.criticalChance;
+  const averaged = assumed ? assumed.measuredResources : report.theaAverage?.supported;
+  const elixirUptime=assumed?assumed.elixirUptime:report.elixirUptime;
+  const averagedElixir=elixirUptime?.supported&&elixirUptime.rows.some(r=>r.uptime>0&&r.uptime<100);
+  const budget = displayedDps.manualResources;
+  const otherBudget=(assumed?report.fullDps:report.assumedDps)?.manualResources;
+  const manaStatus=Number.isFinite(mana.unreservedMana)?budget?.manaStatus:null;
+  const resources = [
+    ['최대 HP', c.values.life, 'life'], ['최대 보호막', c.values.shield, 'shield'],
+    ['사용 가능 MP', mana.unreservedMana, 'available-mana'],
+  ].filter(([,value]) => Number.isFinite(value));
+  const defense = [['아머', c.values.armor, 'armor'], ['회피', c.values.evasion, 'evasion']]
+    .filter(([,value]) => Number.isFinite(value));
+  const resistances = Object.entries({ fire: "화염", cold: "냉기", lightning: "번개", erosion: "부식" });
+  const visibleResistances = resistances.filter(([key]) => Number.isFinite(c.resistances[key].effective ?? c.resistances[key].raw));
+  const hasRawResistance = visibleResistances.some(([key]) => !Number.isFinite(c.resistances[key].effective));
+  const defenseRows = defense.map(([label,value,key]) => cell(label,value,key)).join('') +
+    visibleResistances.map(([key,label]) => {
+      const resistance = c.resistances[key];
+      return cell(label + ' 저항' + (Number.isFinite(resistance.effective) ? '' : ' *'), resistance.effective ?? resistance.raw, 'resistance-' + key, '%');
+    }).join('');
   return `<section class="native-numeric-stats" data-role="native-numeric-stats" aria-label="SS14 수치 계산">
-    <h2>캐릭터 수치</h2><p class="native-stat-note">확인된 옵션 기준${report.theaAverage ? " · 전투 시작 상태" : ""}</p>
-    <dl class="native-stat-grid">${Object.entries({ strength: "힘", dexterity: "민첩", intelligence: "지혜", life: "최대 HP", mana: "최대 MP", shield: "최대 보호막", armor: "아머", evasion: "회피" }).map(([key, label]) => cell(label, c.values[key], key)).join("")}</dl>
-    <details data-role="numeric-resistances"><summary>저항</summary><dl class="native-stat-grid">${Object.entries({ fire: "화염", cold: "냉기", lightning: "번개", erosion: "부식" }).map(([key, label]) => cell(`${label} 저항 합계`, c.resistances[key].raw, `resistance-${key}`, "%")).join("")}</dl>
-      <p>레벨 감점 포함·상한 적용 전입니다. 적용 저항은 자원·방어 상세에서 확인하세요.</p></details>
-    <button type="button" data-ss14-action="requirement" data-section="combat" data-focus-role="season-character-input">기본 속성 입력</button>
+    ${primary ? `<button type="button" class="native-stat-link" data-ss14-action="result-tab" data-tab="calculation" data-index="0" aria-label="주력 스킬 ${esc(safeName(primary.name))} 계산 보기"><strong>${esc(safeName(primary.name))}</strong><span aria-hidden="true">›</span></button>
+      <dl class="native-stat-list" aria-label="${averaged ? '전투 시작 시 주력 스킬 수치' : '주력 스킬 수치'}">${Number.isFinite(primaryRate) ? cell(primary.rateLabel, primaryRate, "primary-rate", "회/초") : ''}${Number.isFinite(primaryCritical) ? cell("크리티컬 확률", primaryCritical, "primary-critical-chance", "%") : ''}</dl>` : '<button type="button" data-ss14-action="section" data-section="skills">주력 스킬 선택</button>'}
+    ${resources.length ? `<dl class="native-stat-list" aria-label="캐릭터 자원">${resources.map(([label,value,key]) => cell(label,value,key)).join('')}</dl>` : ''}
+    ${defenseRows ? `<details class="native-numeric-detail" data-role="numeric-defense-overview"><summary>방어·저항</summary><dl class="native-stat-list native-defense-overview" aria-label="캐릭터 방어">${defenseRows}</dl>
+      ${hasRawResistance ? '<small class="native-stat-note">* 상한 적용 전</small>' : ''}</details>` : ''}
+    <details class="native-numeric-detail"><summary>상세 수치</summary>
+    ${Number.isFinite(mana.mana)||budget?`<details data-role="numeric-mana"><summary>MP 상세${assumed?' · 방어 전 DPS 기준':''}${averagedElixir?' · 영약 유지율 평균':''}${manaStatus==='deficit'?' · 자연 회복 부족':manaStatus==='mixed'?' · 회복 기준별 차이':''}</summary>
+      <dl class="native-stat-list">${cell("최대 MP", mana.mana, "mana")}${cell("봉인 MP", mana.reservedManaPercent, "reserved-mana", "%")}${cell("봉인 MP 보상", mana.sealedManaCompensation, "seal-compensation", "%")}</dl>
+      ${manaReservationRows(manaReservations)}
+      ${mana.reservedManaPercent===null?`<button type="button" data-ss14-action="result-tab" data-tab="conditions">${manaReservations?.some(row=>Number.isInteger(row.supportIndex))?'봉인 조건 확인':'오라 조건 확인'}</button>`:''}
+      ${manaBalance(budget, averaged, assumed, otherBudget)}</details>`:''}
+    <details data-role="numeric-character"><summary>속성·에너지</summary>
+    <dl class="native-stat-list">${Object.entries({ strength: "힘", dexterity: "민첩", intelligence: "지혜" }).map(([key, label]) => cell(label,c.values[key],key)).join("")}
+      <div class="native-stat-cell"><dt>스킬 에너지</dt><dd data-stat="skill-energy">${number(report.energy?.used)} / ${number(report.energy?.maximum)}</dd></div>
+    </dl>
+    <details data-role="numeric-resistances"><summary>저항 상한 상세</summary><dl class="native-stat-list">${resistances.map(([key,label]) => cell(`${label} · 캐릭터 도움말`, c.resistances[key].scenarios[0], `character-cap-${key}`, "%") + cell(`${label} · 저항 도움말`, c.resistances[key].scenarios[1], `resistance-cap-${key}`, "%")).join("")}</dl></details>
     <details data-role="numeric-recovery"><summary>회복·방어 수치</summary><dl class="native-stat-grid">
       ${cell("옵션 HP 자연 회복", c.values.lifeRegenerationGranted, "life-regeneration", "/초")}${cell("옵션 MP 자연 회복", c.values.manaRegenerationGranted, "mana-regeneration", "/초")}
       ${cell("보호막 충전", c.values.shieldRechargePerSecond, "shield-recharge", "/초")}${cell("보호막 충전 대기", c.values.shieldRechargeDelay, "shield-delay", "초")}
       ${cell("원소 이상 회피", c.values.elementalAilmentAvoidancePercent, "elemental-ailment-avoidance", "%")}${cell("받는 원소 대미지 배율", c.values.elementalDamageTakenMultiplier, "elemental-damage-taken", "배")}
       </dl><p>자연 회복은 확인된 옵션의 기여도이며, 충전은 시작 후의 속도입니다. 받는 대미지 배율에는 아머·저항·회피·막기가 포함되지 않습니다.</p></details>
-    <details data-role="numeric-skills" open><summary>스킬 수치</summary>${stats.skills.map(skill => `<article class="native-numeric-skill">
+    <button type="button" data-ss14-action="requirement" data-section="combat" data-focus-role="season-character-input">기본 속성 입력</button></details>
+    ${stats.skills.length ? `<details data-role="numeric-skills"><summary>스킬 수치</summary>${stats.skills.map(skill => {
+      const costs=skillCosts(displayedDps.rows.find(row=>row.rowIndex===skill.rowIndex),`skill-${skill.rowIndex}`);
+      return `<article class="native-numeric-skill">
       <h3>${esc(safeName(skill.name))} · Lv.${number(skill.level)}</h3>
       <dl class="native-stat-grid">${cell("기본 1회 명중", skill.values.averageHit, `skill-${skill.rowIndex}-base-hit`)}${cell("기본 시전 시간", skill.values.castTime, `skill-${skill.rowIndex}-cast-time`, "초")}${cell("기본 MP 소모", skill.values.manaCost, `skill-${skill.rowIndex}-mana`)}</dl>
+      ${costs?`<dl class="native-stat-grid">${costs}</dl>`:''}
       ${Number.isFinite(skill.values.minHit) ? `<p class="native-hit-range">옵션 반영 명중 <strong>${number(skill.values.minHit)}–${number(skill.values.maxHit)}</strong></p><p class="native-stat-note">주 속성·크리티컬·적 방어 적용 전</p>` : ""}
       <details data-role="numeric-skill-${skill.rowIndex}"><summary>속도·크리티컬</summary><dl class="native-stat-grid">${cell("초당 공격·시전", skill.values.rate, `skill-${skill.rowIndex}-rate`)}${cell("크리티컬 수치", skill.values.criticalRating, `skill-${skill.rowIndex}-critical-rating`)}${cell("크리티컬 확률", skill.values.criticalChance, `skill-${skill.rowIndex}-critical-chance`, "%")}${cell("크리티컬 대미지", skill.values.criticalDamage, `skill-${skill.rowIndex}-critical-damage`, "%")}</dl>${link(skill.receipt)}
-      ${skill.blockers.length ? `<ul>${skill.blockers.map(reason => `<li>${esc(reason)}</li>`).join("")}</ul>` : ""}</details></article>`).join("") || "<p>스킬을 선택하면 기본 수치가 표시됩니다.</p>"}</details>
-    <details data-role="numeric-options"><summary>옵션 합계 · ${stats.options.length}항목</summary><p>동일 항목의 고정 수치·증가율·별도 배율입니다. 서로 다른 대미지 종류나 적용 대상은 따로 표시합니다.</p>
+      ${skill.blockers.length ? `<ul>${skill.blockers.map(reason => `<li>${esc(reason)}</li>`).join("")}</ul>` : ""}</details></article>`;
+    }).join("")}</details>` : ''}
+    ${stats.options.length ? `<details data-role="numeric-options"><summary>옵션 합계</summary>
       <label>항목·출처 검색<input type="search" data-numeric-filter aria-label="옵션 합계 검색" /></label>
-      ${stats.options.map(row => `<details class="native-numeric-option" data-numeric-row data-role="numeric-option-${esc(row.key)}"><summary><span>${esc(row.label)}${row.scope !== "global" ? ` · ${esc(row.scopeLabel)}` : ""}</span><strong>${optionValue(row)}</strong></summary>
+      ${stats.options.map(row => `<details class="native-numeric-option" data-numeric-row data-role="numeric-option-${esc(row.key)}"><summary><span>${esc(row.label)}${row.scope !== "global" ? ` · ${esc(row.scopeLabel)}` : ""}</span><strong>${formatSeasonOptionTotals(row)}</strong></summary>
         ${/damage_reflection$/u.test(row.stat) ? "<p>반사 기본 수치 합계입니다. 피격 횟수와 최종 반사 DPS는 포함하지 않습니다.</p>" : ""}
-        <ul>${row.sources.map(source => `<li><span>${esc(source.origin)} · ${esc(safeName(source.name))}</span><b>${sourceValue(source, row.stat)}</b> ${link(source.receipt)}</li>`).join("")}</ul></details>`).join("") || "<p>합산할 옵션이 없습니다.</p>"}</details>
-    ${unavailable ? `<details data-role="numeric-unresolved"><summary>미반영·확인 필요 ${unavailable}건</summary><ul>${stats.unresolved.map(r => `<li>${esc(r.label ?? "선택 효과")}: ${esc(r.reason)}</li>`).join("")}${stats.excluded.map(r => `<li>${esc(r.origin)} · ${esc(safeName(r.name))}: ${esc(r.reason)}</li>`).join("")}</ul></details>` : ""}
+        <ul>${row.sources.map(source => `<li><span>${esc(source.origin)} · ${esc(safeName(source.name))}</span><b>${sourceValue(source, row.stat)}</b> ${link(source.receipt)}</li>`).join("")}</ul></details>`).join("")}</details>` : ''}
+    ${unavailable ? `<details data-role="numeric-unresolved"><summary>효과 확인</summary><ul>${stats.unresolved.map(r => `<li>${esc(r.label ?? "선택 효과")}: ${esc(r.reason)}</li>`).join("")}${stats.excluded.map(r => `<li>${esc(r.origin)} · ${esc(safeName(r.name))}: ${esc(r.reason)}</li>`).join("")}</ul></details>` : ""}
+    </details>
   </section>`;
 }

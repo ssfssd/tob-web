@@ -298,7 +298,6 @@ const STAT_ENTRIES = Object.freeze([
   statEntry("max sentry quantity", "max_sentry_quantity", "count"),
   statEntry("max summonable synthetic troops", "max_summonable_synthetic_troops", "count"),
   statEntry("ignite limit", "ignite_limit", "count"),
-  statEntry("support skill level", "support_skill_level", "level"),
   statEntry("fire skill level", "fire_skill_level", "level"),
   ...['attack','physical','cold','erosion','aura','curse','restoration','spell projectile'].map(type=>
     statEntry(`${type} skill level`,`${type.replaceAll(' ','_')}_skill_level`,'level')),
@@ -861,13 +860,13 @@ function assignRollKeys(effects, identity, lineIndex) {
   });
 }
 
-function parseExactTooltipText(sourceText, identity, flavorReceipt = null) {
+function parseExactTooltipText(sourceText, identity, flavorReceipt = null, parseLine = parseMechanicalLine) {
   const effects = [];
   const blockers = [];
   const flavorLines = [];
   const verifiedFlavorLines = new Set(flavorReceipt?.lines ?? []);
   for (const [lineIndex, line] of detailLines(sourceText).entries()) {
-    const parsed = parseMechanicalLine(line);
+    const parsed = parseLine(line);
     if (verifiedFlavorLines.has(line) && (!flavorReceipt?.protectMechanicalLines || !parsed.effects.length)) {
       flavorLines.push(flavorLineEvidence(line, flavorReceipt));
       continue;
@@ -876,6 +875,29 @@ function parseExactTooltipText(sourceText, identity, flavorReceipt = null) {
     blockers.push(...parsed.blockers);
   }
   return result(effects, blockers, flavorLines);
+}
+
+function parseThunderManipulatorLine(line) {
+  const stacks = /^Inflicts \((2–4|4–5)\) additional stack\(s\) of Numbed$/u.exec(line);
+  const critical = /^\+\((20–30|30–40)\) % additional Numbed Effect on Critical Strike with Lightning Damage for 2 s$/u.exec(line);
+  if (stacks || critical) {
+    const [min,max]=(stacks??critical)[1].split('–').map(Number);
+    return result([{stat:stacks?'gear_numbed_additional_stacks':'gear_numbed_critical_bonus',
+      operation:stacks?'add':'more',unit:stacks?'count':'percent',value:null,sourceText:line,roll:{min,max}}],[]);
+  }
+  const range = /^\+\((25)–(35)\) % additional Max Lightning Damage to an enemy when they have at least 10 stack\(s\) of Numbed$/u.exec(line)
+    ?? /^\+\((40)–(50)\) % additional Max Lightning Damage to an enemy when they have at least 10 stack\(s\) of Numbed$/u.exec(line);
+  if (!range) return parseMechanicalLine(line);
+  return result([{ stat:'max_lightning_damage', operation:'more', unit:'percent', value:null,
+    condition:'to an enemy when they have at least 10 stack(s) of Numbed', sourceText:line,
+    roll:{min:Number(range[1]),max:Number(range[2])} }],[]);
+}
+function parseFrostboltLine(line) {
+  const match=/^Damage penetrates \((25)–(35)\) % Elemental Resistance of (Frostbitten|Numbed) enemies$/u.exec(line)
+    ?? /^Damage penetrates \((36)–(40)\) % Elemental Resistance of (Frostbitten|Numbed) enemies$/u.exec(line);
+  if(!match)return parseMechanicalLine(line);
+  return result([{stat:'elemental_resistance_penetration',operation:'add_percent',unit:'percent',value:null,
+    sourceText:line,condition:`against ${match[3]} enemies`,roll:{min:Number(match[1]),max:Number(match[2])}}],[]);
 }
 
 function rollSignature(effect) {
@@ -1015,6 +1037,9 @@ export function parseTlidbGearTooltip(item, { locale = "en", season = "SS13", fl
     lines.join("\n"),
     identity,
     season === "SS13" ? verifiedFlavorReceipt(item, verifiedLocale) : seasonalFlavor,
+    season==='SS14'&&locale==='en'
+      ? ({Thunder_Manipulator:parseThunderManipulatorLine,Frostbolt:parseFrostboltLine}[verifiedLocale.sourceRecordKey]??parseMechanicalLine)
+      : parseMechanicalLine,
   );
 }
 

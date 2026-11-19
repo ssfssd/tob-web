@@ -1,4 +1,4 @@
-import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
+import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 
 // The comparison baseline lives only in this editor session. Document versions,
 // persisted builds and the undo stack remain owned by their existing modules.
@@ -22,9 +22,10 @@ export function createSeasonEditComparison(document, report) {
       return this.result();
     },
     result() {
-      const a=previous?.report.assumedDps?.dps, b=current.report.assumedDps?.dps;
-      return {changed, assumedDelta:Number.isFinite(a)&&Number.isFinite(b)?b-a:null, baseline: compareSeasonDpsSnapshots(baseline, current),
-        previous: previous ? compareSeasonDpsSnapshots(previous, current) : null};
+      const compare = metric => ({baseline:compareSeasonDpsSnapshots(baseline,current,metric),
+        previous:previous?compareSeasonDpsSnapshots(previous,current,metric):null});
+      const assumed=preferredSeasonDpsMetric(current.report)==='assumedDps'?compare('assumedDps'):null;
+      return {changed,...compare('fullDps'),assumed};
     },
   };
 }

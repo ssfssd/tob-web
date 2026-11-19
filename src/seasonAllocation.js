@@ -1,6 +1,7 @@
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { transformedShape } from "./divinityBoardModel.js";
+import {inverseGeometry} from './seasonInverseImage.js';
 
 // Validate the saved geometry as supplied. This does not certify SS14 template
 // shapes or paths whose season-specific topology has not been published.
@@ -10,8 +11,9 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
   for (const [index, board] of (build?.talents?.boards ?? []).entries()) {
     const path = `talents.boards.${index}`;
     const selected = Object.entries(board.nodePoints ?? {}).filter(([, n]) => n !== 0);
+    const mirrored=Object.entries(board.reflectedNodePoints??{}).filter(([,n])=>n!==0);
     const cores = board.coreTalentIds ?? [];
-    if (!selected.length && !cores.length) continue;
+    if (!selected.length && !cores.length && !mirrored.length) continue;
     const authority = rules.talents[board.treeSlug];
     const countBefore = issues.length;
     if (!authority) { issue(path, "선택 재능 패널의 SS14 포인트 규칙 미확보"); continue; }
@@ -19,6 +21,16 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
       issue(path, "재능 수치와 배치 규칙의 SS14 원문이 다릅니다. 최신 원문 연결을 확인하세요.");
     }
     const nodes = selected.map(([id, points]) => ({ id, points, rule: authority.nodes[id.replace(/^talents-/u, "")] }));
+    if(mirrored.length){
+      const geo=inverseGeometry(build,index);
+      for(const [id,points] of mirrored){
+        const n=geo?.nodes.find(n=>n.isReflected&&n.storageNodeId===id);
+        const source=n&&authority.nodes[n.dataId];
+        const column=n&&new Set(geo.tree.nodes.filter(c=>c.x===n.x).map(c=>authority.nodes[c.dataId]?.requiredPoints));
+        const required=column?.size===1?[...column][0]:null;
+        nodes.push({id,points,rule:source&&Number.isInteger(required)?{...source,requiredPoints:required}:null});
+      }
+    }
     for (const node of nodes) if (!node.rule || !Number.isInteger(node.points) || node.points < 1 || node.points > node.rule.maxPoints) {
       issue(path, "재능 포인트가 SS14 원문의 노드 상한을 벗어났거나 노드가 없습니다.");
     }
@@ -29,9 +41,12 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
       else available += group.reduce((sum, n) => sum + (Number.isInteger(n.points) && n.points > 0 && n.points <= n.rule.maxPoints ? n.points : 0), 0);
     }
     if (new Set(cores).size !== cores.length) issue(path, "같은 핵심 재능이 중복 선택되었습니다.");
+    const occupied=new Set();
     for (const id of cores) {
       const rule = authority.nodes[id.replace(/^talents-/u, "")];
       if (!rule || available < rule.requiredPoints) issue(path, "핵심 재능의 SS14 해금 포인트가 부족하거나 규칙이 없습니다.");
+      if (rule && occupied.has(rule.requiredPoints)) issue(path,"같은 단계의 핵심 재능은 하나만 선택할 수 있습니다.");
+      if (rule) occupied.add(rule.requiredPoints);
     }
     checks.push({ path, label: `재능 패널 ${index + 1}`, status: countBefore === issues.length ? "passed" : "invalid", receipt: authority });
   }

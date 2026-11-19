@@ -8,6 +8,7 @@ const safe = text => typeof text === "string" && !/\p{Script=Han}/u.test(text) ?
 const slotLabel = index => `${index < 5 ? index === 0 ? "주력" : "액티브" : "패시브"} ${index < 5 ? index + 1 : index - 4}`;
 export function effectSourceLabel(path, group) {
   let match;
+  if ((match = path?.match(/^customAffixes\.(\d+)$/u))) return '사용자 옵션 '+(Number(match[1])+1);
   if ((match = path?.match(/^gear\.slots\.(\d+)/u))) return SEASON_GEAR_SLOT_LABELS[Number(match[1])];
   if ((match = path?.match(/^skills\.rows\.(\d+)(?:\.supports\.(\d+))?/u)))
     return slotLabel(Number(match[1])) + (match[2] === undefined ? "" : ` · 보조 ${Number(match[2]) + 1}`);
@@ -17,23 +18,31 @@ export function effectSourceLabel(path, group) {
   return groups[group] ?? "선택 효과";
 }
 
+const absentHitRouteReasons = new Set(['gear-conversion-source-absent','ss14-hit-conversion-source-absent','ss14-hit-gain-source-absent']);
+export function excludedSeasonHitRoutes(skill) {
+  return (skill?.offenseBasis?.excluded??[]).filter(effect=>absentHitRouteReasons.has(effect.reason)&&!effect.affectsCompletion);
+}
+
 // These rows enumerate the selected calculation inputs, not all options on an
 // item card. Direct-damage status is joined to the evaluator's actual trace by
 // owner path AND source line. Equal-name rings and repeated supports stay apart.
 export function seasonEffectSources(report) {
   const rows = [];
   const trace = (report.coupledSkills?.rows ?? []).flatMap(skill => (skill.trace ?? []).map(t => ({ ...t, rowIndex: skill.rowIndex })));
+  const absent = (report.coupledSkills?.rows ?? []).flatMap(excludedSeasonHitRoutes);
   const add = (source, effects = [], blockers = [], inactive = [], mechanics = []) => {
     const origin = effectSourceLabel(source.path, source.group);
     for (const [i, effect] of effects.entries()) {
-      const applied = trace.filter(t => t.effectSource?.path === source.path && t.effectSource.sourceText === effect.sourceText
-        && t.effectSource.stat === effect.stat);
+      const owned=t=>t.effectSource?.path===source.path&&t.effectSource.sourceText===effect.sourceText&&t.effectSource.stat===effect.stat;
+      const applied = trace.filter(owned);
+      const missingSource=!applied.length&&absent.find(owned);
       const valid = Number.isFinite(effect.value) && (!effect.roll || effect.value >= effect.roll.min && effect.value <= effect.roll.max);
-      rows.push({ ...source, ...(effect.detail ? { detail: effect.detail, receipt: effect.receipt } : {}), origin, effect, key: `${source.path}:effect:${i}`, status: !valid ? "blocked" : applied.length ? "direct" : "selected",
-        ...(!valid ? { reason: "선택 수치가 없거나 허용 범위를 벗어났습니다." } : {}),
+      rows.push({ ...source, ...(effect.detail ? { detail: effect.detail, receipt: effect.receipt } : {}), origin, effect, key: `${source.path}:effect:${i}`, status: !valid ? "blocked" : applied.length ? "direct" : missingSource ? "not-applicable" : "selected",
+        ...(!valid ? { reason: "선택 수치가 없거나 허용 범위를 벗어났습니다." }
+          : missingSource ? {reason:`계산 가능한 스킬에 ${missingSource.stage==='conversion'?'전환':'추가 획득'}의 원본 적중 대미지가 없습니다.`} : {}),
         appliedTo: [...new Set(applied.map(t => slotLabel(t.rowIndex)))], value: valid ? effect.value : null });
     }
-    for (const [i, effect] of inactive.entries()) rows.push({ ...source, origin, effect, key: `${source.path}:inactive:${i}`, status: "inactive", value: null });
+    for (const [i, effect] of inactive.entries()) rows.push({ ...source, origin, effect, reason:effect.reason, key: `${source.path}:inactive:${i}`, status: "inactive", value: null });
     for (const [i, effect] of mechanics.entries()) rows.push({ ...source, origin, effect, key: `${source.path}:mechanic:${i}`, status: "mechanic", value: null });
     for (const [i, blocker] of blockers.entries()) rows.push({ ...source, origin, key: `${source.path}:blocked:${i}`, status: "blocked", value: null,
       reason: typeof blocker === "string" ? blocker : blocker.reason ?? "효과 또는 입력 확인 필요" });
@@ -52,12 +61,14 @@ export function seasonEffectSources(report) {
     for (const entry of component.calculations ?? []) {
       const path = component.category === "gear" ? `gear.slots.${entry.slotIndex}`
         : `skills.rows.${entry.rowIndex}${component.category === "supports" ? `.supports.${entry.supportIndex}` : ""}`;
+      const effectiveCard=corrosionCard(card,{itemId:component.id,corrosion:entry.corrosion,sourcePageSha256:entry.receipt?.sourcePageSha256},'ko');
       const source = { group: component.category, path, itemId: component.id, name: safe(component.name),
-        detail: card?.koreanTextVerified ? safe(card.detail) : "", receipt: entry.receipt };
+        detail: effectiveCard?.koreanTextVerified ? safe(effectiveCard.detail) : "", receipt: entry.receipt };
       const effects = component.category === "gear" ? entry.rawEffects ?? [] : component.category === "supports" ? entry.effects ?? []
         : trace.filter(t => t.effectSource?.path === path);
-      add(source, effects, component.category === "gear" ? entry.effectBlockers ?? entry.reasons : entry.blockers);
+      add(source, effects, component.category === "gear" ? entry.effectBlockers ?? entry.reasons : entry.blockers, entry.inactive);
     }
   }
   return rows;
 }
+import { corrosionCard } from './seasonCorrosion.js';

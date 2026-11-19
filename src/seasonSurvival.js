@@ -24,11 +24,18 @@ export function calculateSeasonSurvival({ safe, input, effects, life, mana, shie
   const manaGranted = scale("mana_regeneration_speed", gain("mana", mana));
   const flatMana = number(text, /Heroes regenerate ([\d.]+) Mana per second by default/u);
   const percentMana = number(text, /Heroes regenerate ([\d.]+)% Mana per second by default/u);
+  const proportionalMana=finite(percentMana)&&finite(mana)?mana*percentMana/100:null;
+  const optionMana=gain('mana',mana);
+  const manaRate=base=>finite(base)&&finite(optionMana)?scale('mana_regeneration_speed',base+optionMana):null;
   const manaScenarios = [
-    { label: "기본 고정 회복 해석", value: finite(flatMana) && finite(gain("mana", mana)) ? scale("mana_regeneration_speed", flatMana + gain("mana", mana)) : null },
-    { label: "기본 비율 회복 해석", value: finite(percentMana) && finite(mana) && finite(gain("mana", mana)) ? scale("mana_regeneration_speed", mana * percentMana / 100 + gain("mana", mana)) : null },
+    { id:'flat', label: "기본 고정 회복", value: manaRate(flatMana) },
+    { id:'percent', label: "기본 비율 회복", value: manaRate(proportionalMana) },
+    { id:'combined', label: "두 기본 회복 합산 가정", value: finite(flatMana)&&finite(proportionalMana)?manaRate(flatMana+proportionalMana):null },
   ].map((r) => ({ ...r, value: nonnegative(r.value) }));
-  reasons.push("MP 기본 자연 회복의 고정값과 비율값이 함께 기재되어 있습니다. 합산 여부를 확정하지 않고 두 해석을 분리합니다.");
+  const observedMana=finite(input.observedManaRecovery)&&input.observedManaRecovery>=0&&input.observedManaRecovery<=1000000
+    ? nonnegative(input.observedManaRecovery) : null;
+  if(observedMana!==null)manaScenarios.unshift({id:'observed',label:'관측 자연 회복',value:observedMana});
+  reasons.push("MP 기본 자연 회복의 고정값과 비율값이 함께 기재되어 있습니다. 적용 방식을 확인할 수 없어 각각 표시합니다.");
   const chargePercent = number(text, /Heroes have ([\d.]+)% Energy Shield Charge per second by default/u);
   const chargeDelay = number(text, /base Charge Interval is ([\d.]+) seconds/u);
   const recharge = scale("energy_shield_charge_speed", finite(chargePercent) && finite(shield) ? shield * chargePercent / 100 : null);
@@ -77,7 +84,7 @@ export function calculateSeasonSurvival({ safe, input, effects, life, mana, shie
       cooldownRecoveryBonus: safe ? sum("cooldown_recovery_speed") : null,
       frostbiteMaximumBonus: safe ? sum("max_frostbite_rating") : null,
       elementalDamageTakenMultiplier: elementalTakenSupported ? rounded(elementalTaken.reduce((n,e) => n * (1 + Math.max(-reductionCap, e.value) / 100), damageTakenMultiplier)) : null,
-      manaRegeneration: null, shieldRechargePerSecond: nonnegative(recharge), shieldRechargeDelay: shield > 0 ? nonnegative(interval) : null,
+      manaRegeneration: observedMana, shieldRechargePerSecond: nonnegative(recharge), shieldRechargeDelay: shield > 0 ? nonnegative(interval) : null,
       evadeChance: rounded(evasionChance), spellEvadeChance: finite(evasionChance) && finite(spellPenalty) ? rounded(evasionChance * (1 - spellPenalty / 100)) : null,
       attackBlockChance: safe && blockChanceRule ? rounded(clamp(sum("attack_block_chance", "block_chance"), chanceMax)) : null,
       spellBlockChance: safe && blockChanceRule ? rounded(clamp(sum("spell_block_chance", "block_chance"), chanceMax)) : null,

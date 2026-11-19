@@ -8,7 +8,7 @@ import { resolveTlidbTooltipEffects } from "./tlidbTooltipEffectRuntime.js";
 import { SS14_LOG_COMPLETION } from "./data/ss14LogCompletion.generated.js";
 import { SS14_INSTALLED_LOG_OPTIONS } from "./data/ss14InstalledLogOptions.generated.js";
 import { resolveLogGearMechanics, logMechanicStats } from "./seasonLogGearMechanics.js";
-import { normalizeSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_SPELL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
+import { inactiveIcePulseOptions, normalizeSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_SPELL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
 import { resolveSeasonGearConditions } from './seasonGearConditions.js';
 
 Object.assign(SS14_LOG_GEAR.records, SS14_LOG_COMPLETION.gear);
@@ -61,7 +61,7 @@ function definition(authority, itemId, affix) {
   return unique.length === 1 ? unique[0] : null;
 }
 
-export function inspectLogGear(itemId, log, build, slotIndex) {
+export function inspectLogGear(itemId, log, build, slotIndex, icePulseScope) {
   const authority = SS14_LOG_GEAR.records[itemId], card = getSeasonSelectionRecord("gear", itemId);
   const controls = [], rawEffects = [], effects = [], optionRows = [], reasons = [], mechanics = [];
   const conditionControls = [], inactive = [];
@@ -79,12 +79,15 @@ export function inspectLogGear(itemId, log, build, slotIndex) {
     const ordinary = parseTlidbGearTooltip({ id: itemId, categoryId: "gear", tlidbText: { en: {
       ...card, detail: text, sourcePageVersion: "SS14", sourceFieldStatus: { detail: "exact" },
     } } }, { season: "SS14", flavorReceipt: { ...card.flavorReceipt, lines: [] } });
-    const normalized = normalizeSeasonGearEffects(resolveLogGearMechanics(ordinary, text, build));
-    const conditional = resolveSeasonGearConditions(normalized.effects, build, {
+    const normalized = normalizeSeasonGearEffects(resolveLogGearMechanics(ordinary, text, build),
+      card.sourceRecordKey==='Ice_Pulse'?card:undefined);
+    const inapplicable = inactiveIcePulseOptions(normalized,card,icePulseScope);
+    const inactiveLines = new Set(inapplicable.map(effect=>effect.sourceText));
+    const conditional = resolveSeasonGearConditions(normalized.effects.filter(e=>!inactiveLines.has(e.sourceText)), build, {
       path: `gear.slots.${slotIndex}.${itemId}.log.${metadata.logModifierId ?? 'base'}.conditions`,
       sourcePageSha256: metadata.receipt?.sourcePageSha256 ?? card.sourcePageSha256 });
-    const parsed = { ...normalized, effects: conditional.effects, blockers: [...normalized.blockers, ...conditional.blockers] };
-    conditionControls.push(...conditional.conditions); inactive.push(...conditional.inactive);
+    const parsed = { ...normalized, effects: conditional.effects, blockers: [...normalized.blockers.filter(e=>!inactiveLines.has(e.sourceText)), ...conditional.blockers] };
+    conditionControls.push(...conditional.conditions); inactive.push(...inapplicable,...conditional.inactive);
     mechanics.push(...parsed.mechanics);
     const mapped = mapTlidbTooltipEffects(parsed.effects.filter(e => !logMechanicStats.has(e.stat) && !SEASON_LOCAL_WEAPON_STATS.has(e.stat) && !SEASON_SPELL_FLAT_STATS.has(e.stat) && !SEASON_NATIVE_GEAR_STATS.has(e.stat)));
     const resolved = resolveTlidbTooltipEffects(mapped.effects, { rollValues: {} });

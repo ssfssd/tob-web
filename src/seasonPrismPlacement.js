@@ -2,9 +2,75 @@ import { CATALOG } from "./catalog.js";
 import { RUNTIME_CATALOG } from "./data/runtimeCatalog.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { SS14_PRISM_AREA } from "./data/ss14PrismArea.generated.js";
-import { createTalentBoardModel, getTalentTreeGrid } from "./talentBoardModel.js";
+import { createTalentBoardModel, getTalentTreeGrid, getPrismBaseAffixes, getPrismLegendaryAffixes,
+  addPrismToInventory, placePrism, movePrism, unplacePrism } from "./talentBoardModel.js";
+import { SS14_EXTENSIONS } from "./data/ss14Extensions.generated.js";
+import { TLIDB_TALENT_KO_LOCALE } from "./data/tlidbTalentKoLocale.generated.js";
 
 let model;
+export function talentModel() {
+  return model ??= createTalentBoardModel(RUNTIME_CATALOG.datasets.talent_catalog, { talentItems: CATALOG.talents });
+}
+const prismPage = locale => SS14_EXTENSIONS.pages[locale+"/Ethereal_Prism"];
+let catalog;
+function prismCatalog() {
+  if (catalog) return catalog;
+  const en=prismPage("en"), ko=prismPage("ko");
+  const choices=new Map();
+  const items=[];
+  if (en?.season==="SS14" && ko?.season==="SS14") {
+    const lines=ko.parsed.body.split("\n"), enLines=en.parsed.body.split("\n");
+    for (const item of talentModel().prismItems) {
+      const name=TLIDB_TALENT_KO_LOCALE.prismItems[item.slug];
+      if(name && lines.some(l=>l.startsWith(name+" ")) && enLines.some(l=>l.startsWith(item.slug.replaceAll("_"," ")+" "))) items.push({...item,name});
+    }
+    const unique=(rows,id)=>new Set(rows.filter(r=>r.id===id).map(r=>r.text));
+    for(const row of ko.parsed.modifiers) {
+      if (unique(ko.parsed.modifiers,row.id).size===1 && unique(en.parsed.modifiers,row.id).size===1 && /[가-힣]/u.test(row.text) && !/\p{Script=Han}/u.test(row.text))
+        choices.set(row.id,{id:row.id,name:row.text});
+    }
+  }
+  return catalog={items,choices};
+}
+export function seasonPrismChoices(slug,rarity) {
+  const {items,choices}=prismCatalog(), m=talentModel();
+  const item=items.find(i=>i.slug===slug);
+  const options=rows=>rows.map(r=>choices.get(r.modifierId)).filter(Boolean);
+  return {items,item,base:item?options(getPrismBaseAffixes(m,slug)):[],area:options(m.areaAffixes),
+    rare:options(m.rareGaugeAffixes),legendary:item&&rarity==="legendary"?options(getPrismLegendaryAffixes(m,slug)):[]};
+}
+const fields={base:"baseAffixModifierId",area:"areaAffixModifierId",rare:"rareRandomAffixModifierId",legendary:"legendaryRandomAffixModifierId"};
+export function editSeasonPrism(build,edit) {
+  const talents=build.talents, index=edit.slotIndex, itemId=edit.key, placed=talents?.placedPrism;
+  if (!talents || !Number.isInteger(index) || index<1 || index>3 || !talents.boards?.[index]?.treeSlug)
+    throw Error("전문 재능 패널을 선택하세요.");
+  const m=talentModel();
+  if(edit.kind==="prism-create") {
+    const draft=edit.value, options=seasonPrismChoices(draft?.slug,draft?.rarity);
+    if(!options.item?.supportedRarities.includes(draft.rarity)) throw Error("프리즘 종류와 희귀도를 선택하세요.");
+    const item={instanceId:itemId,name:options.item.name,prismItemName:options.item.name,prismItemSlug:draft.slug,rarity:draft.rarity};
+    for(const [key,field] of Object.entries(fields)) {
+      if(key==="legendary"&&draft.rarity!=="legendary") continue;
+      if(!options[key].some(o=>o.id===draft[key])) throw Error("SS14 프리즘 옵션을 선택하세요.");
+      item[field]=draft[key];
+    }
+    const result=addPrismToInventory(m,talents,item);
+    if(result.status!=="created") throw Error("프리즘을 보관할 수 없습니다.");
+    talents.prismInventory=[{...result.item,prismItemName:item.name},...(talents.prismInventory??[])];
+    return;
+  }
+  if ((talents.boards??[]).some(b=>b?.placedPrism || b?.prismSlots?.some(Boolean) || b?.placedInverseImage || b?.inverseImageSlots?.some(Boolean)))
+    throw Error("기존 보드 단위의 배치 정보를 먼저 확인하세요.");
+  if(edit.kind==="prism-remove" && (placed?.instanceId!==itemId || placed?.boardIndex!==index))
+    throw Error("이 패널에 배치한 프리즘을 선택하세요.");
+  if(edit.kind==="prism-place" && (placed && placed.instanceId!==itemId)) throw Error("기존 프리즘을 먼저 해제하세요.");
+  const result=edit.kind==="prism-remove"?unplacePrism(m,talents,itemId):placed?movePrism(m,talents,itemId,index,edit.value):placePrism(m,talents,index,itemId,edit.value);
+  if(!["unplaced","placed","moved"].includes(result.status)) throw Error(({
+    "required-by-dependent":"프리즘을 선행 조건으로 쓰는 재능을 먼저 회수하세요.",
+    "node-assigned":"포인트를 회수한 뒤 배치하세요.", "inverse-image-on-board":"이 패널의 역상을 먼저 해제하세요."
+  })[result.status]??"배치할 프리즘과 재능 칸을 확인하세요.");
+  talents.placedPrism=result.state.placedPrism;
+}
 // The existing editor supplies coordinates/identities ONLY. No old description,
 // point value, affix value or calculationValueAuthority is read here.
 export function inspectSeasonPrism(build, item, page) {
@@ -28,7 +94,7 @@ export function inspectSeasonPrism(build, item, page) {
   if (!base || area?.text !== "The area of effect expands to 3x3 Rectangle" || !effect
     || SS14_PRISM_AREA.season !== "SS14" || !SS14_PRISM_AREA.body.includes("The Prism is located in the 2nd row, 2nd column within this Effect Area."))
     return fail("현재 검증 범위는 3×3 중앙 배치와 하위 재능의 단일 직접 수치 옵션입니다.");
-  model ??= createTalentBoardModel(RUNTIME_CATALOG.datasets.talent_catalog, { talentItems: CATALOG.talents });
+  talentModel();
   if (model.prismItemBySlug.get(item.prismItemSlug)?.baseAffixModifierId !== item.baseAffixModifierId) return fail("프리즘 종류와 기본 옵션의 연결을 확인하세요.");
   const grid = getTalentTreeGrid(model, board.treeSlug);
   const placed = grid.cells.find(c => c.x === p.x && c.y === p.y)?.node;

@@ -3,6 +3,7 @@ import { SS14_OFFENSE_RULES } from "./data/ss14OffenseRules.generated.js";
 import { SS14_HIT_RULES } from "./data/ss14HitRules.generated.js";
 import { validGameCriticalBinding } from "./seasonGameData.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
+import { DUAL_WIELD_ATTACK_SOURCE } from './seasonWeaponInputs.js';
 
 const finite = Number.isFinite;
 const round = (n) => finite(n) ? Math.round(n * 1e5) / 1e5 : null;
@@ -54,16 +55,24 @@ export function calculateSeasonOffense(build, components, skills, projection, ch
     }
     const attributeMultiplier = blockers.length ? null : 1 + attributeBonus / 100;
     const attributedDps = blockers.length ? null : basis.hitDps * attributeMultiplier;
-    if (basis?.hitDps === 0 && basis?.dotPools?.length) return { id: row.id, rowIndex: row.rowIndex, mainStats: mainStats?.map(n => attributes[n]) ?? [],
-      supported: !blockers.length, values: { attributeMultiplier, attributedDps: 0, expectedDps: 0, hitMultiplier: 1 }, blockers, receipts,
-      assumption: "지속 대미지에는 크리티컬·더블 대미지를 적용하지 않습니다." };
+    const capability = !basis && components.find(c => c.category === "skills" && c.id === row.id)
+      ?.calculations?.find(entry => entry.rowIndex === row.rowIndex)?.damageCapabilities;
+    if (basis?.hitDps === 0 && basis?.dotPools?.length || capability?.dot && !capability.hit) {
+      const known = blockers.length === 0;
+      return { id: row.id, rowIndex: row.rowIndex, mainStats: mainStats?.map(n => attributes[n]) ?? [],
+        supported: known, values: { attributeMultiplier, attributedDps: known ? 0 : null, expectedDps: known ? 0 : null, hitMultiplier: known ? 1 : null },
+        blockers, receipts, assumption: "지속 대미지에는 크리티컬·더블 대미지를 적용하지 않습니다." };
+    }
     const weapon = record?.tags?.includes('Attack') ? seasonWeaponProfile(build) : null;
+    const hands = basis?.weaponHands;
     const offensePins = weapon?.enabled ? seasonOffenseRulePins() : build.ss14Inputs?.offenseRuleReceipts;
     const input = weapon?.enabled ? weapon.supported ? { itemId: row.id, sourcePageSha256: record?.sourcePageSha256,
       baseCriticalRating: weapon.values.baseCriticalRating } : null : build.ss14Inputs?.offense?.[row.rowIndex];
-    if (weapon?.enabled) { criticalBlockers.push(...weapon.blockers); receipts.push(...weapon.receipts); }
-    if (!input || input.itemId !== row.id || input.sourcePageSha256 !== record?.sourcePageSha256 || !validBaseCriticalRating(input.baseCriticalRating)
-      || !validGameCriticalBinding(input)) {
+    if (hands) receipts.push({season:'SS14',sourceUrl:DUAL_WIELD_ATTACK_SOURCE},...hands.flatMap(hand=>hand.receipts));
+    else if (weapon?.enabled) { criticalBlockers.push(...weapon.blockers); receipts.push(...weapon.receipts); }
+    const hasBaseRating = input?.itemId === row.id && input.sourcePageSha256 === record?.sourcePageSha256
+      && validBaseCriticalRating(input.baseCriticalRating) && validGameCriticalBinding(input);
+    if (!hasBaseRating) {
       if (!weapon?.enabled) criticalBlockers.push("해당 스킬의 보정 전 기본 크리티컬 수치를 직접 입력하세요. 미입력을 0으로 계산하지 않습니다.");
     }
     if (!bound(criticalPage, offensePins)
@@ -133,22 +142,29 @@ export function calculateSeasonOffense(build, components, skills, projection, ch
       || !luckyPage.body.includes("Unlucky: The result is rolled twice") || !luckyPage.body.includes("cancel into Lucky"))) {
       criticalBlockers.push("SS14 크리티컬 행운·불운 공식 미확인");
     }
-    const rating = (input?.baseCriticalRating + flat) * (1 + increase / 100) * more;
-    if (!finite(rating) || rating < 0 || !finite(damage) || damage < 100) criticalBlockers.push("크리티컬 계산 입력 범위 오류");
-    const chance = Math.min(1, Math.max(0, rating / 10000));
     const luck = (veryLucky ? 2 : lucky ? 1 : 0) - (unlucky ? 1 : 0);
-    const effectiveChance = luck >= 0 ? 1 - (1 - chance) ** (luck + 1) : chance ** 2;
     const criticalHitMore = effects.filter(e => e.stat === "critical_hit_damage" || e.stat === 'projectile_critical_hit_damage' && tags.has('projectile'));
     if (criticalHitMore.some(e => e.operation !== "more" || !finite(e.value) || e.value < 0 || e.target || e.condition)) criticalBlockers.push("크리티컬 명중 전용 추가 배율 미확인");
     const criticalOnlyMultiplier = criticalHitMore.reduce((n, e) => n * (1 + e.value / 100), 1);
-    const criticalMultiplier = 1 + effectiveChance * (damage / 100 * criticalOnlyMultiplier - 1);
+    const calculateCritical = baseRating => {
+      const rating = (baseRating + flat) * (1 + increase / 100) * more;
+      const chance = Math.min(1, Math.max(0, rating / 10000));
+      const effectiveChance = luck >= 0 ? 1 - (1 - chance) ** (luck + 1) : chance ** 2;
+      return {rating,chance,effectiveChance,criticalMultiplier:1 + effectiveChance * (damage / 100 * criticalOnlyMultiplier - 1)};
+    };
+    const {rating,chance,effectiveChance,criticalMultiplier} = calculateCritical(input?.baseCriticalRating);
+    const handRatings = hands?.map(hand=>({...calculateCritical(hand.baseCriticalRating),slotIndex:hand.slotIndex,hitDps:hand.hitDps}));
+    if (hasBaseRating && (!finite(rating) || rating < 0) || handRatings?.some(hand=>!finite(hand.rating)||hand.rating<0)
+      || !finite(damage) || damage < 100) criticalBlockers.push("크리티컬 계산 입력 범위 오류");
+    const expectedDps = handRatings ? handRatings.reduce((sum,hand)=>sum+hand.hitDps*hand.criticalMultiplier,0)/2*attributeMultiplier*doubleMultiplier
+      : attributedDps*criticalMultiplier*doubleMultiplier;
     receipts.push(...criticalHitMore.map(e => e.receipt).filter(Boolean));
     const supported = !blockers.length && !criticalBlockers.length;
     if (criticalPage) receipts.push(criticalPage);
     if ((lucky || veryLucky || unlucky) && luckyPage) receipts.push(luckyPage);
     return { id: row.id, rowIndex: row.rowIndex, mainStats: mainStats?.map((n) => attributes[n]) ?? [], supported,
       values: { attributeMultiplier: round(attributeMultiplier), attributedDps: round(attributedDps),
-        hitMultiplier: supported ? criticalMultiplier * doubleMultiplier : null,
+        hitMultiplier: supported && !hands ? criticalMultiplier * doubleMultiplier : null,
         criticalRating: !criticalBlockers.length ? round(rating) : null, criticalDamage: !criticalBlockers.length ? round(damage) : null,
         criticalChance: !criticalBlockers.length ? round(chance * 100) : null,
         effectiveCriticalChance: !criticalBlockers.length ? round(effectiveChance * 100) : null,
@@ -156,7 +172,10 @@ export function calculateSeasonOffense(build, components, skills, projection, ch
         quadrupleDamageChance: !criticalBlockers.length ? round(quadrupleChance) : null,
         doubleDamageMultiplier: !criticalBlockers.length ? round(doubleMultiplier) : null,
         criticalOnlyMultiplier: !criticalBlockers.length ? round(criticalOnlyMultiplier) : null,
-        expectedDps: supported ? round(attributedDps * criticalMultiplier * doubleMultiplier) : null },
+        expectedDps: supported ? round(expectedDps) : null,
+        ...(supported && handRatings && { weaponHands:handRatings.map(hand=>({slotIndex:hand.slotIndex,
+          criticalRating:round(hand.rating), effectiveCriticalChance:hand.effectiveChance*100,
+          hitMultiplier:hand.criticalMultiplier*doubleMultiplier})) }) },
       blockers: [...new Set([...blockers, ...criticalBlockers])], receipts,
       assumption: "기본 크리티컬·조건은 사용자 확인 입력입니다. 행운 재추첨과 크리티컬·더블 대미지 판정은 독립이라고 가정한 부분 기대값입니다. 발동 유지율을 뜻하지 않습니다." };
   });

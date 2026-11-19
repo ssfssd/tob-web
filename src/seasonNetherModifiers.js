@@ -2,8 +2,9 @@ import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
 import { resolveSeasonSkillLevel } from './seasonSkillLevels.js';
 import { netherSum, netherRule } from './seasonNetherRemaining.js';
-import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
+import { theaCombatEnabled, fixedNumbedStacks } from './seasonTheaCombatInputs.js';
 import { inspectSeasonSupport, checkSeasonSupportHost } from './seasonSupport.js';
+import { SS14_THEA_COMBAT } from './data/ss14TheaCombat.generated.js';
 
 export function netherCondition(row,build,key,label,max=1) {
   const conditionKey=`${row.path}:nether-${key}`,sourcePageSha256=row.receipt.sourcePageSha256;
@@ -18,32 +19,75 @@ export function netherCondition(row,build,key,label,max=1) {
 const push=(row,stat,value,operation='add_percent',sourceText=row.detail)=>row.effects.push({stat,value,operation,
   unit:operation==='add'?'flat':'percent',path:row.path,group:row.group,receipt:row.receipt,sourceText});
 const fail=(row,reason)=>{row.blockers.push({reason});row.status='partial';};
+export const FIXED_NUMBED_FIELD = {
+  label:'대상에게 직접 부여한 마취 중첩', min:0, max:SS14_THEA_COMBAT.numbed.maxStacks, integer:true,
+};
+export const isNumbedBaseOverride = effect => effect.stat === 'numbed_base_lightning_taken'
+  && effect.operation === 'set' && effect.value === 11;
+export function projectFixedNumbed(rows,build,gearEffect) {
+  if(theaCombatEnabled(build))return null;
+  const sources=rows.filter(row=>row.effects.some(effect=>effect.stat==='numbed_effect'));
+  let stacks=fixedNumbedStacks(build), sourceKey=null;
+  if(build.ss14Inputs?.dps?.enemy?.numbedStacks===undefined&&sources.length){
+    // Keep the existing receipt-bound condition on old documents.
+    for(const row of sources){
+      const value=netherCondition(row,build,'numbed-stacks',FIXED_NUMBED_FIELD.label,FIXED_NUMBED_FIELD.max);
+      if(stacks===undefined&&value!==null){stacks=value;sourceKey=row.conditionControls.at(-1).key;}
+    }
+  }
+  if(!Number.isInteger(stacks)||stacks<0||stacks>FIXED_NUMBED_FIELD.max)return null;
+  const baseOwner=rows.find(row=>row.effects.some(isNumbedBaseOverride));
+  const basePerStack=baseOwner?.effects.find(isNumbedBaseOverride)?.value ?? SS14_THEA_COMBAT.numbed.morePerStack;
+  const bonus=basePerStack*stacks*
+    (1+(netherSum(sources.flatMap(row=>row.effects),'numbed_effect')+gearEffect)/100);
+  const owner=baseOwner??sources[0];
+  const receipt=netherRule('Numbed');
+  const effect=owner?null:{stat:'lightning_damage_taken',value:bonus,operation:'more',unit:'percent',
+    path:'dps.enemy.numbedStacks',group:'combat',receipt,sourceText:FIXED_NUMBED_FIELD.label};
+  if(owner)push(owner,'lightning_damage_taken',bonus,'more');
+  return {stacks,bonus,sourceKey,receipt,effect};
+}
 const resolveBuff=(slot,card)=>resolveSeasonSkillLevel({id:slot.skillId,categoryId:'skills',tlidbText:{en:{...card,sourcePageVersion:'SS14',sourceFieldStatus:{detail:'exact'}}}},slot.level??20);
+const warcryDamage = /^\+?([\d.]+) % additional (damage|Ailment Damage) dealt by (Slash-Strike|Demolisher) skills (?:for each|per) enemy affected, stacking up to 8 times$/u;
+const demolisherRecovery = /^\+[\d.]+ % Demolisher Charge Recovery Speed for each enemy affected, stacking up to 8 times$/u;
 
-export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation = 0) {
+export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,levelBonus) {
   const originals=rows.flatMap(r=>r.effects),sources=stat=>rows.filter(r=>r.effects.some(e=>e.stat===stat));
   const amount=stat=>netherSum(originals,stat);
   const hasNether=rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
   const slots=[...(build.skills?.active??[]),...(build.skills?.passive??[])];
+  const hasSkillTag=tag=>slots.some(slot=>SS14_CARDS_EN.records[slot?.skillId]?.tags?.includes(tag));
   const fear=rows.find(r=>r.mechanics?.some(m=>m.kind==='nether-fearless-double'));
   // Project actual selected SS14 buffs, retaining unresolved clauses on the row.
   for(const [index,slot] of slots.entries()) {
     const card=SS14_CARDS_EN.records[slot?.skillId];
     if(!card||!card.tags?.some(t=>['Aura','Warcry'].includes(t)))continue;
     const aura=card.tags.includes('Aura'),stat=aura?'aura_effect':'warcry_effect';
-    const resolved=resolveBuff(slot,card);
-    const row={path:`skills.netherBuff.${index}`,itemId:slot.skillId,group:'divinity',buffSkill:index,
+    const baseLevel=slot.level??20, bonus=levelBonus(card,index), level=baseLevel+bonus;
+    const resolved=resolveBuff({...slot,level},card);
+    const row={path:`skills.netherBuff.${index}`,itemId:slot.skillId,group:'divinity',buffSkill:index,isAura:aura,
       name:SS14_CARDS.records[slot.skillId]?.name??'한국어 원문 미제공',detail:SS14_CARDS.records[slot.skillId]?.koreanTextVerified?SS14_CARDS.records[slot.skillId].detail:'한국어 원문 미제공',receipt:card,
-      effects:[],blockers:[...resolved.blockers],conditionControls:[],inactive:[],mechanics:[],status:resolved.blockers.length?'partial':'mapped'};
+      level,baseLevel,levelBonus:bonus,progressionReceipt:resolved.receipt,
+      effects:[],blockers:resolved.blockers.map(blocker=>({reason:blocker.sourceText??blocker.reason})),conditionControls:[],inactive:[],mechanics:[],status:resolved.blockers.length?'partial':'mapped'};
     rows.push(row);if(row.blockers.length)continue;
     const binding=build.ss14Inputs?.skills?.[index];
     if(binding?.itemId!==slot.skillId||binding.sourcePageSha256!==card.sourcePageSha256)fail(row,'선택 버프의 SS14 원문 연결을 다시 확인하세요.');
     if(slots.filter(s=>s?.skillId===slot.skillId).length>1)fail(row,'같은 오라·함성을 여러 칸에서 중복 적용할 수 없습니다.');
+    const resolvedText=resolved.item.tlidbText.en.detail;
+    const lines=resolvedText.split('\nDetails\n').at(-1).split('\n');
+    const effectLines=lines.filter(l=>!/^Activates the Aura,|^Casts the skill and lets out a Warcry:|^Taunts Nearby enemies\.|^Weakens Nearby enemies\.|^Lasts/u.test(l));
+    if(!aura && effectLines.length && effectLines.every(line=>{
+      const tag=warcryDamage.exec(line)?.[3] ?? (demolisherRecovery.test(line)?'Demolisher':null);
+      return tag && !hasSkillTag(tag);
+    })){
+      row.inactive.push({reason:'함성의 효과가 적용되는 스킬이 장착되어 있지 않습니다.'});
+      continue;
+    }
     const active=netherCondition(row,build,`buff-${index}`,`${row.name} 효과 적용 중 여부`);
     const supports=[];
     for(const [supportIndex,support] of (slot.supports??[]).entries()) {
       if(!support?.supportId)continue;
-      const linked=inspectSeasonSupport(support,{rowIndex:index,supportIndex,isTarget:true,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`],build});
+      const linked=inspectSeasonSupport({...support,level:support.level+levelBonus(null,index,true)},{rowIndex:index,supportIndex,isTarget:true,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`],build});
       for(const reason of linked.blockers)fail(row,reason);
       if(checkSeasonSupportHost(support.supportId,card,{values:{}},index)!==true)fail(row,'버프와 보조 스킬의 호환 조건을 확인하세요.');
       for(const effect of linked.effects) {
@@ -58,15 +102,22 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation 
     const supportMore=aura?supports.filter(e=>e.stat==='supported-skill-aura-effect'&&e.operation==='more').reduce((n,e)=>n*(1+e.value/100),1):1;
     const multiplier=(1+(amount(stat)+(aura?supportAmount('supported-skill-aura-effect'):0))/100)*supportMore;
     if(multiplier<0)fail(row,'오라·함성 효과 배율이 음수입니다.');
-    const resolvedText=resolved.item.tlidbText.en.detail;
-    const lines=resolvedText.split('\nDetails\n').at(-1).split('\n');
-    const effectLines=lines.filter(l=>!/^Activates the Aura,|^Casts the skill and lets out a Warcry:|^Taunts Nearby enemies\.|^Weakens Nearby enemies\.|^Lasts/u.test(l));
     const stacks=aura?1:netherCondition(row,build,`warcry-enemies-${index}`,`${row.name} 영향을 받은 적 수`,8);
     for(let line of effectLines) {
       if(line.includes('Not affected by Aura Effects')) {fail(row,'오라 효과 제외 조항의 별도 계산 미지원');continue;}
-      const per=line.match(/^([\d.]+) % additional (damage|Ailment Damage) dealt by (Slash-Strike|Demolisher) skills (?:for each|per) enemy affected, stacking up to 8 times$/u);
+      const per=line.match(warcryDamage);
       if(per){push(row,`${per[3]==='Demolisher'?'demolisher':'slash_strike'}_${per[2]==='damage'?'damage':'ailment_damage'}`,Number(per[1])*stacks*multiplier,'more',line);continue;}
-      const melee=line.match(/^\+([\d.]+) % (Critical Strike Rating for Melee Skills|additional Melee Skill Damage|Melee Attack Speed)$/u);
+      if(demolisherRecovery.test(line)) {
+        if(!hasSkillTag('Demolisher'))
+          row.inactive.push({sourceText:line,reason:'장착한 파괴 스킬 없음'});
+        else if(stacks>0){
+          push(row,'demolisher_charge_recovery_speed',Number(line.match(/[\d.]+/u)[0])*stacks*multiplier,'add_percent',line);
+          if(slots.some(skill=>skill?.skillId!=='skills-tlidb-com-cn-groundshaker' && SS14_CARDS_EN.records[skill?.skillId]?.tags?.includes('Demolisher')))
+            fail(row,'함성으로 바뀌는 파괴 충전 간격은 아직 계산할 수 없습니다.');
+        }
+        continue;
+      }
+      const melee=line.match(/^\+?([\d.]+) % (Critical Strike Rating for Melee Skills|additional Melee Skill Damage|Melee Attack Speed)$/u);
       if(melee){push(row,{'Critical Strike Rating for Melee Skills':'melee_critical_strike_rating','additional Melee Skill Damage':'melee_damage','Melee Attack Speed':'melee_attack_speed'}[melee[2]],Number(melee[1])*multiplier,melee[2].startsWith('additional')?'more':'add_percent',line);continue;}
       if(/^\+?[\d.]+ % additional Minion Damage per enemy affected\. Stacks up to 8 times$/u.test(line)) {
         push(row,'minion_damage',Number(line.match(/[\d.]+/u)[0])*stacks*multiplier,'more',line);continue;
@@ -110,13 +161,6 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation 
     if(rating!==null&&!rows.some(r=>r.mechanics?.some(m=>m.kind==='nether-frostbite'))){
       push(row,'cold_damage_taken',rating*(1+amount('frostbite_effect')/100),'more');
       row.mechanics.push({kind:'nether-frostbite',rating,receipt:netherRule('Frostbite')});
-    }
-  }
-  for(const row of sources('numbed_effect'))if(!theaCombatEnabled(build)) {
-    const stacks=netherCondition(row,build,'numbed-stacks','대상에 이미 적용된 마취 중첩',10);
-    if(stacks!==null&&!rows.some(r=>r.mechanics?.some(m=>m.kind==='nether-numbed-fixed'))){
-      push(row,'lightning_damage_taken',5*stacks*(1+amount('numbed_effect')/100),'more');
-      row.mechanics.push({kind:'nether-numbed-fixed',stacks,receipt:netherRule('Numbed')});
     }
   }
   const provision=rows.find(r=>r.mechanics?.some(m=>m.kind==='nether-provision'));

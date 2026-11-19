@@ -14,7 +14,7 @@ export function sharedCodeFromHash(hash) {
   return typeof hash === 'string' && hash.startsWith(shareFragment) ? hash.slice(shareFragment.length) : null;
 }
 
-async function readBounded(stream) {
+export async function readBoundedBuildCode(stream) {
   const reader = stream.getReader(), chunks = [];
   let length = 0;
   try {
@@ -38,7 +38,7 @@ async function readBounded(stream) {
 export async function encodeBuildCode(document) {
   const blob = new Blob([JSON.stringify(shareableSeasonBuild(document))]);
   if (blob.size > maxBytes) throw new Error('공유 가능한 빌드 크기를 초과했습니다.');
-  const bytes = await readBounded(blob.stream().pipeThrough(new CompressionStream('gzip')));
+  const bytes = await readBoundedBuildCode(blob.stream().pipeThrough(new CompressionStream('gzip')));
   let binary = '';
   for (let pos=0; pos<bytes.length; pos+=8192) binary += String.fromCharCode(...bytes.subarray(pos,pos+8192));
   return prefix + btoa(binary).replaceAll('+','-').replaceAll('/','_').replace(/=+$/u,'');
@@ -52,7 +52,7 @@ export async function decodeBuildCode(raw) {
     const encoded = text.slice(prefix.length);
     if (!/^[A-Za-z0-9_-]+$/u.test(encoded)) throw new Error();
     const bytes = Uint8Array.from(atob(encoded.replaceAll('-','+').replaceAll('_','/')), c=>c.charCodeAt(0));
-    const plain = await readBounded(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
+    const plain = await readBoundedBuildCode(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
     const value = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plain), (key, entry) => {
       if (['__proto__','constructor','prototype'].includes(key)) throw new Error();
       return entry;

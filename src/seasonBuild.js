@@ -4,6 +4,7 @@ import { normalizeBuild } from "./engine.js";
 import { calculateSeasonSkill } from "./seasonCalculation.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { SS14_GEAR_EN } from "./data/ss14Gear.en.generated.js";
+import { corrosionCard,isImplicitRoll } from './seasonCorrosion.js';
 import { parseTlidbGearTooltip, projectTlidbGearTooltipRollValues } from "./tlidbGearTooltipCalculation.js";
 import { mapTlidbTooltipEffects } from "./tlidbTooltipStatMapping.js";
 import { resolveTlidbTooltipEffects } from "./tlidbTooltipEffectRuntime.js";
@@ -14,19 +15,20 @@ import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { inspectNestedSeasonReferences } from "./seasonConfiguration.js";
 import { inspectSeasonSupport } from "./seasonSupport.js";
 import { SS14_SUPPORTS_EN } from "./data/ss14Supports.en.generated.js";
-import { projectSeasonComponents } from "./seasonComponents.js";
+import { projectSeasonComponents, projectSeasonCustomOptions } from "./seasonComponents.js";
 import { calculateSeasonCharacter } from "./seasonCharacter.js";
-import { calculateElixirAverage } from "./seasonElixirAverage.js";
+import { calculateElixirAverage, applyObservedElixirUptime } from "./seasonElixirAverage.js";
 
 import { projectSeasonBlessings } from "./seasonBlessings.js";
 import { calculateSeasonDps } from "./seasonDps.js";
 import { calculateTheaAverage } from "./seasonTheaCycle.js";
 import { seasonDamageContext } from "./seasonWeaponInputs.js";
 import { inspectLogGear } from "./seasonLogGear.js";
-import { seasonGearLevelBonus, seasonEffectLevelBonus } from "./seasonSkillLevels.js";
+import { seasonGearLevelBonus, seasonEffectLevelBonus, seasonRevelationLevelBonus } from "./seasonSkillLevels.js";
 import { projectSeasonClockwork } from "./seasonClockwork.js";
 import { calculateSeasonNumericStats } from "./seasonNumericStats.js";
-import { normalizeSeasonGearEffects, validSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
+import { inactiveIcePulseOptions, inactiveKinglyTerraOptions, inactiveSunsetReapingOptions, isObservedTerraGearEffect, normalizeSeasonGearEffects, observedKinglyTerraOptions, validSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
+import { VOLTAIC_RIPPLE_ID } from "./seasonSkillMechanics.js";
 import { netherSum } from "./seasonNetherRemaining.js";
 import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { logMechanicStats } from "./seasonLogGearMechanics.js";
@@ -77,7 +79,7 @@ export function inspectSeasonBuildInputs(build) {
   if (nonempty(build?.divinity?.boards)) block("divinity", "신격의 석판", "확인된 일반 석판 수치는 별도 내역에 반영하며 SS14 명왕·복제·배치 검증은 미완료입니다.");
   if ((build?.pact?.slots ?? []).some((slot) => slot.spirit || slot.undeterminedFate
     || Object.values(slot.rings ?? {}).some((ring) => ring.installedDestiny))) block("pact", "정령·운명", "정령 레벨, 링과 추가 슬롯에 장착한 운명은 효과별 계산 내역에서 확인할 수 있습니다.");
-  if (build?.customAffixes?.trim()) block("customAffixes", "사용자 옵션", "SS14 사용자 효과 연결 미완료");
+  if (projectSeasonCustomOptions(build).some(r=>r.blockers.length)) block("customAffixes","사용자 옵션","일부 옵션의 SS14 문구를 확인하세요.");
   if (nonempty(build?.conditions)) block("conditions", "전투 조건", "SS14 조건과 적 방어 계산 미검증");
   if (build?.skillSeals?.life || build?.skillSeals?.mana) block("skillSeals", "자원 봉인", "SS14 자원 봉인 계산 미검증");
   if (nonempty(build?.calculation)) block("calculation", "추가 계산 설정", "원본 계산 설정을 보존했으나 SS14 적용은 미검증");
@@ -101,8 +103,8 @@ export function projectSeasonGearRollValues(item, slot, targetEffects) {
   return values;
 }
 
-function inspectGear(item, slot, records, { targetBinding, isTarget = false, sourceSlot = slot, sourceSeason = "SS13", build, slotIndex } = {}) {
-  const record = records?.[item.id];
+function inspectGear(item, slot, records, { targetBinding, isTarget = false, sourceSlot = slot, sourceSeason = "SS13", build, slotIndex, noTerra = false, observedVoltage = false, noReaping = false, icePulseScope, rollsOnly = false } = {}) {
+  const record = corrosionCard(records?.[item.id],isTarget?targetBinding:null);
   if (!record || record.status !== "collected-preview" || record.season !== "SS14"
     || record.sourceRecordKey !== item.tlidbText?.en?.sourceRecordKey) return { status: "unavailable", reasons: ["SS14 동일 장비 카드 미확보"] };
   const receipt = { sourceUrl: record.sourceUrl, sourcePageSha256: record.sourcePageSha256, sourceRecordKey: record.sourceRecordKey, season: record.season };
@@ -110,7 +112,7 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
   if(isTarget&&currentIdentity&&!currentIdentity.slots.includes(slotIndex))
     return {status:'partial',receipt,reasons:['장비 종류와 장착 칸이 맞지 않습니다. 저장된 장비는 보존되며 올바른 칸에서 다시 선택할 수 있습니다.']};
   if (isTarget && targetBinding?.logGear && targetBinding.itemId === item.id && targetBinding.sourcePageSha256 === record.sourcePageSha256) {
-    return inspectLogGear(item.id, targetBinding.logGear, build, slotIndex);
+    return inspectLogGear(item.id, targetBinding.logGear, build, slotIndex, icePulseScope);
   }
   const crafts = Object.values(slot.crafts ?? {});
   const unknownCraft = crafts.some(c => !craftOptions(item.id).some(o => o.affixId === c?.affixId && o.tierId === c?.tierId));
@@ -118,42 +120,80 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
     return { status: "partial", receipt, reasons: ["SS14 제작·침식·사용자 장비 옵션의 별도 수치 근거 미확보. SS13 값으로 대체하지 않습니다."] };
   }
   const parsed = normalizeSeasonGearEffects(parseTlidbGearTooltip({ id: item.id, categoryId: "gear", tlidbText: { en: { ...record,
-    sourcePageVersion: "SS14", sourceFieldStatus: { detail: "exact" } } } }, { season: "SS14", flavorReceipt: record.flavorReceipt }));
+    sourcePageVersion: "SS14", sourceFieldStatus: { detail: "exact" } } } }, { season: "SS14", flavorReceipt: record.flavorReceipt }),record);
   const validBinding = targetBinding?.itemId === item.id && targetBinding.sourcePageSha256 === record.sourcePageSha256;
   if (isTarget && !validBinding) return { status: "partial", receipt, reasons: ["SS14 장비 입력과 원문 근거의 연결이 바뀌었습니다. SS13 선택값으로 대체하지 않습니다."] };
   const rollValues = isTarget ? targetBinding.rolls : sourceSeason === "SS13" ? projectSeasonGearRollValues(item, slot, parsed.effects) : {};
-  const conditional = resolveSeasonGearConditions(parsed.effects.map(e => ({ ...e,
+  const controls = parsed.effects.filter((effect) => effect.roll).map((effect) => ({ ...effect.roll,
+    ...(isImplicitRoll(record,effect.roll.key)?{implicit:true}:{}),
+    stat: effect.stat, sourceText: effect.sourceText, value: rollValues?.[effect.roll.key] ?? "" }));
+  const corrosion = targetBinding?.corrosion ? {corrosion:targetBinding.corrosion} : {};
+  if (rollsOnly) return {receipt, controls, ...corrosion};
+  const inactive = !isTarget ? [] : [
+    ...(noTerra ? inactiveKinglyTerraOptions(parsed,record) : []),
+    ...(observedVoltage ? observedKinglyTerraOptions(parsed,record) : []),
+    ...(noReaping ? inactiveSunsetReapingOptions(parsed,record) : []),
+    ...inactiveIcePulseOptions(parsed,record,icePulseScope),
+  ];
+  const inactiveLines = new Set(inactive.map(effect=>effect.sourceText));
+  const parsedBlockers = parsed.blockers.filter(effect=>!inactiveLines.has(effect.sourceText));
+  const conditional = resolveSeasonGearConditions(parsed.effects.filter(effect=>!inactiveLines.has(effect.sourceText)).map(e => ({ ...e,
     value: e.roll ? Number.isFinite(rollValues?.[e.roll.key]) && rollValues[e.roll.key] >= e.roll.min && rollValues[e.roll.key] <= e.roll.max
       ? rollValues[e.roll.key] : null : e.value })), build,
     { path: `gear.slots.${slotIndex}.${item.id}.conditions`, sourcePageSha256: record.sourcePageSha256 });
-  const mapped = mapTlidbTooltipEffects(conditional.effects.filter(e => !SEASON_LOCAL_WEAPON_STATS.has(e.stat) && !SEASON_GLOBAL_FLAT_STATS.has(e.stat) && !logMechanicStats.has(e.stat) && !SEASON_NATIVE_GEAR_STATS.has(e.stat)));
+  const mapped = mapTlidbTooltipEffects(conditional.effects.filter(e => !SEASON_LOCAL_WEAPON_STATS.has(e.stat) && !SEASON_GLOBAL_FLAT_STATS.has(e.stat) && !logMechanicStats.has(e.stat) && !SEASON_NATIVE_GEAR_STATS.has(e.stat) && !isObservedTerraGearEffect(e)));
   const resolution = resolveTlidbTooltipEffects(mapped.effects, { rollValues });
-  const reasons = [...parsed.blockers, ...conditional.blockers, ...mapped.blockers, ...resolution.excluded];
-  const controls = parsed.effects.filter((effect) => effect.roll).map((effect) => ({ ...effect.roll,
-    stat: effect.stat, sourceText: effect.sourceText, value: rollValues?.[effect.roll.key] ?? "" }));
+  const reasons = [...parsedBlockers, ...conditional.blockers, ...mapped.blockers, ...resolution.excluded];
+  const effectReasons = [...new Set(conditional.blockers.map(issue=>issue.reason))];
+  if (parsedBlockers.length || mapped.blockers.length || resolution.excluded.length)
+    effectReasons.push("SS14 장비 효과·조건·선택 수치 해석 미완료");
   // Keep the native parser vocabulary for the season-neutral damage evaluator.
   // Mapped character-stat names must not be fed into the skill evaluator.
   const rawEffects = conditional.effects;
   return { status: reasons.length ? "partial" : "mapped", receipt,
-    reasons: reasons.length ? ["SS14 장비 효과·조건·선택 수치 해석 미완료"] : [],
+    reasons: effectReasons,
     effects: resolution.applied, rawEffects, controls, rollValues, effectBlockers: reasons,
-    conditionControls: conditional.conditions, inactive: conditional.inactive,
+    ...corrosion,
+    conditionControls: conditional.conditions, inactive: [...conditional.inactive,...inactive],
     comparison: { scope: "gear-card-contributions-only", rows: sourceSeason === "SS13" && sourceSlot?.itemId === item.id ? compareSeasonGearEffects(item, sourceSlot, parsed, rollValues) : [],
       sourceReceipt: { season: "SS13", sourceUrl: item.tlidbText?.en?.sourceUrl, sourcePageSha256: item.tlidbText?.en?.sourcePageSha256 } } };
+}
+
+export function seasonGearSlotRollEntry(build, slotIndex) {
+  if (build.patchSnapshot?.season !== 'SS14') return null;
+  const slot = build.gear?.slots?.[slotIndex];
+  if (!slot?.itemId) return null;
+  const item = findItemById(slot.itemId);
+  if (!item) return null;
+  return inspectGear(item, slot, SS14_GEAR_EN.records, {
+    build, slotIndex, isTarget:true, targetBinding:build.ss14Inputs?.gear?.[slotIndex], sourceSeason:'SS14', rollsOnly:true,
+  });
 }
 
 // The full-build boundary remains fail-closed until every selected dependency
 // AND base-stat/level/combat rules have season-specific authority. Partial
 // component values are never summed and presented as full build performance.
-export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true, beforeDefense = false } = {}) {
+export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true, includeElixirUptime = true, beforeDefense = false } = {}) {
   if (includeTheaAverage && build.ss14Inputs?.theaCycle?.mode === "automatic") {
     const average=calculateTheaAverage(build,
-      state => calculateSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false, beforeDefense }));
+      state => calculateSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false, includeElixirUptime:false, beforeDefense }));
     average.numericStats=calculateSeasonNumericStats(average);
     return average;
   }
   const inputs = inspectSeasonBuildInputs(build);
   const sourceInputs = sourceBuild === build ? inputs : inspectSeasonBuildInputs(sourceBuild);
+  const selectedCards = {skills:skills.records,supports:supports.records,gear:gear.records};
+  const slots = [...inputs.normalized.skills.active, ...inputs.normalized.skills.passive];
+  const calculateSupport = (support, rowIndex, supportIndex) => {
+    const result = inspectSeasonSupport(support, { rowIndex, supportIndex, records: supports.records, build,
+      isTarget: build?.patchSnapshot?.season === "SS14", binding: build?.ss14Inputs?.supports?.[`${rowIndex}:${supportIndex}`] });
+    const slot = slots[rowIndex];
+    if (!slot.skillId || supportIndex >= slot.unlockedSupportCount)
+      result.blockers.push("보조가 연결된 스킬 또는 열린 보조 칸이 없습니다.");
+    if (slot.supports.filter(entry => entry?.supportId === support.supportId).length > 1)
+      result.blockers.push("같은 스킬에 중복된 보조를 연결할 수 없습니다.");
+    return result;
+  };
   const components = inputs.references.map((reference) => {
     const item = findItemById(reference.id);
     const name = item?.tlidbText?.ko?.name;
@@ -167,7 +207,7 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
         const binding = build?.ss14Inputs?.skills?.[index];
         if (build?.patchSnapshot?.season === "SS14" && (binding?.itemId !== item.id
           || binding.sourcePageSha256 !== skills.records?.[item.id]?.sourcePageSha256)) {
-          return { ...calculation, rowIndex: index, values: {}, blockers: ["SS14 스킬 입력과 원문 근거의 연결이 바뀌었습니다. 저장 당시 값으로 대체하지 않습니다."] };
+          return { ...calculation, rowIndex: index, minionLevel:undefined, levelUnavailable:false, bindingChanged:true, values: {}, blockers: ["SS14 스킬 입력과 원문 근거의 연결이 바뀌었습니다. 저장 당시 값으로 대체하지 않습니다."] };
         }
         return { rowIndex: index, ...calculation };
       });
@@ -175,9 +215,46 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
         reasons: [...new Set(calculations.flatMap((result) => result.blockers))], calculations };
     }
     if (reference.category === "gear") {
+      const sourceKey=gear.records?.[item.id]?.sourceRecordKey;
+      const selectedSkills=inputs.normalized.selections.skills.filter(Boolean);
+      const observedVoltage=sourceKey==='Kingly_Armor' && selectedSkills.length>0 && selectedSkills.every(id=>id===VOLTAIC_RIPPLE_ID);
+      const noTerra = sourceKey==='Kingly_Armor' && inputs.references.every(({category,id})=>{
+        if (!Object.hasOwn(selectedCards,category) || id===item.id) return true;
+        const card=selectedCards[category]?.[id];
+        return card?.season==='SS14' && !card.tags?.includes('Terra') && !/\bTerra (?:Charge|Skills?)\b/iu.test(card.detail??'');
+      });
+      // Only skip the armor's on-Reaping effects if every selected source is
+      // accounted for. Craft, logged and conditional extension effects can
+      // supply triggers independently of a card's normal tooltip.
+      const noReaping = sourceKey==='Twilight_Vestment' && !nonempty(build.customAffixes)
+        && !inputs.normalized.gear.slots.some(slot=>nonempty(slot?.crafts))
+        && !Object.values(build.ss14Inputs?.gear??{}).some(binding=>binding?.logGear||binding?.corrosion?.implicit
+          || binding?.itemId!==item.id&&binding?.corrosion)
+        && inputs.references.every(({category,id})=>{
+          if (id===item.id) return true;
+          const card=selectedCards[category]?.[id];
+          return card?.season==='SS14' && !/\breap(?:s|ed|ing)?\b/iu.test(card.detail??'');
+        });
+      let icePulseScope;
+      if (sourceKey==='Ice_Pulse' && !build.skills?.elixirs?.some(slot=>slot?.skillId)) {
+        const hasTrigger = inputs.normalized.gear.slots.some((slot,index)=>{
+          if (!slot?.itemId || slot.itemId===item.id) return false;
+          const binding=build.ss14Inputs?.gear?.[index], card=selectedCards.gear?.[slot.itemId];
+          return !card?.detail || /\btriggers?\b/iu.test(card.detail) || nonempty(slot.crafts)
+            || binding?.logGear || binding?.corrosion || slot.corrupted || slot.affixText?.trim();
+        });
+        const hosts=inputs.references.filter(({category})=>category==='skills'||category==='supports')
+          .map(({category,id})=>selectedCards[category]?.[id]);
+        if (!hasTrigger && hosts.length && hosts.every(card=>card?.season==='SS14'&&card.detail)) {
+          const noPotionOrMobility=hosts.every(card=>!card.tags?.some(tag=>['Mobility','Restoration','Elixir'].includes(tag))
+            && !/\b(?:Mobility|Restoration|Potion) Skills?\b/iu.test(card.detail));
+          icePulseScope={noPotionOrMobility,noChargeSkill:noPotionOrMobility
+            && hosts.every(card=>!/\b(?:Cooldown|Charges|Charging Progress)\b/iu.test(card.detail))};
+        }
+      }
       const slots = inputs.normalized.gear.slots.flatMap((slot, index) => slot?.itemId === item.id ? [{ index, slot }] : []);
       const calculations = slots.map(({ index, slot }) => ({ slotIndex: index, ...inspectGear(item, slot, gear.records, {
-        isTarget: build?.patchSnapshot?.season === "SS14", targetBinding: build?.ss14Inputs?.gear?.[index], build, slotIndex: index,
+        isTarget: build?.patchSnapshot?.season === "SS14", targetBinding: build?.ss14Inputs?.gear?.[index], build, slotIndex: index, noTerra,observedVoltage,noReaping,icePulseScope,
         sourceSlot: sourceInputs.normalized.gear.slots[index],
         sourceSeason: sourceBuild?.patchSnapshot?.season,
       }) }));
@@ -185,14 +262,9 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
         reasons: [...new Set(calculations.flatMap((entry) => entry.reasons))], calculations };
     }
     if (reference.category === "supports") {
-      const slots = [...inputs.normalized.skills.active, ...inputs.normalized.skills.passive];
       const calculations = slots.flatMap((slot, rowIndex) => (slot?.supports ?? []).flatMap((support, supportIndex) => {
         if (support?.supportId !== item.id) return [];
-        const result = inspectSeasonSupport(support, { rowIndex, supportIndex, records: supports.records, build,
-          isTarget: build?.patchSnapshot?.season === "SS14", binding: build?.ss14Inputs?.supports?.[`${rowIndex}:${supportIndex}`] });
-        if (!slot.skillId || supportIndex >= slot.unlockedSupportCount) result.blockers.push("보조가 연결된 스킬 또는 열린 보조 칸이 없습니다.");
-        if (slot.supports.filter((entry) => entry?.supportId === item.id).length > 1) result.blockers.push("같은 스킬에 중복된 보조를 연결할 수 없습니다.");
-        return [result];
+        return [calculateSupport(support,rowIndex,supportIndex)];
       }));
       return { ...base, status: calculations.length && calculations.every((entry) => !entry.blockers.length) ? "mapped" : "partial",
         reasons: calculations.length ? [...new Set(calculations.flatMap((entry) => entry.blockers))] : ["보조의 적용 스킬·칸 연결 미확인"], calculations };
@@ -207,29 +279,33 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
       : "선택 구성별 수치 내역과 별개로 이 참조의 전체 효과 연결은 미완료입니다."] };
   });
   const gearEffects = components.filter(c => c.category === "gear").flatMap(c => c.calculations ?? []).flatMap(validSeasonGearEffects);
-  const componentProjection = projectSeasonComponents(build, { gearEffects, gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation") });
+  const gearNumbedEffect=netherSum(gearEffects.filter(e=>e.operation==='add_percent'&&e.unit==='percent'&&e.value>=0),"numbed_effect");
+  const componentProjection = projectSeasonComponents(build, {
+    gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation"), gearLevelEffects: gearEffects, gearNumbedEffect,
+  });
   for(const component of components.filter(c=>c.category==='skills')) {
     const buffs=componentProjection.rows.filter(r=>r.itemId===component.id&&Number.isInteger(r.buffSkill));
     if(!buffs.length)continue;
     component.calculations=component.calculations.map(c=>{
       const buff=buffs.find(r=>r.buffSkill===c.rowIndex);if(!buff)return c;
-      return {...c,blockers:buff.blockers.map(b=>b.reason),effects:[],values:{},mechanics:[{kind:'utility-skill',sourceText:buff.detail}]};
+      return {...c,level:buff.level,baseLevel:buff.baseLevel,levelBonus:buff.levelBonus,progressionReceipt:buff.progressionReceipt,
+        blockers:buff.blockers.map(b=>b.reason),effects:[],values:{},mechanics:[{kind:'utility-skill',sourceText:buff.detail}]};
     });
     component.reasons=buffs.flatMap(r=>r.blockers.map(b=>b.reason));component.status=component.reasons.length?'partial':'mapped';
   }
   for (const row of components.filter(c => ["skills", "supports"].includes(c.category) && c.calculations?.length)) {
     if (row.id === "supports-ss14-clockwork-core" || row.id === "skills-ss14-supreme-descent") continue;
+    const support = row.category === "supports", record = skills.records[row.id];
+    const revelationBonus = support ? 0 : seasonRevelationLevelBonus(build,componentProjection.rows,record);
     row.calculations = row.calculations.map(entry => {
-      const componentBonus=seasonEffectLevelBonus(componentProjection.effects,skills.records[row.id],row.category==='supports',entry.rowIndex);
-      const bonus = seasonGearLevelBonus(components, skills.records[row.id], row.category === "supports", entry.rowIndex)+componentBonus;
+      if(entry.mechanics?.some(m=>m.kind==='utility-skill'))return entry;
+      const bonus = seasonEffectLevelBonus(componentProjection.effects, record, support, entry.rowIndex)
+        + seasonGearLevelBonus(components, record, support, entry.rowIndex) + revelationBonus;
       if (!bonus) return entry;
-      if (entry.blockers?.length) return entry;
-      if (componentProjection.rows.some(r=>r.buffSkill===entry.rowIndex&&r.itemId===row.id))
-        return {...entry,blockers:['버프·저주의 추가 스킬 레벨을 포함한 효과 계산은 아직 미지원입니다.'],baseLevel:entry.level,levelBonus:bonus};
+      if (entry.bindingChanged) return entry;
       const calculation = row.category === "skills" ? calculateSeasonSkill(row.id, entry.level + bonus, "SS14", { preview: skills, damageContext: seasonDamageContext(build, entry.rowIndex, row.id) })
-        : inspectSeasonSupport({ supportId: row.id, level: entry.level + bonus }, { rowIndex: entry.rowIndex, supportIndex: entry.supportIndex, records: supports.records, build,
-          isTarget: build.patchSnapshot?.season === "SS14", binding: build.ss14Inputs?.supports?.[`${entry.rowIndex}:${entry.supportIndex}`] });
-      return { ...entry, ...calculation, baseLevel: entry.level, levelBonus: bonus };
+        : calculateSupport({ supportId: row.id, level: entry.level + bonus },entry.rowIndex,entry.supportIndex);
+      return { rowIndex: entry.rowIndex, ...calculation, baseLevel: entry.level, levelBonus: bonus };
     });
     row.reasons = [...new Set(row.calculations.flatMap(e => e.blockers))];
     row.status = row.reasons.length ? "partial" : "mapped";
@@ -261,12 +337,14 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
     summary: { dps: null, life: null, mana: null, shield: null }, components, blockers,
     counts: { total: components.length, mapped: components.filter((row) => row.status === "mapped").length, blocked: blockers.length },
     sourceGeneratedAt: { skills: skills.generatedAt, gear: gear.generatedAt, supports: supports.generatedAt, components: componentProjection.generatedAt },
-    componentProjection, coupledSkills, character, blessings, beforeDefense,
+    componentProjection, coupledSkills, character, blessings, beforeDefense, energy,
     offense: calculateSeasonOffense(build, components, skills, componentProjection, character, coupledSkills),
     limitation: "개별 카드 해석 성공은 전체 빌드 계산 지원이 아닙니다. 구성과 설정은 모두 보존하며, 연결되지 않은 효과를 0으로 합산하지 않습니다." };
-  if (includeAverage) report.elixirAverage = calculateElixirAverage(build, componentProjection,
-    input => calculateSeasonBuild(input, { skills, gear, supports, sourceBuild, includeAverage: false, beforeDefense }));
+  const calculateState=input=>calculateSeasonBuild(input,{skills,gear,supports,sourceBuild,
+    includeAverage:false,includeElixirUptime:false,beforeDefense});
+  if (includeAverage) report.elixirAverage = calculateElixirAverage(build, componentProjection, calculateState);
   report.fullDps = calculateSeasonDps(build, report);
+  if(includeElixirUptime)applyObservedElixirUptime(build,report,calculateState);
   report.numericStats = calculateSeasonNumericStats(report);
   report.fullDpsSupported = report.fullDps.supported;
   report.summary.dps = report.fullDps.dps;

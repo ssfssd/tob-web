@@ -1271,6 +1271,378 @@ export const SS14_LOG_COMPLETION = {
     }
   },
   "levels": {
+    "skills-tlidb-com-cn-summon-machine-guard": {
+      "season": "SS14",
+      "sourceUrl": "https://tlidb.com/en/Summon_Machine_Guard",
+      "sourcePageSha256": "fd34b2317e8c58b25da541226da11a8d3eeb92c4dc6234c1d6479befab5622d2",
+      "acceptedCardHashes": [
+        "fd34b2317e8c58b25da541226da11a8d3eeb92c4dc6234c1d6479befab5622d2",
+        "4c1c0278ceb1aad383ced5e3bce7d08a45c91bed3405046f801ef85c99338840"
+      ],
+      "acceptedCards": [
+        {
+          "hash": "fd34b2317e8c58b25da541226da11a8d3eeb92c4dc6234c1d6479befab5622d2",
+          "detail": "Main Stat:\nStrength, Intelligence\nMana Cost\n8\nCast Speed\n1.25\nMinion Skill: Overpower , Onslaught Punch\nSimple\nCasts the skill and summons 1 Machine Guard to the target spot.\nNo more Minions will be summoned by this skill after reaching its Max Minion Quantity.\nDetails\nSummon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        },
+        {
+          "hash": "4c1c0278ceb1aad383ced5e3bce7d08a45c91bed3405046f801ef85c99338840",
+          "detail": "Main Stat:\nStrength, Intelligence\nMana Cost\n8\nCast Speed\n1.25 s\nMinion Skill: Overpower , Onslaught Punch\nSimple\nCasts the skill and summons 1 Machine Guard to the target spot.\nNo more Minions will be summoned by this skill after reaching its Max Minion Quantity.\nDetails\nSummon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        }
+      ],
+      "baseDetail": "Main Stat:\nStrength, Intelligence\nMana Cost\n8\nCast Speed\n1.25\nMinion Skill: Overpower , Onslaught Punch\nSimple\nCasts the skill and summons 1 Machine Guard to the target spot.\nNo more Minions will be summoned by this skill after reaching its Max Minion Quantity.\nDetails\nSummon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command",
+      "headers": [
+        "level",
+        "Descript"
+      ],
+      "rows": [
+        [
+          "1",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 2 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "2",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 2 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "3",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 2 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "4",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "5",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "6",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "7",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "8",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "9",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "10",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "11",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "12",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "13",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "14",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "15",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "16",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "17",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 3 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "18",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "19",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "20",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "21",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "22",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "23",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "24",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "25",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "26",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "27",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "28",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "29",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "30",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "31",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "32",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "33",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "34",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "35",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "36",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "37",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "38",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "39",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ],
+        [
+          "40",
+          "Summon Machine Guard:\nSummons 1 Machine Guard\nThis skill summons up to 4 Minions\n0.5 % Skill Area for Minions summoned by this skill for every 1 Command"
+        ]
+      ]
+    },
+    "skills-tlidb-com-cn-summon-frost-magus": {
+      "season": "SS14",
+      "sourceUrl": "https://tlidb.com/en/Summon_Frost_Magus",
+      "sourcePageSha256": "f1050e697f96aab95f516423bbeb717a3078c1b55b44adb52fe659eb17240aa1",
+      "acceptedCardHashes": [
+        "f1050e697f96aab95f516423bbeb717a3078c1b55b44adb52fe659eb17240aa1",
+        "e8d022251fcf8c32ae713ad6863bff2a6be136005744945731346cf8cf1d8b3d"
+      ],
+      "acceptedCards": [
+        {
+          "hash": "f1050e697f96aab95f516423bbeb717a3078c1b55b44adb52fe659eb17240aa1",
+          "detail": "Main Stat:\nIntelligence\nSealed Mana\n20%\nCast Speed\n1\nMinion Skill: Glacier Ripples , Frost Release , Permafrost Cast , Ice Earthshaker\nSimple\nActivates the skill and summons 1 Frost Magus.\nActivating the skill grants the character Origin of Spirit Magus : Restores +3.825% Max Life and Max Energy Shield every second.\nDetails\nSummon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.825 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        },
+        {
+          "hash": "e8d022251fcf8c32ae713ad6863bff2a6be136005744945731346cf8cf1d8b3d",
+          "detail": "Main Stat:\nIntelligence\nSealed Mana\n20%\nCast Speed\n1 s\nMinion Skill: Glacier Ripples , Frost Release , Permafrost Cast , Ice Earthshaker\nSimple\nActivates the skill and summons 1 Frost Magus.\nActivating the skill grants the character Origin of Spirit Magus : Restores +2.4% Max Life and Max Energy Shield every second.\nDetails\nSummon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.825 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        }
+      ],
+      "baseDetail": "Main Stat:\nIntelligence\nSealed Mana\n20%\nCast Speed\n1\nMinion Skill: Glacier Ripples , Frost Release , Permafrost Cast , Ice Earthshaker\nSimple\nActivates the skill and summons 1 Frost Magus.\nActivating the skill grants the character Origin of Spirit Magus : Restores +3.825% Max Life and Max Energy Shield every second.\nDetails\nSummon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.825 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker.",
+      "headers": [
+        "level",
+        "Descript"
+      ],
+      "rows": [
+        [
+          "1",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.4 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "2",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.475 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "3",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.55 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "4",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.625 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "5",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.7 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "6",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.775 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "7",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.85 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "8",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 2.925 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "9",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "10",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.075 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "11",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.15 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "12",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.225 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "13",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.3 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "14",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.375 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "15",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.45 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "16",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.525 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "17",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.6 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "18",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.675 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "19",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.75 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "20",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.825 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "21",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.9 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "22",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 3.97 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "23",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.04 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "24",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.11 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "25",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.18 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "26",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.25 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "27",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.32 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "28",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.39 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "29",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.46 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "30",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.53 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "31",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.6 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "32",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.67 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "33",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.74 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "34",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.81 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "35",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.88 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "36",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 4.95 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "37",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 5.02 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "38",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 5.09 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "39",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 5.16 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ],
+        [
+          "40",
+          "Summon Frost Magus:\nSummons 1 Frost Magus\nThis skill summons up to 1 Minions\n+1 Max Frostbite Rating for the Minions summoned by this skill for every +1 Max Frostbite Rating\nSpirit Magi become undefeatable\nWhen Spirit Magi become undefeatable, they gain Reconjuring\nOrigin of Spirit Magus :\nGains Origin of Ice, restoring 5.23 % of Max Life and Max Energy Shield per second to the summoner\nFrost Magus:\nBase Skill: Glacier Ripples.\nEmpower Skill: Frost Release.\nEnhanced Skill: Permafrost Cast.\nUltimate: Ice Earthshaker."
+        ]
+      ]
+    },
     "skills-tlidb-com-cn-ice-lances": {
       "season": "SS14",
       "sourceUrl": "https://tlidb.com/en/Ice_Lances",

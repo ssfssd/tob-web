@@ -4,27 +4,30 @@ import { seasonCalculationIssues, seasonDpsStatusLabel } from './seasonCalculati
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { SS14_GEAR_EN } from "./data/ss14Gear.en.generated.js";
+import { corrosionCard,corrosionOptions,corrosionBasePool } from './seasonCorrosion.js';
 import { parseTlidbGearTooltip } from "./tlidbGearTooltipCalculation.js";
 import { normalizeBuild } from "./engine.js";
 import { findItemById } from "./catalog.js";
-import { getSeasonSelectionOptions, getSeasonSelectionRecord, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
+import { getSeasonPickerOptions, getSeasonSelectionRecord, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { SEASON_CONFIGURATION_GROUPS, compareSeasonConfigurations } from "./seasonConfiguration.js";
 import { seasonSupportOptions } from "./seasonSupport.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
 import { SEASON_COMPONENT_LABELS } from "./seasonComponents.js";
+import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys } from "./seasonDps.js";
+import { SEASON_DPS_ENEMY_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
+import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { SEASON_HERO_COMBAT_FIELDS } from "./seasonMechanicInputs.js";
 import { seasonSlateOptions } from "./seasonDivinity.js";
 import { seasonGameCritical, validGameCriticalBinding } from "./seasonGameData.js";
 import { SEASON_BLESSINGS, blessingLabel, blessingConditionValue } from "./seasonBlessings.js";
-import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS } from "./seasonAdvisor.js";
+import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from "./seasonAdvisor.js";
 import { seasonTheaOptions, THEA_SS14_ID, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty } from "./seasonHeroSelection.js";
 import { isThea, hasRevelation, revelationBoardOptions, revelationNodeOptions } from "./seasonTheaRevelation.js";
 import { THEA_EVENT_FIELDS } from "./seasonTheaEvents.js";
-import { theaCombatKeys } from "./seasonTheaCombatInputs.js";
+import { hasNumbedSupport, theaCombatInputValues, theaCombatKeys } from "./seasonTheaCombatInputs.js";
 import { logReviewRows } from "./seasonLogReview.js";
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/gu,
@@ -59,7 +62,7 @@ function selectionControls(document, report, formValues) {
     <p>장비를 교체하면 해당 칸의 옵션을 다시 선택해야 합니다.</p>
     ${["skills", "gear"].map((category) => `<fieldset class="season-slot-grid"><legend>${category === "skills" ? "스킬 구성" : "장비 구성"}</legend>${Array.from({ length: category === "gear" ? 10 : 9 }, (_, index) => {
       const current = category === "gear" ? normalized.gear.slots[index]?.itemId : normalized.selections.skills[index];
-      const options = getSeasonSelectionOptions(category, index);
+      const options = getSeasonPickerOptions(category, index, current);
       const label = category === "gear" ? SEASON_GEAR_SLOT_LABELS[index] : `${index < 5 ? "액티브" : "패시브"} 스킬 ${index < 5 ? index + 1 : index - 4}`;
       const id = `season-choice-${category}-${index}`;
       const component = report.components.find(row => row.category === category && row.id === current);
@@ -123,21 +126,34 @@ function supportControls(document, formValues) {
 }
 
 export function labeledGearRolls(row, entry) {
-  const ko = koreanRecord(row.id);
-  const en = SS14_GEAR_EN.records[row.id];
+  const binding={itemId:row.id,sourcePageSha256:entry.receipt?.sourcePageSha256,corrosion:entry.corrosion};
+  const ko = corrosionCard(koreanRecord(row.id),binding,'ko');
+  const en = corrosionCard(SS14_GEAR_EN.records[row.id],binding);
   const koreanEffects = ko && en?.sourceRecordKey === ko.sourceRecordKey ? parseTlidbGearTooltip({ id: row.id,
     tlidbText: { ko: { ...ko, sourcePageVersion: "SS14", sourceFieldStatus: { detail: "exact" },
       sourceSeasonEvidence: en.sourceSeasonEvidence } } }, { locale: "ko", season: "SS14" }).effects : [];
+  const localized = corrosionOptions(row.id);
+  const localizedLine = (option, sourceText, corroded) => {
+    const original=(corroded?option.replacement:option.original).split('\n');
+    const translated=(corroded?option.corroded:option.normal).split('\n');
+    const index=original.indexOf(sourceText);
+    return original.length===translated.length && index>=0 && original.lastIndexOf(sourceText)===index ? translated[index] : undefined;
+  };
   const seen = new Set();
   return (entry.controls ?? []).filter((control) => {
-    const key = control.key.startsWith("log:") ? control.key : JSON.stringify([control.sourceText, control.min, control.max]);
+    const key = control.key.startsWith("log:") ? control.key : JSON.stringify([control.implicit,control.sourceText, control.min, control.max]);
     if (seen.has(key)) return false;
     seen.add(key); return true;
   }).map((control, index) => {
     const matching = koreanEffects.filter((effect) => effect.stat === control.stat
       && effect.roll?.min === control.min && effect.roll?.max === control.max);
-    const label = control.label ?? (matching.length === 1 && !/\p{Script=Han}/u.test(matching[0].sourceText)
-      ? matching[0].sourceText : `옵션 ${index + 1} · 한국어 원문 미제공`);
+    const replacements=localized.filter(o=>entry.corrosion?.selected.includes(o.base)&&o.replacement.split('\n').includes(control.sourceText));
+    const originals=localized.filter(o=>!entry.corrosion?.selected.includes(o.base)&&o.original.split('\n').includes(control.sourceText));
+    const implicit=control.implicit&&corrosionBasePool(row.id)?.rows.find(r=>r.id===entry.corrosion.implicit.id);
+    const label = control.label ?? implicit?.ko ?? (replacements.length===1?localizedLine(replacements[0],control.sourceText,true):undefined)
+      ?? (matching.length === 1 && !/\p{Script=Han}/u.test(matching[0].sourceText) ? matching[0].sourceText : undefined)
+      ?? (originals.length===1?localizedLine(originals[0],control.sourceText,false):undefined)
+      ?? `옵션 ${index + 1} · 한국어 원문 미제공`;
     return {...control,label};
   });
 }
@@ -147,7 +163,7 @@ function rollControls(row, entry, formValues) {
     const label=control.label;
     return `<div class="native-roll-option"><label>${escape(label)}<input type="number" step="any" min="${control.min}" max="${control.max}"
       aria-label="장비 칸 ${entry.slotIndex + 1} ${escape(label)}" data-season-edit="gear-roll" data-slot="${entry.slotIndex}"
-      data-roll="${escape(control.key)}" value="${escape(formValues[`gear-roll:${entry.slotIndex}:${control.key}`] ?? control.value)}" /><small>SS14 선택 범위 ${number(control.min)}~${number(control.max)}</small></label>
+      data-roll="${escape(control.key)}" value="${escape(formValues[`gear-roll:${entry.slotIndex}:${control.key}`] ?? control.value)}" /><small>${number(control.min)}~${number(control.max)}</small></label>
       <details class="native-option-source" data-role="roll-source-${entry.slotIndex}-${index}"><summary>옵션 출처</summary><p>${escape(SEASON_GEAR_SLOT_LABELS[entry.slotIndex])} · ${escape(name(row.id))}</p><p>선택 범위: TLIDB SS14 · 현재 값: ${control.key.startsWith("log:") ? "가져온 수치 또는 직접 입력" : "직접 입력"}</p>${sourceLink(ko ?? en)}</details></div>`;
   }).join("");
 }
@@ -163,7 +179,7 @@ function memoryControls(report, formValues, slot, automatic=false) {
   const own = report.componentProjection.rows.filter(r => slot === undefined || r.path.startsWith('hero.memories.'+slot+'.'));
   const rows = automatic?[]:own.filter(r => r.memoryControl);
   const ranges = own.filter(r => r.memoryRollControls?.length);
-  return rows.length || ranges.length ? `<fieldset><legend>${automatic?'옵션 범위':'SS14 추억 수치 확인'}</legend><p id="season-memory-scope">${automatic?'범위가 있는 옵션은 장착할 추억에 표시된 값을 입력하세요.':'특성 단계는 장착한 추억의 강화와 옵션으로 계산합니다. 기본 옵션은 게임 카드에 표시된 수치를 선택하세요. 목록에 없으면 미확인으로 남기세요. 부활 추억의 보정은 미확인입니다.'}</p>${rows.map((r) => {
+  return rows.length || ranges.length ? `<fieldset><legend>${automatic?'옵션 범위':'SS14 추억 수치 확인'}</legend><details><summary>추억 수치 기준</summary><p id="season-memory-scope">${automatic?'범위가 있는 옵션은 장착할 추억에 표시된 값을 입력하세요.':'특성 단계는 장착한 추억의 강화와 옵션으로 계산합니다. 기본 옵션은 게임 카드에 표시된 수치를 선택하세요. 목록에 없으면 미확인으로 남기세요. 부활 추억의 보정은 미확인입니다.'}</p></details>${rows.map((r) => {
     const c = r.memoryControl; const value = formValues[`memory-base:${c.key}`] ?? c.value;
     return `<label>${escape(r.name)}<select data-season-edit="memory-base" data-key="${escape(c.key)}" aria-label="SS14 추억 ${Number(c.key) + 1} 기본 수치" aria-describedby="season-memory-scope"><option value=""${value === "" ? " selected" : ""}>수치 확인 필요</option>${c.options.map((o) => `<option value="${o.value}"${Number(value) === o.value ? " selected" : ""}>${escape(o.label)}</option>`).join("")}</select></label>`;
   }).join("")}${ranges.map((r, optionIndex) => `<p>${escape(r.name)} · ${escape(r.detail)} ${sourceLink(r.receipt)}</p>${r.memoryRollControls.map((c, index) => {
@@ -204,24 +220,48 @@ function extensionControls(report, formValues) {
   const controls = report.componentProjection.rows.flatMap((r) => r.extensionControls ?? [])
     .filter((c, i, all) => all.findIndex((x) => x.key === c.key) === i);
   if (!controls.length) return "";
-  return `<fieldset><legend>영약·모듈·제작 조건</legend><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 현재 상태를 선택하세요. 자동 은총 계산의 영약 사용 간격·지속 시간은 아래 전투 시간표에서 입력합니다.</p>${controls.map((c) => {
+  return `<fieldset><legend>영약·모듈·제작 조건</legend><details><summary>영약 계산 기준</summary><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 관측 유지율을 입력하면 활성·비활성 상태를 시간 비율로 평균냅니다. 자동 은총은 전투 시간표의 영약 사용 간격·지속 시간을 사용합니다.</p></details>${controls.map((c) => {
     const value = formValues[`extension-input:${c.key}`] ?? c.value;
     const label = `SS14 ${c.label}`;
+    const range=c.observedRange??c;
     return c.kind === "boolean" ? `<label>${escape(c.label)}<select data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope">${[["", "확인 필요"], [0, "아니요"], [1, "예"]].map(([v, t]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
-      : `<label>${escape(c.label)} (${c.min}~${c.max})<input type="number" min="${c.min}" max="${c.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope" value="${escape(value)}" /></label>`;
+      : `<label>${escape(c.label)} (${number(range.min)}~${number(range.max)})<input type="number" min="${range.min}" max="${range.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope" value="${escape(value)}" /></label>`;
   }).join("")}</fieldset>`;
+}
+
+export function renderNearbyEnemyField(controls) {
+  if (!controls.length) return '';
+  const choices = new Map();
+  for (const count of [0,1,2]) {
+    const key = controls.map(c=>nearbyEnemyConditionValue(c,count)).join('');
+    const group = choices.get(key) ?? [];
+    group.push(count);
+    choices.set(key,group);
+  }
+  const matches = matchingNearbyEnemyCounts(controls);
+  const saved = controls.some(c=>c.value!=='');
+  const selected = saved && controls.every(c=>c.value!=='')
+    && [...choices.values()].find(group=>group.length===matches.length && group.every(n=>matches.includes(n)));
+  const pending = saved && !selected;
+  const labels = {'0':'없음','1':'한 명','2':'두 명 이상','0,2':'한 명이 아님','1,2':'한 명 이상'};
+  return `<label>주변 적 수<select data-season-edit="${nearbyEnemyCountInput}" data-key="${nearbyEnemyCountInput}" aria-label="주변 적 수">
+    ${pending?`<option value="unresolved" disabled selected>${matches.length?'일부 입력됨':'조건 충돌'}</option>`:''}
+    <option value=""${saved?'':' selected'}>미입력</option>${[...choices.values()].map(group=>
+      `<option value="${group[0]}"${selected===group?' selected':''}>${labels[group.join(',')]}</option>`).join('')}</select></label>`;
 }
 
 function characterControls(document, report, formValues) {
   const allConditions = report.componentProjection.rows.flatMap((row) => row.conditionControls.map((c) => ({ ...c, name: row.name, detail: row.detail })));
-  const conditions = allConditions.filter(c => !c.automatic).filter((c, i, list) => list.findIndex((other) => other.conditionGroup === c.conditionGroup) === i)
+  const targetNumbed=usesTargetNumbedInput(document.targetBuild,report);
+  const nearby = renderNearbyEnemyField(allConditions.filter(c=>!c.automatic && nearbyEnemyGroups.includes(c.conditionGroup)));
+  const conditions = allConditions.filter(c => !c.automatic && !nearbyEnemyGroups.includes(c.conditionGroup) && !(targetNumbed&&c.numbedMinimum>0&&c.value==='')).filter((c, i, list) => list.findIndex((other) => other.conditionGroup === c.conditionGroup) === i)
     .filter((c) => !report.blessings.enabled || blessingConditionValue(c, { Focus: 0, Agility: 0, Tenacity: 0 }) === undefined);
-  return `<fieldset><legend>SS14 자원·방어 기본 입력</legend><p>선택 장비·재능 등의 효과를 더하기 전 힘·민첩·지혜를 입력하세요. 게임 기본값으로 자동 추정하지 않습니다. 기존 SS13 전투 조건은 보존하되 이 입력과 섞지 않습니다.</p>
-    ${Object.entries(SEASON_CHARACTER_INPUTS).map(([key, field]) => `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(formValues[`character-input:${key}`] ?? document.targetBuild.ss14Inputs.character?.[key] ?? "")}" /></label>`).join("")}</fieldset>
-    ${conditions.length ? `<fieldset><legend>SS14 선택 효과의 조건 확인</legend><p>아래 원문의 조건이 현재 상황에서 충족되는지 직접 선택하세요. 미입력은 미지원이며 자동 발동·유지 시간·전체 전투 평균을 가정하지 않습니다. 같은 상태의 입력은 함께 반영됩니다.</p><p id="season-stack-scope">아래 축복 조건만 입력하면 선택 옵션의 기여만 계산합니다. 축복 자체의 기본 효과까지 연결하려면 별도의 축복 현재 중첩 입력 3종을 확인하세요. 몰락은 해당 원문의 0~60 범위입니다. 낮은 HP 여부는 자동 추정하지 않습니다.</p>${conditions.map((c, index) => {
+  return `<fieldset><legend>SS14 자원·방어 기본 입력</legend><details><summary>기본 속성 입력 기준</summary><p>선택 장비·재능 등의 효과를 더하기 전 힘·민첩·지혜를 입력하세요. 게임 기본값으로 자동 추정하지 않습니다. 기존 SS13 전투 조건은 보존하되 이 입력과 섞지 않습니다.</p></details>
+    ${Object.entries(SEASON_CHARACTER_INPUTS).map(([key, field]) => `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(formValues[`character-input:${key}`] ?? document.targetBuild.ss14Inputs.character?.[key] ?? "")}" />${key==='observedManaRecovery'?'<small>같은 전투 조건에서 확인한 초당 자연 회복량입니다.</small>':''}</label>`).join("")}</fieldset>
+    ${conditions.length || nearby ? `<fieldset><legend>SS14 선택 효과의 조건 확인</legend><details><summary>조건 적용 기준</summary><p>아래 원문의 조건이 현재 상황에서 충족되는지 직접 선택하세요. 미입력은 미지원이며 자동 발동·유지 시간·전체 전투 평균을 가정하지 않습니다. 같은 상태의 입력은 함께 반영됩니다.</p><p id="season-stack-scope">아래 축복 조건만 입력하면 선택 옵션의 기여만 계산합니다. 축복 자체의 기본 효과까지 연결하려면 별도의 축복 현재 중첩 입력 3종을 확인하세요. 몰락은 해당 원문의 0~60 범위입니다. 낮은 HP 여부는 자동 추정하지 않습니다.</p></details>${nearby}${conditions.map((c, index) => {
       const value = formValues[`component-condition:${c.key}`] ?? c.value;
       const description=c.label?`<details><summary>${escape(c.name)} 원문</summary><p>${escape(c.detail)}</p></details>`:`<p>${escape(c.name)} · ${escape(c.detail)}</p>`;
-      if (c.kind === "count") return `${description}<label>${escape(c.label??`조건 ${index + 1} 중첩 수`)} (0~${c.max})<input type="number" min="0" max="${c.max}" step="1" data-season-edit="component-condition" data-key="${escape(c.key)}" aria-label="SS14 조건 ${index + 1} 중첩 수" aria-describedby="season-stack-scope" value="${escape(value)}" /></label>`;
+      if (c.kind === "count") return `${description}<label>${escape(c.label??`조건 ${index + 1} 중첩 수`)}${c.allowZero?'':` (${c.min??0}~${c.max})`}<input type="number" min="${c.allowZero?0:c.min??0}" max="${c.max}" step="1" data-season-edit="component-condition" data-key="${escape(c.key)}" aria-label="${escape(c.allowZero?c.label:`SS14 조건 ${index + 1} 중첩 수`)}" aria-describedby="season-stack-scope" value="${escape(value)}" /></label>`;
       return `${description}<label>${escape(c.label??`조건 ${index + 1}`)}<select data-season-edit="component-condition" data-key="${escape(c.key)}" aria-label="SS14 조건 ${index + 1} 충족 여부">${[["", "확인 필요"], [0, "미충족"], [1, "충족"]].map(([n, text]) => `<option value="${n}"${String(value) === String(n) ? " selected" : ""}>${text}</option>`).join("")}</select></label>`;
     }).join("")}</fieldset>` : ""}`;
 }
@@ -262,9 +302,11 @@ function characterResults(report) {
 function offenseControls(document, report, formValues) {
   const supported = report.coupledSkills.rows.filter((r) => getSeasonSelectionRecord("skills", r.id));
   const weapon = seasonWeaponProfile(document.targetBuild);
-  return `<fieldset><legend>스킬 기본 크리티컬</legend><p id="season-critical-input-help">공격 스킬은 선택 무기의 수치를 자동 반영합니다. 주술은 해당 스킬의 보정 전 기본 수치를 사용합니다. 수동 입력은 확률(%)이나 최종 수치가 아닙니다.</p>
+  return `<fieldset><legend>스킬 기본 크리티컬</legend><details><summary>크리티컬 입력 기준</summary><p id="season-critical-input-help">공격 스킬은 선택 무기의 수치를 자동 반영합니다. 주술은 해당 스킬의 보정 전 기본 수치를 사용합니다. 수동 입력은 확률(%)이나 최종 수치가 아닙니다.</p></details>
     ${supported.map((r) => weapon.enabled && getSeasonSelectionRecord('skills', r.id)?.tags?.includes('Attack')
-      ? `<p>${escape(name(r.id))} · 칸 ${r.rowIndex + 1} · 무기에서 자동 반영: <output data-role="weapon-critical">${weapon.supported ? number(weapon.values.baseCriticalRating) : '미확인'}</output></p>`
+      ? `<p>${escape(name(r.id))} · 칸 ${r.rowIndex + 1} · 무기에서 자동 반영: <output data-role="weapon-critical">${r.offenseBasis?.weaponHands
+        ? r.offenseBasis.weaponHands.map(hand=>`${hand.slotIndex===0?'메인':'서브'} ${number(hand.baseCriticalRating)}`).join(' · ')
+        : weapon.supported ? number(weapon.values.baseCriticalRating) : '미확인'}</output></p>`
       : `<label>${escape(name(r.id))} · 칸 ${r.rowIndex + 1}<input type="number" min="0" max="100000" step="any" data-season-edit="offense-input" data-key="${r.rowIndex}"
       aria-label="SS14 스킬 칸 ${r.rowIndex + 1} 기본 크리티컬 수치" aria-describedby="season-critical-input-help" value="${escape(formValues[`offense-input:${r.rowIndex}`] ?? document.targetBuild.ss14Inputs.offense?.[r.rowIndex]?.baseCriticalRating ?? "")}" /></label>
       ${gameCriticalControl(document, r)}`).join("") || "<p>현재 원문이 연결된 선택 스킬 없음</p>"}
@@ -272,15 +314,15 @@ function offenseControls(document, report, formValues) {
 }
 
 export function weaponSummary(build, slotIndex = 0) {
-  const weapon = seasonWeaponProfile(build, slotIndex);
+  const weapon = seasonWeaponProfile(build, slotIndex, {individual:true});
   if (!weapon.enabled || !findItemById(weapon.itemId)?.tags?.includes('mainHand')) return '';
   const v = weapon.values, value = n => Number.isFinite(n) ? number(n) : '미확인';
-  return `<section class="season-weapon-summary" aria-label="무기 자동 수치"><h5>무기 수치 · 자동 반영</h5>
+  return `<section class="season-weapon-summary" aria-label="무기 자동 수치"><h5>무기 수치</h5>
     <p>${Object.entries({physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식'}).filter(([type]) => type === 'physical' || v[`weapon${type}Max`] > 0)
       .map(([type,label]) => `${label} 대미지 <strong>${value(v[`weapon${type}Min`])}–${value(v[`weapon${type}Max`])}</strong>`).join(' · ')} · 초당 공격 <strong>${value(v.weaponSpeed)}</strong> · 크리티컬 <strong>${value(v.baseCriticalRating)}</strong></p>
-    <small>선택한 무기 자체 옵션까지 반영한 값입니다. 공격 스킬에 적용하며 주술 기본 수치는 유지합니다.</small>
-    ${weapon.blockers.map(reason => `<p>${escape(reason)}</p>`).join('')}
-    <details><summary>SS14 수치 출처</summary>${weapon.receipts.map(sourceLink).join(' · ')}</details></section>`;
+    <details><summary>${weapon.blockers.length ? '미확정 사유 · 수치 출처' : '수치 출처'}</summary>
+      ${weapon.blockers.map(reason => `<p>${escape(reason)}</p>`).join('')}
+      ${weapon.receipts.map(sourceLink).join(' · ')}</details></section>`;
 }
 
 function gameCriticalControl(document, row) {
@@ -314,24 +356,29 @@ function theaControls(document, report, formValues) {
   const cycle = build.ss14Inputs.theaCycle ?? { mode: "snapshot", seconds: 300, warmup: 0 };
   const mode = formValues["thea-mode:mode"] ?? Number(cycle.mode === "automatic");
   const board = build.talents?.boards?.[3];
+  const eventValues = theaCombatInputValues(build, report);
   const eventKeys = [...new Set(report.componentProjection.rows.flatMap(r => r.mechanics ?? []).filter(m => m.kind === "thea-event-input").map(m => m.key))];
-  for (const key of ["combatMode", ...theaCombatKeys(build, report.componentProjection.rows.flatMap(r => r.mechanics ?? []))]) if (!eventKeys.includes(key)) eventKeys.push(key);
+  for (const key of ["combatMode", ...theaCombatKeys(build, report.componentProjection.rows.flatMap(r => r.mechanics ?? []), report)]) if (!eventKeys.includes(key)) eventKeys.push(key);
   if (build.ss14Inputs.theaEvents?.hitRate !== undefined && !eventKeys.includes("hitRate")) eventKeys.push("hitRate");
   if (build.ss14Inputs.theaEvents?.projectileRate !== undefined && !eventKeys.includes("projectileRate")) eventKeys.push("projectileRate");
   return `<details data-role="season-thea-controls"><summary>티아1 · 계시 재능과 자동 은총</summary>
     <fieldset><legend>은총 계산 방식</legend><label>계산 방식<select data-season-edit="thea-mode" data-key="mode" aria-label="SS14 은총 계산 방식">
       <option value="0"${Number(mode) === 0 ? " selected" : ""}>현재 상태 직접 설정</option><option value="1"${Number(mode) === 1 ? " selected" : ""}>자동 주기 평균</option></select></label>
       ${[["seconds", "측정 시간", 1], ["warmup", "측정 전 준비 시간", 0]].map(([key, label, min]) => `<label>${label} (초)<input type="number" min="${min}" max="1800" step="any" data-season-edit="thea-cycle-input" data-key="${key}" aria-label="SS14 은총 ${label}" value="${escape(formValues[`thea-cycle-input:${key}`] ?? cycle[key])}" /></label>`).join("")}
-      <p>자동 계산은 축복·은총이 없는 전투 시작 상태에서 출발합니다. 준비 시간 이후의 상태별 최종 DPS를 평균내며, 현재 중첩과 은총 적용 여부를 직접 입력할 필요가 없습니다. 측정 시간을 바꾸면 초반 준비 구간의 영향도 달라집니다.</p>
-      <p>적 상태·스킬 사용 비율은 전체 DPS 전투 입력에서 선택하세요. 추가 발동은 아래에서 지정한 일정한 간격으로 발생하며, 첫 발동은 한 간격 뒤입니다. 발생하지 않는 행동은 0으로 선택하세요.</p></fieldset>
+      <details><summary>자동 은총 계산 기준</summary><p>자동 계산은 축복·은총이 없는 전투 시작 상태에서 출발합니다. 준비 시간 이후의 상태별 최종 DPS를 평균내며, 현재 중첩과 은총 적용 여부를 직접 입력할 필요가 없습니다. 측정 시간을 바꾸면 초반 준비 구간의 영향도 달라집니다.</p>
+      <p>적 상태·스킬 사용 비율은 전체 DPS 전투 입력에서 선택하세요. 추가 발동은 아래에서 지정한 일정한 간격으로 발생하며, 첫 발동은 한 간격 뒤입니다. 발생하지 않는 행동은 0으로 선택하세요.</p></details></fieldset>
     ${eventKeys.length ? `<fieldset><legend>추가 축복 획득·소모 조건</legend>${eventKeys.map(key => {
-      const field = THEA_EVENT_FIELDS[key]; const v = formValues[`thea-event:${key}`] ?? build.ss14Inputs.theaEvents?.[key] ?? "";
-      return `<label>${escape(field.label)}${field.boolean || field.choices ? `<select data-season-edit="thea-event" data-key="${key}" aria-label="SS14 ${escape(field.label)}">${[["", "선택 필요"], ...(field.choices ? field.choices.map(n => [n, String(n)]) : [[0, "아니요"], [1, "예"]])].map(([n, label]) => `<option value="${n}"${String(v) === String(n) ? " selected" : ""}>${label}</option>`).join("")}</select>` : `<input type="number" min="0" max="${field.max}" step="${field.integer ? "1" : "any"}" data-season-edit="thea-event" data-key="${key}" aria-label="SS14 ${escape(field.label)}" value="${escape(v)}" />`}</label>`;
-    }).join("")}<p>복합 계산에서는 아래 전투 입력의 스킬별 시전 횟수를 사용합니다. 점화 기본값은 명중 대미지와 별개이며, 추가 점화 증가에는 현재 문서에 이미 연결한 증가를 중복 입력하지 마세요. 스코치 저항 감소는 적용 환경의 20% 또는 30%를 선택합니다. 연속 공격은 공격 스킬에만 적용합니다. 확률은 128회 모의 계산의 추정 평균으로 표시합니다.</p></fieldset>` : ""}
+      const field = THEA_EVENT_FIELDS[key]; const v = formValues[`thea-event:${key}`] ?? eventValues[key] ?? "";
+      const label = key === "numbedEnabled" && hasNumbedSupport(report) ? "주력 스킬의 기본 마취 계산" : field.label;
+      const autoMana = key === 'manaRate' && eventValues.combatMode === 1;
+      const attributes = `data-season-edit="thea-event" data-key="${key}" aria-label="SS14 ${escape(label)}"`;
+      if (autoMana) return `<label>${escape(label)}<input type="number" min="0" max="${field.max}" step="any" ${attributes} value="${escape(v)}" placeholder="시전 소모 자동" /><small>비우면 DPS 계산에 포함된 스킬의 시전 MP를 사용합니다. 다른 MP 소모도 있다면 전체 소모율을 입력하세요.</small></label>`;
+      return `<label>${escape(label)}${field.boolean || field.choices ? `<select ${attributes}>${[["", "선택 필요"], ...(field.choices ? field.choices.map(n => [n, String(n)]) : [[0, "아니요"], [1, "예"]])].map(([n, label]) => `<option value="${n}"${String(v) === String(n) ? " selected" : ""}>${label}</option>`).join("")}</select>` : `<input type="number" min="0" max="${field.max}" step="${field.integer ? "1" : "any"}" ${attributes} value="${escape(v)}" />`}</label>`;
+    }).join("")}<details><summary>복합 발동 계산 기준</summary><p>복합 계산에서는 아래 전투 입력의 스킬별 시전 횟수를 사용합니다. 점화 기본값은 명중 대미지와 별개이며, 추가 점화 증가에는 현재 문서에 이미 연결한 증가를 중복 입력하지 마세요. 스코치 저항 감소는 적용 환경의 20% 또는 30%를 선택합니다. 연속 공격은 공격 스킬에만 적용합니다. 확률은 128회 모의 계산의 추정 평균으로 표시합니다.</p></details></fieldset>` : ""}
     ${hasRevelation(build) ? `<fieldset><legend>계시의 예언 · 4번째 활성화 보드</legend>
       <label>4번째 보드<select id="season-thea-board" aria-label="SS14 계시의 예언 4번째 보드"><option value="">패널 선택</option>${revelationBoardOptions().map(o => `<option value="${escape(o.slug)}"${board?.treeSlug === o.slug ? " selected" : ""}>${escape(o.name)}</option>`).join("")}</select></label>
       <button type="button" data-action="advisor-select-thea-board">4번째 보드 선택</button>
-      <p>다른 패널을 선택하면 이 사본의 4번째 보드 포인트가 초기화됩니다. 아래 설명은 계시로 바뀐 효과이며, 변환 전 재능은 중복 합산하지 않습니다. 해금 포인트가 부족하면 계산을 보류합니다.</p>
+      <small>패널 교체 시 4번째 보드 포인트 초기화</small><details><summary>계시 변환 기준</summary><p>아래 설명은 계시로 바뀐 효과이며, 변환 전 재능은 중복 합산하지 않습니다. 해금 포인트가 부족하면 계산을 보류합니다.</p></details>
       ${board?.treeSlug ? `<details><summary>4번째 보드 재능 포인트 편집</summary>${revelationNodeOptions(build).map(n => {
         const value = formValues[`thea-node:${n.id}`] ?? (n.core ? Number(board.coreTalentIds?.includes(n.id)) : board.nodePoints?.[n.id] ?? 0);
         return `<label>${escape(n.name)}${n.replacement ? " · 계시 변환" : ""} · 해금 ${n.required}점<input type="number" min="0" max="${n.max}" step="1" data-season-edit="thea-node" data-key="${escape(n.id)}" aria-label="SS14 4번째 보드 ${n.sourceId} 포인트" value="${escape(value)}" /></label><p>${escape(n.detail)}</p>`;
@@ -340,27 +387,49 @@ function theaControls(document, report, formValues) {
     </details>`;
 }
 
+export function renderSeasonDpsField(key, definition, selected = "", prefix = "SS14 DPS", {minionMaximum,sharedCommand} = {}) {
+    if (selected === "" && definition.defaultValue !== undefined) selected = definition.defaultValue;
+    if (key.endsWith(":minionCount") && Number.isInteger(minionMaximum)) {
+      definition = {...definition,max:minionMaximum,label:`현재 소환체 수 (최대 ${minionMaximum}기)`};
+    }
+    if (key.endsWith(":command") && sharedCommand) definition = {...definition,label:"현재 통솔 수치 (스마트 웨폰 공통)"};
+    const attributes = `data-season-edit="dps-input" data-key="${escape(key)}" aria-label="${escape(prefix)} ${definition.shared || key.startsWith("enemy:") ? "" : `스킬 칸 ${Number(key.split(":")[0]) + 1} `}${escape(definition.label)}"`;
+    if (definition.windows) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="0-2, 4-5"><small>전투 시작 0초 기준. 구간을 입력하면 해당 시간에만 적용됩니다.</small></label>`;
+    if (definition.times) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="3.2, 4.5 또는 없음"><small>전투 시작 기준. 적중 시점의 효과로 계산합니다.</small></label>`;
+    return `<label>${escape(definition.label)}${definition.choices
+      ? `<select ${attributes}>${definition.defaultValue === undefined ? '<option value="">미정</option>' : ''}${definition.choices.map(([v, label]) => `<option value="${v}"${selected !== "" && Number(selected) === v ? " selected" : ""}>${escape(label)}</option>`).join("")}</select>`
+      : `<input type="number" min="${definition.min}" max="${definition.max}" step="${definition.integer ? 1 : "any"}" ${attributes} value="${escape(selected)}" />`}
+      ${definition.hint?`<small>${escape(definition.hint)}</small>`:''}</label>`;
+}
+export function usesTargetNumbedInput(build,report) {
+  return !theaCombatEnabled(build) && !report.componentProjection.rows.some(row=>
+    row.conditionControls.some(control=>control.conditionGroup==='nether-numbed-stacks'));
+}
+export function renderFixedNumbedField(build,report,value) {
+  if(!usesTargetNumbedInput(build,report))return '';
+  const gearCondition=report.components.some(row=>row.category==='gear'&&row.calculations?.some(entry=>
+    entry.conditionControls?.some(control=>control.numbedMinimum>0)));
+  if(value==null&&!gearCondition&&!report.coupledSkills.rows.some(row=>
+    [row.offenseBasis?.pools,row.offenseBasis?.dotPools].some(pools=>pools?.some(pool=>pool.type==='lightning'&&pool.max>0)))
+    && !report.fullDps.blockers.some(reason=>reason.includes(SEASON_DPS_ENEMY_FIELDS.numbedStacks.label)))return '';
+  return renderSeasonDpsField('enemy:numbedStacks',SEASON_DPS_ENEMY_FIELDS.numbedStacks,value??'','전투 조건');
+}
 function dpsControls(document, report, formValues, showDummy = false) {
   const build = document.targetBuild;
   const input = document.targetBuild.ss14Inputs.dps;
-  const field = (key, definition, value) => {
-    const selected = formValues[`dps-input:${key}`] ?? value ?? "";
-    const attributes = `data-season-edit="dps-input" data-key="${key}" aria-label="SS14 DPS ${key.startsWith("enemy:") ? "" : `스킬 칸 ${Number(key.split(":")[0]) + 1} `}${escape(definition.label)}"`;
-    return `<label>${escape(definition.label)}${definition.choices
-      ? `<select ${attributes}><option value="">미정</option>${definition.choices.map(([v, label]) => `<option value="${v}"${selected !== "" && Number(selected) === v ? " selected" : ""}>${escape(label)}</option>`).join("")}</select>`
-      : `<input type="number" min="${definition.min}" max="${definition.max}" step="${definition.integer ? 1 : "any"}" ${attributes} value="${escape(selected)}" />`}</label>`;
-  };
-  return `<details data-role="season-dps-input"><summary>전체 DPS 전투 입력</summary>
-    ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
-    <p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후, 관통 적용 전의 유효 저항입니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
-    <fieldset><legend>대상 방어</legend>${showDummy ? renderTrainingDummyPicker(input?.enemy) : ""}${Object.entries(SEASON_DPS_ENEMY_FIELDS).map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}</fieldset>
+  const field = (key, definition, value, limits) => renderSeasonDpsField(key, definition,
+    formValues[`dps-input:${key}`] ?? value ?? "", "SS14 DPS", limits);
+  return `${showDummy ? renderTrainingDummyPicker(input?.enemy) : ""}<details data-role="season-dps-input"><summary>${showDummy ? "대상 방어·스킬 상세 조건" : "대상·스킬 조건"}</summary>
+    ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><details><summary>구성 확인 기준</summary><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p></details>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
+    <fieldset><legend>대상</legend>${Object.entries(SEASON_DPS_ENEMY_FIELDS).filter(([key])=>key!=='numbedStacks').map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}
+      ${renderFixedNumbedField(build,report,formValues['dps-input:enemy:numbedStacks']??input?.enemy?.numbedStacks)}</fieldset>
     ${report.componentProjection.rows.filter(r => r.slateControls?.length).map(r => `<fieldset><legend>${escape(r.name)} · SS14 석판 옵션</legend>
       ${r.slateControls.map(c => `<label>${c.index + 1}번째 옵션<select data-season-edit="slate-affix" data-key="${escape(c.key)}" aria-label="SS14 ${escape(r.name)} 옵션 ${c.index + 1}"><option value="">옵션 선택 필요</option>
         ${seasonSlateOptions(c.type).map(o => `<option value="${escape(o.id)}"${(formValues[`slate-affix:${c.key}`] ?? c.value) === o.id ? " selected" : ""}>${escape(o.name)} · ${escape(o.detail)}</option>`).join("")}</select></label>`).join("")}</fieldset>`).join("")}
     ${report.componentProjection.rows.some(r => r.heroControls?.length) ? `<fieldset><legend>히어로 발동·현재 상태</legend>
-      <p>${document.targetBuild.ss14Inputs.heroSelection?.heroId === THEA_SS14_ID
+      <details><summary>히어로 발동 입력 기준</summary><p>${document.targetBuild.ss14Inputs.heroSelection?.heroId === THEA_SS14_ID
         ? "현재 상태 계산에서는 적용 중인 은총의 소모 중첩을 입력하세요. 자동 주기 평균을 선택하면 은총 상태와 축복 중첩은 시간에 따라 계산됩니다."
-        : "0은 미적용, 1은 적용입니다. 발동 횟수는 무료 발동을 포함한 실제 횟수입니다. 창의 오버로드가 충전을 바꾸므로, 사용 중에는 일반 매직 버스트 횟수도 직접 입력합니다."}</p>
+        : "0은 미적용, 1은 적용입니다. 발동 횟수는 무료 발동을 포함한 실제 횟수입니다. 창의 오버로드가 충전을 바꾸므로, 사용 중에는 일반 매직 버스트 횟수도 직접 입력합니다."}</p></details>
       ${[...new Set(report.componentProjection.rows.flatMap(r => r.heroControls ?? []))].map(key => {
         const d = SEASON_HERO_COMBAT_FIELDS[key];
         const value = formValues[`hero-combat:${key}`] ?? document.targetBuild.ss14Inputs.heroCombat?.[key] ?? "";
@@ -373,41 +442,61 @@ function dpsControls(document, report, formValues, showDummy = false) {
     ${report.coupledSkills.rows.some(r => getSeasonSelectionRecord('skills', r.id)?.tags?.includes('Attack')) ? weaponSummary(build) : ''}
     ${report.coupledSkills.rows.map(r => {
       const entry = report.components.filter(c => c.category === "skills").flatMap(c => c.calculations ?? []).find(c => c.rowIndex === r.rowIndex);
-      return `<fieldset><legend>${escape(name(r.id))} · 스킬 칸 ${r.rowIndex + 1}</legend>${Object.entries(SEASON_DPS_SKILL_FIELDS)
-        .filter(([key]) => seasonDpsSkillFieldKeys(entry, r.id, build).includes(key))
-        .map(([key, def]) => field(`${r.rowIndex}:${key}`, def, input?.skills?.[r.rowIndex]?.[key])).join("")}
-        ${entry?.mechanics?.filter(m => m.limitation).map(m => `<p>${escape(m.limitation)}${m.kind === "ice-ring-on-kill" ? " 단일 보스에게 재발동 적중이 없으면 0을 입력하세요." : ""} ${sourceLink(m)}</p>`).join("") ?? ""}</fieldset>`;
+      const minionMaximum = report.fullDps.rows.find(row => row.rowIndex === r.rowIndex)?.minionMaximum;
+      const sharedCommand = report.fullDps.observedCommandRow === r.rowIndex;
+      return `<fieldset><legend>${escape(name(r.id))} · 스킬 칸 ${r.rowIndex + 1}</legend>${seasonDpsSkillFieldKeys(entry, r.id, build)
+        .flatMap(key => { const def = seasonDpsSkillFieldDefinition(r.id,key,r.terraChargeMaximum); return def ? [field(`${r.rowIndex}:${key}`, def, input?.skills?.[r.rowIndex]?.[key], {minionMaximum,sharedCommand})] : []; }).join("")}
+        ${entry?.mechanics?.some(m => m.limitation) ? `<details><summary>효과 상세·입력 기준</summary>${entry.mechanics.filter(m => m.limitation).map(m => `<p>${escape(m.limitation)}${m.kind === "ice-ring-on-kill" ? " 단일 보스에게 재발동 적중이 없으면 0을 입력하세요." : ""} ${sourceLink(m)}</p>`).join("")}</details>` : ""}</fieldset>`;
     }).join("")}
-    <p>적중률과 시전 시간 배분은 자원 소모·이동을 고려한 입력입니다. 복합 계산은 첫 매직 버스트 충전도 포함합니다. ${seasonWeaponProfile(build).enabled ? '무기 수치는 선택한 장비에서 자동 반영합니다.' : '무기 대미지는 무기 자체 수치로 입력하세요.'} 추가 번개는 스킬 계수 적용 전 수치이며 다른 증가 보정은 중복 입력하지 마세요. 점화·마취 입력은 주력 스킬에 적용됩니다.</p>
+    <details data-role="combat-input-help"><summary>전투 입력 기준</summary><p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후, 관통 적용 전의 유효 저항입니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
+    <p>적중률과 시전 시간 배분은 자원 소모·이동을 고려한 입력입니다. 복합 계산은 첫 매직 버스트 충전도 포함합니다. ${seasonWeaponProfile(build).enabled ? '무기 수치는 선택한 장비에서 자동 반영합니다.' : '무기 대미지는 무기 자체 수치로 입력하세요.'} 추가 번개는 스킬 계수 적용 전 수치입니다. 점화와 기본 마취 확률은 주력 스킬에 적용하며, 마취된 대상의 추가 중첩은 각 번개 적중에서 계산합니다.</p></details>
   </details>`;
 }
 
-function dpsResults(report, renderIssues) {
+export const SEASON_DPS_PARTS = [
+  ["manualDps", "일반 시전"], ["spellBurstDps", "매직 버스트"], ["repeatDps", "추가 발동"],
+  ["heroDps", "히어로 발동"], ["netherDps", "명왕 발동"],
+  ["dotDps", "지속"], ["reapingDps", "수확"], ["minionDps", "소환체"], ["omenDps", "오멘"], ["playerDeteriorationDps", "악화"],
+];
+
+function dpsResults(report, { embedded = false } = {}) {
   const r = report.fullDps;
+  const assumed = embedded && preferredSeasonDpsMetric(report) === 'assumedDps';
+  const displayRows = assumed ? report.assumedDps.rows : r.rows;
   const blockers = [...new Set(r.blockers)];
   const joint = report.theaAverage?.combat && report.theaAverage.supported ? report.theaAverage : null;
   const repeated = r.rows.filter(row => row.shotgun?.hits > 1);
-  return `<section aria-label="SS14 전체 DPS" data-role="season-full-dps" tabindex="-1"><h5>SS14 전체 DPS</h5>
+  const measured = joint?.measuredCounts;
+  const blessingTotal = kind => Object.values(joint?.measuredBlessings?.[kind] ?? {}).reduce((a,b)=>a+b,0);
+  const gained = blessingTotal('gained'), consumed = blessingTotal('consumed');
+  const displayDps = value => embedded && Number.isFinite(value) ? value.toLocaleString('ko-KR', { maximumFractionDigits: 2 }) : number(value);
+  const columns = SEASON_DPS_PARTS.filter(([key]) => displayRows.some(row => row.values[key] > 0));
+  columns.push(["dps", "합계"]);
+  const rowLabel = row => {
+    const label = `${escape(name(row.id))} · 칸 ${row.rowIndex + 1}`;
+    return embedded ? `<button type="button" data-ss14-action="inspect-contribution-skill" data-index="${row.rowIndex}">${label}</button>` : label;
+  };
+  return `<section aria-label="${embedded ? '전투 DPS 상세' : 'SS14 전체 DPS'}" data-role="season-full-dps" tabindex="-1">${embedded ? '' : `<h5>SS14 전체 DPS</h5>
     <p class="season-dps-value"><strong>${r.supported ? number(r.dps) : seasonDpsStatusLabel(report)}</strong></p>
-    ${joint?.projectileTie ? `<p data-role="season-projectile-order">같은 시각에 겹친 후속타의 처리 순서는 게임에서 미확인입니다. 먼저 시전한 투사체 우선 ${number(joint.projectileTie.arrivalsFirstDps)} DPS · 새 시전 우선 ${joint.projectileTie.newCastFirstDps === null ? '계산 불가' : number(joint.projectileTie.newCastFirstDps) + ' DPS'}</p>` : ''}
     <p>${r.supported ? report.theaAverage ? report.theaAverage.estimated ? "자동 은총 추정 평균" : "자동 은총 주기 평균" : "입력한 전투 조건 기준" : `입력·효과 ${blockers.length}건 확인 필요`}</p>
-    ${blockers.length ? `<details data-role="season-dps-blockers"><summary>계산에 필요한 입력·효과 확인 (${blockers.length})</summary>${renderIssues ? renderIssues(blockers) : seasonCalculationIssues(report).map(group=>`<section data-cause="${group.cause}"><h6>${group.label} (${group.reasons.length})</h6><ul>${group.reasons.map(b=>`<li>${escape(b)}</li>`).join('')}</ul></section>`).join('')}
-      <button type="button" data-action="advisor-open-section" data-section="combat">전투 조건 편집</button><button type="button" data-action="advisor-open-section" data-section="hero">히어로 특성 편집</button></details>` : ""}
-    <details data-role="season-dps-breakdown"><summary>스킬별 DPS·계산 조건</summary>
+    ${blockers.length ? `<details data-role="season-dps-blockers"><summary>계산에 필요한 입력·효과 확인 (${blockers.length})</summary>${seasonCalculationIssues(report).map(group=>`<section data-cause="${group.cause}"><h6>${group.label} (${group.reasons.length})</h6><ul>${group.reasons.map(b=>`<li>${escape(b)}</li>`).join('')}</ul></section>`).join('')}
+      <button type="button" data-action="advisor-open-section" data-section="combat">전투 조건 편집</button><button type="button" data-action="advisor-open-section" data-section="hero">히어로 특성 편집</button></details>` : ""}`}
+    <details data-role="season-dps-breakdown"><summary>${assumed ? '발동 유형별 방어 전 DPS' : embedded ? '발동 유형별 DPS' : '스킬별 DPS'}</summary>
+    ${displayRows.length ? `<div class="season-dps-table-scroll" tabindex="0" role="region" aria-label="스킬별 DPS 표"><table aria-label="${assumed?'스킬별 방어 전 DPS':'스킬별 전투 DPS'}"><thead><tr><th scope="col">스킬</th>${columns.map(([,label])=>`<th scope="col">${label}</th>`).join('')}</tr></thead>
+      <tbody>${displayRows.map(row => `<tr><th scope="row">${rowLabel(row)}</th>${columns.map(([key]) => `<td>${displayDps(row.values[key] ?? (row.supported && key !== "dps" ? 0 : null))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : ''}
+    ${!assumed&&!r.supported ? "<p>스킬별 수치는 확인된 효과만 반영합니다.</p>" : ""}
+    <details><summary>${assumed?'입력한 조건의 계산 근거':'적용 조건·근거'}</summary>
+    ${joint?.projectileTie ? `<p data-role="season-projectile-order">동시 적중 순서 미확인 · ${joint.fissureTie?'후속 적중':'기존 투사체'} 우선 ${number(joint.projectileTie.arrivalsFirstDps)} DPS · 새 시전 우선 ${joint.projectileTie.newCastFirstDps === null ? '계산 불가' : number(joint.projectileTie.newCastFirstDps) + ' DPS'}</p>` : ''}
     ${report.theaAverage?.supported ? `<p>측정 ${number(report.theaAverage.seconds)}초 · 준비 ${number(report.theaAverage.warmup)}초 · 은총 유지율 ${number(report.theaAverage.uptime)}% · 은총 지속 ${number(report.theaAverage.duration)}초 · 재사용 대기 ${number(report.theaAverage.cooldown)}초</p>` : ""}
     ${report.theaAverage?.supported && report.theaAverage.estimated ? `<p>확률 소모 128회 반복 · 평균 DPS의 표준오차 ${number(report.theaAverage.standardError)}. 같은 입력은 같은 결과를 재현합니다. 실제 전투 오차 범위를 뜻하지 않습니다.</p>` : ""}
-    ${report.theaAverage?.supported && report.theaAverage.combat ? `<p>점화 DPS ${number(r.rows.reduce((n, row) => n + row.values.igniteDps, 0))} · 스코치 DPS ${number(r.rows.reduce((n, row) => n + row.values.scorchDps, 0))} (지속 합계에 포함) · 스코치 유지율 ${number(report.theaAverage.scorchUptime)}% · 평균 마취 ${number(report.theaAverage.numbedAverage)}중첩</p>` : ""}
+    ${report.theaAverage?.supported && report.theaAverage.combat ? `<p>점화 DPS ${number(r.rows.reduce((n, row) => n + row.values.igniteDps, 0))} · 스코치 DPS ${number(r.rows.reduce((n, row) => n + row.values.scorchDps, 0))} (지속 합계에 포함) · 스코치 유지율 ${number(report.theaAverage.scorchUptime)}%${embedded?'':` · 평균 마취 ${number(report.theaAverage.numbedAverage)}중첩`}</p>` : ""}
     <p>${escape(r.limitation)}</p>
     ${repeated.map(row => `<p data-role="season-shotgun-result">${escape(name(row.id))} · 같은 적 ${row.shotgun.hits}회 적중 · 첫 적중 이후 감쇠 ${number(row.shotgun.falloff * 100)}% · ${joint ? `첫 적중 후 ${row.shotgun.delaysMs.slice(1).map(number).join(' / ')} ms. 대상 적중률은 선택한 경로 전체에 적용합니다.` : `적중 합산 ×${number(row.shotgun.multiplier)}. ${escape(row.shotgun.limitation)}`}</p>`).join('')}
-    ${joint && repeated.length ? `<p>준비 시간 포함 평균 · 전체 적중 ${number(joint.counts.hits)}회 (후속 ${number(joint.counts.followupHits)}회) · 추가 효과로 획득한 축복 ${number(Object.values(joint.extraBlessings.gained).reduce((a,b)=>a+b,0))}중첩 · 소모한 축복 ${number(Object.values(joint.extraBlessings.consumed).reduce((a,b)=>a+b,0))}중첩</p>` : ''}
-    <div class="season-dps-table-scroll" tabindex="0" role="region" aria-label="스킬별 DPS 표"><table><caption>스킬별 전투 DPS 내역</caption><thead><tr><th scope="col">스킬</th><th scope="col">일반 시전</th><th scope="col">매직 버스트</th><th scope="col">추가 발동</th><th scope="col">히어로 발동</th><th scope="col">지속</th><th scope="col">소환</th><th scope="col">합계</th></tr></thead>
-      <tbody>${r.rows.map(row => `<tr><th scope="row">${escape(name(row.id))} · 칸 ${row.rowIndex + 1}</th>${["manualDps", "spellBurstDps", "repeatDps", "heroDps", "dotDps", "minionDps", "dps"].map(k => `<td>${number(row.values[k] ?? (row.supported && k === "minionDps" ? 0 : null))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
-    ${r.rows.some(row => row.values.specialDps > 0) ? `<p>오멘 DPS ${number(r.rows.reduce((sum,row) => sum + (row.values.specialDps ?? 0), 0))} (전체 합계 포함)</p>` : ""}
+    ${measured && (repeated.length || joint.counts.followupHits > 0) ? `<p data-role="season-measured-hits">측정 구간 평균 · 플레이어 적중 ${number(measured.hits)}회 (후속 ${number(measured.followupHits)}회)${gained || consumed ? ` · 추가 축복 획득 ${number(gained)} · 소모 ${number(consumed)}` : ''}</p>` : ''}
     ${r.rows.filter(row => row.minionUtility?.length || row.utilityMechanics?.length).map(row => `<details><summary>${escape(name(row.id))} · 소환체 효과</summary><ul>${row.minionUtility.map(e => `<li>${escape(({ armor: "아머", evasion: "회피", max_energy_shield: "최대 보호막", elemental_resistance: "원소 저항", elemental_damage_taken: "받는 원소 대미지", elemental_ailment_avoidance: "원소 이상 회피", block_chance: "공격·주술 막기 확률", knockback_chance: "넉백 확률", elemental_ailment_chance: "원소 이상 확률", cooldown_recovery_speed: "쿨타임 회복 속도", injury_buffer: "대미지 완충", deterioration_chance: "악화 확률", physical_as_random_elemental: "물리 대미지의 랜덤 원소 추가", ailment_damage: "상태 이상 대미지", max_frostbite_rating: "최대 빙결 수치 보너스" })[e.stat] ?? e.stat)} ${e.operation === "more" ? "추가 " : ""}${number(e.value)}${e.operation === "add" ? "" : "%"}</li>`).join("")}${(row.utilityMechanics ?? []).map(m => `<li>${m.kind === "module-taunt-on-block" ? "막기 성공 시 적 도발" : "넉백 성공 시 적에게 마비 부여"}</li>`).join("")}</ul></details>`).join("")}
     ${(r.heroMechanics ?? []).filter(m => m.kind === "execute").map(m => `<p>도태: 대상 HP ${number(m.threshold)}% 미만, ${m.radius}m 이내, ${m.delay}초 지연. 지속 DPS에 곱하지 않고 처치 조건으로 구분합니다.</p>`).join("")}
-    ${!r.supported ? "<p>스킬 행에 수치가 있어도 빌드 전체의 미해석 효과가 남아 있으면 전체 DPS로 사용할 수 없습니다.</p>" : ""}
     <details><summary>SS14 전투 공식 근거</summary>${r.receipts.map(sourceLink).join(" · ")}</details>
-    </details></section>`;
+    </details></details></section>`;
 }
 
 function recommendationControls(document, documents, metric, inputStale) {

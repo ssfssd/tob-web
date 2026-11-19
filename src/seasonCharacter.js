@@ -1,6 +1,8 @@
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { calculateSeasonSurvival } from "./seasonSurvival.js";
 import { validSeasonGearEffects } from "./seasonGearEffects.js";
+import { netherSum } from "./seasonNetherRemaining.js";
+import { LUNAR_ECLIPSE_ID, validLunarEclipseLink } from "./seasonSupport.js";
 
 export const SEASON_CHARACTER_INPUTS = {
   strength: { label: "적용 전 힘", min: 0, max: 100000 },
@@ -8,6 +10,7 @@ export const SEASON_CHARACTER_INPUTS = {
   intelligence: { label: "적용 전 지혜", min: 0, max: 100000 },
   enemyLevel: { label: "받는 대미지 계산 대상 레벨", min: 1, max: 100 },
   enemyAccuracy: { label: "회피 계산 대상 명중 수치", min: 1, max: 1000000 },
+  observedManaRecovery: { label: "관측 MP 자연 회복 (MP/초)", min: 0, max: 1000000 },
 };
 export const seasonRulePins = (data = SS14_RULES) => Object.fromEntries(Object.values(data.pages).map((p) => [p.sourceUrl, p.sourcePageSha256]));
 const finite = (n) => typeof n === "number" && Number.isFinite(n);
@@ -118,19 +121,32 @@ export function calculateSeasonCharacter(build, components, projection, { data =
     return [type, { raw: round(raw), effective: !capConflict ? scenarios[0] : null, scenarios }];
   }));
   const survival = calculateSeasonSurvival({ safe, input, effects, life, mana, shield, evasion, data });
-  const holds=(kind)=>projection.rows.some(r=>r.mechanics?.some(m=>m.kind===kind));
-  const reserveUnknown=holds('unresolved-law-of-greed-reservation');
-  const maxManaUnknown=holds('unresolved-reservation-max-mp');
-  const reservedManaPercent=reserveUnknown?null:effects.filter(e=>e.stat==='sealed_mana_percent').reduce((n,e)=>n+e.value,0);
-  if(reserveUnknown)blockers.push('탈법의 MP 봉인 조합을 확인하기 전에는 합계를 표시하지 않습니다.');
-  if(maxManaUnknown)blockers.push('탈법의 최대 MP 옵션 수치가 확인될 때까지 사용 가능한 MP를 확정하지 않습니다.');
-  if(reservedManaPercent>100)blockers.push('확인된 MP 봉인 합이 100%를 초과합니다.');
+  const manaReservations=projection.rows.filter(row=>row.isAura).map(row=>{
+    const reservation=row.mechanics?.find(m=>m.kind==='nether-reservation');
+    const active=row.conditionControls?.find(c=>c.conditionGroup===`nether-buff-${row.buffSkill}`)?.value;
+    const blocked=row.blockers.length>0;
+    return {rowIndex:row.buffSkill,name:row.name,base:reservation?.base,blocked,
+      active:active===1?true:active===0?false:null,
+      applied:blocked ? null : round(row.effects.find(e=>e.stat==='sealed_mana_percent')?.value)};
+  });
+  const lunar=components.find(component=>component.category==='supports'&&component.id===LUNAR_ECLIPSE_ID);
+  const supportReservations=(lunar?.calculations??[]).map(row=>{
+    const blocked=!validLunarEclipseLink(build,row.rowIndex,row.supportIndex)||row.sealedManaPercent!==10;
+    return {rowIndex:row.rowIndex,supportIndex:row.supportIndex,name:lunar.name,
+      base:row.sealedManaPercent,applied:blocked?null:row.sealedManaPercent,active:true,blocked};
+  });
+  manaReservations.push(...supportReservations);
+  const reservationPending=manaReservations.some(row=>row.blocked);
+  const reservedManaPercent=reservationPending?null:supportReservations.reduce((sum,row)=>sum+row.applied,
+    effects.filter(e=>e.stat==='sealed_mana_percent').reduce((n,e)=>n+e.value,0));
+  if(reservedManaPercent>100)blockers.push('선택한 스킬의 MP 봉인 합이 100%를 초과합니다.');
   return { scope: "source-bound-resource-defense-projection", fullBuildSupported: false,
     values: { ...Object.fromEntries(Object.entries(stats).map(([k, v]) => [k, safe ? round(v) : null])),
       life: round(life), mana: round(mana), shield: round(shield), armor: round(armor), evasion: round(evasion),
-      reservedManaPercent:round(reservedManaPercent),unreservedMana:reserveUnknown||maxManaUnknown||!finite(mana)||reservedManaPercent>100?null:round(mana*(1-reservedManaPercent/100)),
+      sealedManaCompensation: round(netherSum(effects, "sealed_mana_compensation")),
+      reservedManaPercent:round(reservedManaPercent),unreservedMana:finite(mana)&&finite(reservedManaPercent)&&reservedManaPercent<=100?round(mana*(1-reservedManaPercent/100)):null,
       armorReduction: round(armorReduction), nonPhysicalArmorReduction: round(armorReduction === null ? null : armorReduction * .6),
-      ...survival.values }, resistances, armorScenarios, survival, blockers: [...new Set([...blockers, ...survival.reasons])], receipts,
+      ...survival.values }, manaReservations, resistances, armorScenarios, survival, blockers: [...new Set([...blockers, ...survival.reasons])], receipts,
     omittedEffectCount: projection.rows.filter((r) => r.blockers.length).length,
     limitation: "사용자가 입력한 적용 전 속성에 확인된 선택 효과와 SS14 기본 공식을 결합한 참고값입니다. 미해석 효과·봉인·특수 상호작용은 제외되며 전체 빌드 최종값이 아닙니다." };
 }

@@ -94,8 +94,12 @@ export function parseRemainingNether(t,{build,add,need,effects,blockers,mechanic
   }
 }
 
+export const SEASON_SKILL_AILMENT_TAGS = {
+  slash_strike_ailment_damage: 'Slash-Strike', demolisher_ailment_damage: 'Demolisher',
+  area_ailment_damage: 'Area', projectile_ailment_damage: 'Projectile',
+};
+
 export const NETHER_CONSUMED_STATS=new Set(['affliction_per_second','enemy_hit_damage_taken','enemy_dot_damage_taken','enemy_all_damage_taken',
   'aura_effect','sealed_mana_compensation','warcry_effect','elixir_effect','spirit_magus_origin_effect',
   'base_ailment_damage_min','base_ailment_damage_max','ill_omen_efficiency','damaging_ailment_chance',
-  'frostbite_effect','numbed_effect','numbed_additional_stacks','deterioration_damage',
-  'slash_strike_ailment_damage','demolisher_ailment_damage','area_ailment_damage','projectile_ailment_damage']);
+  'frostbite_effect','numbed_effect','numbed_additional_stacks','deterioration_damage']);

@@ -1,15 +1,19 @@
 import { SS14_MEMORIES } from "./data/ss14Memories.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
+import { TALENT_SUBTREE_SLUGS_BY_GOD } from './talentBoardModel.js';
 import { SS14_SPIRIT_NAMES } from "./data/ss14SpiritNames.generated.js";
 import { getCatalogItems, findItemById } from "./catalog.js";
-import { getSkillEnergyUsage } from "./skillRuntimeModel.js";
+import { createDefaultSkillState, getSkillEnergyUsage } from "./skillRuntimeModel.js";
+import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
 import { seasonDestinyOptions, pactNodeActive, validFateLayout, pactAllocationKeys } from './seasonDestiny.js';
 import { EMPTY_TRAIT_MEMORY } from "./seasonHeroSelection.js";
 import { memoryQuality } from './seasonMemoryQuality.js';
+import { editSeasonPrism } from './seasonPrismPlacement.js';
+import {editInverse,inverseGeometry} from './seasonInverseImage.js';
 
 const ko = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
 const verified = page => page?.season === "SS14" && page.sourceSeasonEvidence?.actualSeason === 14 && page.sourceSeasonEvidence.verificationComplete;
@@ -26,6 +30,14 @@ export function seasonMemoryOptions(index) {
 export function seasonTalentBoards() {
   return Object.values(SS14_COMPONENTS.pages).filter(p => p.locale === "en" && p.category === "talents" && verified(p))
     .map(p => ({ id: p.slug, name: ko(SS14_COMPONENTS.pages[p.sourceUrl.replace("/en/", "/ko/")]?.parsed.name) }));
+}
+export function talentPanelGroups(build,index) {
+  const boards=build.talents?.boards??[];
+  const used=new Set(boards.filter((_,i)=>i!==index).map(b=>b?.treeSlug));
+  const catalog=new Map(seasonTalentBoards().map(t=>[t.id,t]));
+  return Object.entries(TALENT_SUBTREE_SLUGS_BY_GOD).filter(([god])=>index!==1||boards[0]?.treeSlug===god).map(([god,children])=>({
+    god:catalog.get(god), choices:(index===0?[god]:children).filter(id=>!used.has(id)).map(id=>catalog.get(id)).filter(Boolean)
+  })).filter(g=>g.god&&g.choices.length);
 }
 export function seasonTalentNodes(slug) {
   const en = SS14_COMPONENTS.pages[`https://tlidb.com/en/${slug}`];
@@ -44,6 +56,11 @@ export function seasonTalentNodes(slug) {
     return [{ id: item.id, name: ko(translated.name), detail: ko(translated.detail), core, iconUrl: row.iconUrl,
       max: rule.maxPoints, required: rule.requiredPoints }];
   }).sort((a, b) => a.required - b.required || a.id.localeCompare(b.id));
+}
+export function setSeasonCoreTalent(board,node,value) {
+  const sameSlot=id=>SS14_RULES.talents[board.treeSlug]?.nodes[id.replace(/^talents-/u,'')]?.requiredPoints===node.required;
+  const keep=(board.coreTalentIds??[]).filter(id=>id!==node.id && (!value||!sameSlot(id)));
+  board.coreTalentIds=value?[...keep,node.id]:keep;
 }
 export function seasonSpiritOptions() {
   return SS14_COMPONENTS.spiritIdentities.flatMap(identity => {
@@ -70,6 +87,28 @@ export function editNativeSeasonSelection(target, edit) {
   if (edit.kind === "hero-level") {
     if (!Number.isInteger(edit.value) || edit.value < 1 || edit.value > 100) throw new Error("히어로 레벨을 1~100으로 입력하세요.");
     target.heroLevel = edit.value; target.hero = { ...target.hero, level: edit.value }; capture(target, "hero");
+  } else if (edit.kind === "skills-reset") {
+    const inputs = target.ss14Inputs;
+    target.skills = { ...createDefaultSkillState(), energyMax: target.skills?.energyMax ?? 525 };
+    target.skillLevels = Array(9).fill(0);
+    delete target.skillSeals;
+    for (const group of ['selections', 'selectionProjection']) {
+      target[group] = { ...target[group], skills: Array(9).fill(null), supports: [] };
+    }
+    inputs.selectionMode = 'isolated-v1';
+    inputs.selections = { ...inputs.selections, gear: inputs.selections?.gear ?? {},
+      skills: Object.fromEntries(Array.from({length:9}, (_, i) => [i, null])) };
+    inputs.skills = {};
+    inputs.supports = {};
+    inputs.supportSelections = {};
+    for (let i = 0; i < 9; i++) rebindSeasonSkillInputs(inputs, i, null);
+    for (const key of Object.keys(inputs.extensionInputs ?? {})) {
+      if (/^(module|elixir|ingredient):/u.test(key)) delete inputs.extensionInputs[key];
+    }
+    for (const key of Object.keys(inputs.componentConditions ?? {})) {
+      if (key.startsWith('skills.')) delete inputs.componentConditions[key];
+    }
+    capture(target, 'skills');
   } else if (edit.kind === "support-count") {
     if (!Number.isInteger(edit.rowIndex) || edit.rowIndex < 0 || edit.rowIndex > 8) throw new Error("스킬 칸을 확인하세요.");
     const slot = edit.rowIndex < 5 ? target.skills.active[edit.rowIndex] : target.skills.passive[edit.rowIndex - 5];
@@ -132,7 +171,10 @@ export function editNativeSeasonSelection(target, edit) {
         const selected = memory[key].filter(id => id !== option.groupId);
           const limit = option.kind === 'random' ? memoryQuality(memory.ss14Quality)?.randomLimit ?? 2 : 2;
           if (edit.value && selected.length >= limit) throw new Error(`이 추억의 ${option.kind === 'random' ? '랜덤' : '고유'} 옵션은 ${limit}개까지 선택할 수 있습니다.`);
-        memory[key] = edit.value ? [...selected, option.groupId] : selected;
+        const previous=memory[key].indexOf(option.groupId);
+        const position=Number.isInteger(edit.position)?edit.position:previous;
+        if(edit.value)selected.splice(position>=0 && position<=selected.length?position:selected.length,0,option.groupId);
+        memory[key] = selected;
         if (edit.value) memory.affixRolls[option.groupId] = { tierId: option.tierId, rolls: {} };
         else delete memory.affixRolls[option.groupId];
       }
@@ -143,20 +185,58 @@ export function editNativeSeasonSelection(target, edit) {
       for (const key of Object.keys(target.ss14Inputs.memoryRolls ?? {})) if (key.startsWith(prefix)) delete target.ss14Inputs.memoryRolls[key];
     }
     capture(target, "hero");
-  } else if (["talent-board", "talent-node"].includes(edit.kind)) {
-    if (!Number.isInteger(index) || index < 0 || index > 2) throw new Error("재능 패널을 확인하세요. 4번째 패널은 계시의 예언에서 편집하세요.");
+  } else if(edit.kind==='inverse-discard'||edit.kind==='prism-discard'){
+    const t=target.talents,inverse=edit.kind==='inverse-discard';
+    const field=inverse?'inverseImageInventory':'prismInventory',placed=inverse?t?.placedInverseImage:t?.placedPrism;
+    const matches=i=>(i.instanceId??i.id)===edit.key;
+    if(placed?.instanceId===edit.key||!t?.[field]||t[field].filter(matches).length!==1||
+        t.boards.some(b=>b?.placedPrism||b?.placedInverseImage||b?.prismSlots?.some(Boolean)||b?.inverseImageSlots?.some(Boolean)))
+      throw Error('배치되지 않은 보관함 항목을 선택하세요.');
+    t[field]=t[field].filter(i=>!matches(i));
+    capture(target,'talents');
+  } else if (["inverse-create","inverse-place","inverse-remove","inverse-point"].includes(edit.kind)) {
+    const board=target.talents?.boards?.[index];
+    if(edit.kind==='inverse-point'){
+      const n=inverseGeometry(target,index)?.nodes.find(n=>n.isReflected&&n.storageNodeId===edit.key);
+      const source=n&&seasonTalentNodes(board.treeSlug).find(r=>r.id===n.flatItemId);
+      if(!source||!Number.isInteger(edit.value)||edit.value<0||edit.value>source.max)throw Error('거울 재능의 포인트를 확인하세요.');
+      board.reflectedNodePoints??={};
+      if(edit.value)board.reflectedNodePoints[edit.key]=edit.value;
+      else delete board.reflectedNodePoints[edit.key];
+    }else{
+      if(edit.kind==='inverse-place'&&!seasonTalentNodes(board?.treeSlug).some(n=>!n.core&&n.id===edit.value))throw Error('SS14 재능 칸을 선택하세요.');
+      editInverse(target,edit);
+    }
+    capture(target,'talents');
+  } else if (["prism-create","prism-place","prism-remove"].includes(edit.kind)) {
+    if(edit.kind==="prism-place"&&!seasonTalentNodes(target.talents?.boards?.[index]?.treeSlug).some(n=>!n.core&&n.id===edit.value))
+      throw Error("SS14 패널의 일반 재능 칸을 선택하세요.");
+    editSeasonPrism(target,edit);
+    capture(target,"talents");
+  } else if (["talent-board", "talent-node", "talent-reset"].includes(edit.kind)) {
+    if (!Number.isInteger(index) || index < 0 || index > 3) throw new Error("재능 패널을 확인하세요.");
     target.talents ??= { boards: [] };
-    if (edit.kind === "talent-board") {
-      if (edit.value && !seasonTalentBoards().some(b => b.id === edit.value)) throw new Error("SS14 재능 패널을 선택하세요.");
+    if (edit.kind === "talent-reset") {
+      const board=target.talents.boards[index];
+      if(!board?.treeSlug)throw new Error('재능 패널을 먼저 선택하세요.');
+      board.nodePoints={};board.reflectedNodePoints={};board.selectedNodeIds=[];board.coreTalentIds=[];
+    } else if (edit.kind === "talent-board") {
       if (target.talents.boards[index]?.treeSlug === edit.value) return true;
+      if (edit.value && !talentPanelGroups(target,index).some(group=>group.choices.some(b=>b.id===edit.value))) throw new Error("이 칸에 장착할 수 있는 재능 패널을 선택하세요.");
+      if(index===0 && target.talents.boards[1]?.treeSlug && !TALENT_SUBTREE_SLUGS_BY_GOD[edit.value]?.includes(target.talents.boards[1].treeSlug))
+        throw new Error("다른 계열로 바꾸려면 두 번째 재능 패널을 먼저 해제하세요.");
       if ([target.talents.placedPrism, target.talents.placedInverseImage].some(p => p?.boardIndex === index)) throw new Error("배치된 프리즘·역상을 먼저 해제하세요.");
+      while(target.talents.boards.length<index) target.talents.boards.push({treeSlug:null,nodePoints:{},coreTalentIds:[]});
       target.talents.boards[index] = { boardId: null, slotType: index ? "sub" : "main", treeSlug: edit.value || null,
         nodePoints: {}, reflectedNodePoints: {}, selectedNodeIds: [], coreTalentIds: [] };
     } else {
       const board = target.talents.boards[index];
       const node = seasonTalentNodes(board?.treeSlug).find(n => n.id === edit.key);
       if (!node || !Number.isInteger(edit.value) || edit.value < 0 || edit.value > node.max) throw new Error("SS14 재능 포인트 상한을 확인하세요.");
-      if (node.core) board.coreTalentIds = [...(board.coreTalentIds ?? []).filter(id => id !== node.id), ...(edit.value ? [node.id] : [])];
+      const mirror=target.talents.placedInverseImage;
+      if(edit.value&&!node.core&&mirror?.boardIndex===index&&!inverseGeometry(target,index)?.nodes.some(n=>!n.isReflected&&n.flatItemId===node.id))
+        throw Error('거울 반사로 대체된 재능 칸입니다.');
+      if (node.core) setSeasonCoreTalent(board,node,edit.value);
       else {
         board.nodePoints ??= {};
         if (edit.value) board.nodePoints[node.id] = edit.value; else delete board.nodePoints[node.id];

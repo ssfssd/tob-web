@@ -1,7 +1,7 @@
 import { getCatalogItems } from "./catalog.js";
 import { SS14_LOG_SLATES } from "./data/ss14LogSlates.generated.js";
 import { createDivinityBoard, createSlateInstance, addSlateToInventory, placeSlate } from "./divinityBoardModel.js";
-import { seasonSlateEntry, seasonSlateTemplates, seasonSlateOptions } from "./seasonDivinity.js";
+import { seasonSlateEntry, seasonSlateTemplates, seasonSlateOptions, hasDuplicatePedigreeCore } from "./seasonDivinity.js";
 import { logGroupComplete } from "./gameLogSnapshot.js";
 
 const special = { 1001: "starfire", 1003: "stars_fall", 1005: "corner_of_divinity", 1009: "void_gap",
@@ -72,6 +72,7 @@ function buildBoard(items, boardId) {
         slots[controls[n].slot] = hits[0];
       }
       if (templateId !== "six_gods" && controls.some(c => !slots[c.slot])) fail("특수 석판의 옵션 기록이 빠져 있습니다.");
+      if (hasDuplicatePedigreeCore(templateId,slots)) fail('신의 계보에 같은 핵심 재능이 두 번 기록됐습니다.');
       const influence = item.InfluenceId ?? 0;
       // Exact installed locale IDs agree with the SS14 copy descriptions.
       if (templateId === "starfire") {

@@ -617,6 +617,13 @@ function parseConversion(line, category) {
   }];
 }
 
+function parseSeasonSupportGain(line, category, season) {
+  if (season !== 'SS14' || category !== 'supports') return null;
+  const match = line.match(/^Adds\s+(\d+(?:\.\d+)?)\s*%\s+of Physical Damage as Fire Damage to the supported skill\.?$/u);
+  return match ? [{ stat: 'supported-skill-physical-damage-as-fire', operation: 'add',
+    value: Number(match[1]), unit: 'percent', sourceText: line }] : null;
+}
+
 function parseInheritedCap(line, category) {
   const match = line.match(/^([+-]?\d+(?:\.\d+)?)\s*%\s+of\s+(.+?)\s+(?:is|are) also applied to\s+(.+?),\s*up to\s+\+?([+-]?\d+(?:\.\d+)?)\s*%\s+(.+)\.?$/iu);
   if (!match) return null;
@@ -836,6 +843,7 @@ function parseClause(rawLine, category, level, item, season) {
     () => parseCappedMovementSpeed(line, category),
     () => parseElixirDirectEffect(line, item),
     () => parseConversion(line, category),
+    () => parseSeasonSupportGain(line, category, season),
     () => parseInheritedCap(line, category),
     () => parseQuantityOrCap(line),
   ];

@@ -1,3 +1,5 @@
+import {inverseGeometry} from './seasonInverseImage.js';
+
 // A configuration is a user's input, not a season-value authority. Copy whole
 // owned sections, including future nested fields; never normalize them away.
 export const SEASON_CONFIGURATION_GROUPS = [
@@ -88,8 +90,14 @@ export function inspectNestedSeasonReferences(build, add) {
   visit(build?.skills, "skills", { skillId: "skills", supportId: "supports", modularizationId: "modularization", elixirId: "elixirs", bottleId: "elixirs", ingredientId: "ingredients", ingredientIds: "ingredients" });
   visit(build?.talents, "talents", { boardId: "talentTrees", treeSlug: "talentTrees", selectedNodeIds: "talents", coreTalentIds: "talents", prismId: "prisms", prismItemSlug: "prisms", inverseImageId: "inverseImages" });
   for (const [index, board] of (build?.talents?.boards ?? []).entries()) {
-    for (const field of ["nodePoints", "reflectedNodePoints"]) {
-      for (const [id, points] of Object.entries(board?.[field] ?? {})) if (points > 0) add("talents", id, `talents.boards.${index}.${field}.${id}`);
+    for(const [id,points] of Object.entries(board?.nodePoints??{}))if(points>0)add('talents',id,`talents.boards.${index}.nodePoints.${id}`);
+    const mirrored=Object.entries(board?.reflectedNodePoints??{}).filter(([,n])=>n>0);
+    if(mirrored.length){
+      const nodes=inverseGeometry(build,index)?.nodes??[];
+      for(const [key] of mirrored){
+        const source=nodes.find(n=>n.isReflected&&n.storageNodeId===key);
+        add('talents',source?.flatItemId??key,`talents.boards.${index}.reflectedNodePoints.${key}`);
+      }
     }
   }
   visit(build?.pact, "pact", { spiritId: "spirits", destinyId: "destiny", fateId: "destiny" });

@@ -1,19 +1,22 @@
 import { normalizeBuild } from "./engine.js";
+import {restoreCustomOptionText} from './seasonCustomOptions.js';
 import { memoryBaseSource } from './seasonMemoryQuality.js';
 import { calculateSeasonBuild } from "./seasonBuild.js";
 import { validTheaInputs } from "./seasonTheaCycle.js";
 import { validTheaEventValue, THEA_EVENT_FIELDS } from "./seasonTheaEvents.js";
 import { theaEffectsPin } from "./seasonTheaSpecials.js";
 import { theaCombatPin } from "./seasonTheaCombatInputs.js";
-import { isThea, revelationBoardOptions, revelationNodeOptions, theaRulePin } from "./seasonTheaRevelation.js";
+import { hasRevelation, isThea, revelationBoardOptions, revelationNodeOptions, theaRulePin } from "./seasonTheaRevelation.js";
 import { prepareSeasonMigration, reopenSeasonResearchCopy, isSeasonMigrationSource } from "./seasonMigration.js";
 import { applySeasonSelections, getSeasonSelectionOptions, getSeasonSelectionRecord, isTwoHandedWeapon } from "./seasonSelections.js";
 import { parseTlidbGearTooltip } from "./tlidbGearTooltipCalculation.js";
 import { validLogGear, editLogGearRoll } from "./seasonLogGear.js";
+import { corrosionCard,isImplicitRoll,setSeasonCorrosion,setSeasonCorrosionBase } from './seasonCorrosion.js';
 import { applyLogSlates } from "./seasonLogSlates.js";
 import { applySeasonConfigurations, captureSeasonConfiguration, compareSeasonConfigurations, SEASON_CONFIGURATION_GROUPS, validSeasonConfigurations, validPactAllocations } from "./seasonConfiguration.js";
-import { applySeasonSupportSelections, seasonSupportItem, seasonSupportOptions } from "./seasonSupport.js";
+import { applySeasonSupportSelections, isRecentDamageCondition, seasonSupportItem, seasonSupportOptions, supportFitsSocket } from "./seasonSupport.js";
 import { pinSeasonComponentReceipts, projectSeasonComponents, validSeasonConditionValue } from "./seasonComponents.js";
+import { boundSeasonConditionGroups, exclusiveResourceStates, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from "./seasonEffectConditions.js";
 import { SEASON_CHARACTER_INPUTS, seasonRulePins } from "./seasonCharacter.js";
 import { seasonOffenseRulePins, validBaseCriticalRating } from "./seasonOffense.js";
 import { seasonGameCritical, validGameCriticalBinding } from "./seasonGameData.js";
@@ -29,9 +32,9 @@ import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
 import { applyShelf } from './seasonShelf.js';
-import { applySeasonSlateSelections, validSeasonSlateSelections, seasonSlateTemplates, seasonSlateOptions } from "./seasonDivinity.js";
+import { applySeasonSlateSelections, validSeasonSlateSelections, seasonSlateTemplates, seasonSlateOptions, hasDuplicatePedigreeCore } from "./seasonDivinity.js";
 import { applySeasonHeroSelection, validSeasonHeroSelection, editSeasonHeroSelection } from "./seasonHeroSelection.js";
-import { editNativeSeasonSelection } from "./seasonNativeSelections.js";
+import { editNativeSeasonSelection, setSeasonCoreTalent } from "./seasonNativeSelections.js";
 import { editNativeDivinity } from "./seasonNativeDivinity.js";
 import { editNativeExtension, clearNativeExtension, nativeModuleOptions, nativeElixirOptions, nativeModuleForItem } from "./seasonNativeExtensions.js";
 import { validLogReview, editLogReview, LOG_REVIEW_GROUPS } from "./seasonLogReview.js";
@@ -59,6 +62,32 @@ function targetFor(source, id, name, levels, inputs) {
     target.skills[category][index] = { ...target.skills[category][index], skillId, level: levels[rowIndex] };
   });
   return applySeasonHeroSelection(applySeasonSlateSelections(applySeasonSupportSelections(applySeasonSelections(target, inputs.selections, levels, inputs.selectionMode === "isolated-v1"), inputs.supportSelections), inputs.slateSelections), inputs);
+}
+
+function inheritGearResourceStates(before, after, slotIndex) {
+  const saved = before.ss14Inputs.componentConditions;
+  if (!Object.keys(saved ?? {}).length) return;
+  const states = boundSeasonConditionGroups(projectSeasonComponents(before), saved);
+  const resourceStates = new Map();
+  for (const [low, full] of exclusiveResourceStates) {
+    if (states.get(low)?.has(1) && states.get(full)?.has(1)) continue;
+    for (const group of [low, full]) {
+      const values = states.get(group);
+      if (values?.size === 1) resourceStates.set(group, [...values][0]);
+    }
+  }
+  if (!resourceStates.size) return;
+  const prefix = `gear.slots.${slotIndex}.`;
+  for (const row of projectSeasonComponents(after).rows.filter(row => row.path.startsWith(prefix))) {
+    for (const control of row.conditionControls) {
+      if (control.kind !== 'boolean' || control.value !== '' || control.automatic || !control.sourcePageSha256
+        || !resourceStates.has(control.conditionGroup)) continue;
+      const state = resourceStates.get(control.conditionGroup);
+      const value = control.inverted ? 1 - state : state;
+      if (!validSeasonConditionValue(control, value)) continue;
+      (after.ss14Inputs.componentConditions ??= {})[control.key] = { value, sourcePageSha256: control.sourcePageSha256 };
+    }
+  }
 }
 
 function validDocument(document) {
@@ -143,7 +172,8 @@ function validDocument(document) {
       || !/^[a-f0-9]{64}$/u.test(binding.sourcePageSha256) || !object(binding.rolls)
       || !Object.values(binding.rolls).every((value) => typeof value === "number" && Number.isFinite(value))) return false;
     if (binding.logGear !== undefined && (!validLogGear(binding.logGear, binding.itemId) || Object.keys(binding.rolls).length)) return false;
-    const record = getSeasonSelectionRecord("gear", binding.itemId);
+    const record = corrosionCard(getSeasonSelectionRecord("gear", binding.itemId),binding);
+    if(binding.corrosion!==undefined&&!record)return false;
     // Old receipt versions remain readable but are blocked by the calculator.
     if (record?.sourcePageSha256 === binding.sourcePageSha256) {
       const controls = parseTlidbGearTooltip({ id: binding.itemId, categoryId: "gear", tlidbText: { en: {
@@ -152,7 +182,7 @@ function validDocument(document) {
       for (const [key, value] of Object.entries(binding.rolls)) {
         const effect = controls.find((row) => row.roll.key === key);
         if (!effect || value < effect.roll.min || value > effect.roll.max) return false;
-        if (controls.some((row) => row.sourceText === effect.sourceText && row.roll.min === effect.roll.min
+        if (controls.some((row) => isImplicitRoll(record,row.roll.key)===isImplicitRoll(record,key)&&row.sourceText === effect.sourceText && row.roll.min === effect.roll.min
           && row.roll.max === effect.roll.max && binding.rolls[row.roll.key] !== value)) return false;
       }
     }
@@ -171,7 +201,9 @@ function validDocument(document) {
       if (binding.rolls !== undefined && (!object(binding.rolls)
         || Object.entries(binding.rolls).some(([k,v]) => !/^range-\d+$/u.test(k) || !Number.isFinite(v)))) return false;
       if (binding.conditions !== undefined && (!object(binding.conditions)
-        || Object.entries(binding.conditions).some(([k,v]) => !(k === "jumpsBeforeHit" || k === 'sameTargetHits' || /^repeat(?:Jump|DelayMs)-[1-9]\d?$/u.test(k) || /^snapshot-\d+$/u.test(k))
+        || Object.entries(binding.conditions).some(([k,v]) => isRecentDamageCondition(k) ? v!==0&&v!==1
+          : !(k === "jumpsBeforeHit" || k === 'sameTargetHits' || k === 'beamTargetCount' || /^repeat(?:Jump|DelayMs)-[1-9]\d?$/u.test(k) || /^snapshot-\d+$/u.test(k))
+          || k === 'beamTargetCount' && (v !== 1 && v !== 2)
           || !Number.isInteger(v) || v < (k === 'sameTargetHits' || k.startsWith('repeatJump-') ? 1 : 0)
           || v > (k.startsWith('repeatDelayMs-') ? 1800000 : /^snapshot-/u.test(k) ? 1000000000 : 100)))) return false;
       if (binding.tier !== undefined && !seasonSupportItem(binding.itemId)?.tlidbText.en.supportTiers?.some(t => t.tier === binding.tier)) return false;
@@ -209,8 +241,28 @@ export function createSeasonWorkspace(draft, { now = new Date(), id = globalThis
     targetBuild: targetFor(sourceBuild, id, `${sourceBuild.name || "빌드"} · SS14`, normalized.skillLevels, inputs) };
 }
 
+export function resetSeasonWorkspace(document) {
+  if (!validDocument(document)) throw new Error('SS14 편집 문서 형식을 확인할 수 없습니다.');
+  const next=structuredClone(document);
+  const empty=normalizeBuild({id:document.id,name:document.targetBuild.name,patchSnapshot:patch(),heroLevel:90});
+  const inputs={schemaVersion:1,gear:{},skills:{},supports:{},
+    componentReceipts:pinSeasonComponentReceipts(empty),ruleReceipts:seasonRulePins(),
+    selections:{gear:{},skills:{}},selectionMode:'isolated-v1',
+    configurations:Object.fromEntries(SEASON_CONFIGURATION_GROUPS.map(g=>[g.id,captureSeasonConfiguration(empty,g.id)]))};
+  next.targetBuild=targetFor(next.sourceBuild,next.id,empty.name,empty.skillLevels,inputs);
+  next.updatedAt=new Date().toISOString();
+  if(!validDocument(next))throw new Error('빈 SS14 빌드 구성을 확인할 수 없습니다.');
+  return next;
+}
+
 export function editSeasonWorkspace(document, edit) {
   if (!validDocument(document)) throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
+  if (['skill-selection','support-selection'].includes(edit.kind) && edit.level !== undefined) {
+    const {level,...selection}=edit;
+    const selected=editSeasonWorkspace(document,selection);
+    return editSeasonWorkspace(selected,{kind:edit.kind==='skill-selection'?'skill-level':'support-level',
+      rowIndex:edit.rowIndex,supportIndex:edit.supportIndex,value:level});
+  }
   const next = structuredClone(document);
   const gearId = edit.kind === 'gear-selection' ? edit.value : edit.kind === 'shelf-apply' && edit.value?.kind === 'gear' ? edit.value.item?.itemId : null;
   if (gearId && (edit.slotIndex === 0 || edit.slotIndex === 1)) {
@@ -224,10 +276,29 @@ export function editSeasonWorkspace(document, edit) {
     }
   }
   const target = next.targetBuild;
+  if ((edit.kind==='talent-node'||edit.kind==='thea-node') && edit.value>0) {
+    const mirror=target.talents?.placedInverseImage;
+    if(mirror&&mirror.boardIndex===(edit.kind==='thea-node'?3:edit.slotIndex)&&mirror.nodeId===edit.key)
+      throw new Error('역상이 배치된 재능은 포인트를 투자할 수 없습니다.');
+    const placed=target.talents?.placedPrism;
+    if(placed && placed.boardIndex===(edit.kind==='thea-node'?3:edit.slotIndex) && placed.nodeId===edit.key)
+      throw new Error("프리즘이 배치된 재능은 포인트를 투자할 수 없습니다.");
+  }
+  if (edit.slotIndex===3 && (edit.kind==='talent-node' || edit.kind==='talent-board' && edit.value) && hasRevelation(target)) {
+    edit={...edit,kind:edit.kind==='talent-node'?'thea-node':'thea-board'};
+  }
   if (edit.kind === "name") {
     if (typeof edit.value !== "string" || !edit.value.trim() || edit.value.trim().length > 160) throw new Error("빌드 이름을 1~160자로 입력하세요.");
     target.name = edit.value.trim();
+  } else if (edit.kind === 'custom-options') {
+    if(typeof edit.value!=='string')throw Error('사용자 옵션을 한 줄씩 입력하세요.');
+    target.customAffixes=restoreCustomOptionText(edit.value,target.customAffixes);
+    target.ss14Inputs.configurations??={};
+    target.ss14Inputs.configurations.combat=captureSeasonConfiguration(target,'combat');
   } else if (edit.kind === 'shelf-apply') {
+    if (gearId && normalizeBuild(target).gear.slots[edit.slotIndex]?.itemId !== gearId)
+      for (const key of Object.keys(target.ss14Inputs.componentConditions ?? {}))
+        if (key.startsWith(`gear.slots.${edit.slotIndex}.`)) delete target.ss14Inputs.componentConditions[key];
     applyShelf(target,edit.value,edit.slotIndex);
   } else if (edit.kind === "log-review-reset") {
     target.ss14Inputs.logReview = Object.fromEntries(Object.keys(LOG_REVIEW_GROUPS).filter(k => k !== 'divinity' || edit.value !== 1).map(k => [k, null]));
@@ -277,13 +348,14 @@ export function editSeasonWorkspace(document, edit) {
     if (edit.kind === "thea-board") {
       if (!revelationBoardOptions().some(r => r.slug === edit.value)) throw new Error("계시의 예언이 지원하는 재능 보드를 선택하세요.");
       if (target.talents.boards[3]?.treeSlug === edit.value) return next;
+      if(target.talents.boards.slice(0,3).some(b=>b?.treeSlug===edit.value))throw Error("다른 칸에 장착한 재능 패널입니다.");
       if ([target.talents.placedPrism, target.talents.placedInverseImage].some(p => p?.boardIndex === 3)) throw new Error("기존 4번째 보드의 프리즘·역상 배치를 먼저 해제하세요.");
       target.talents.boards[3] = { boardId: null, slotType: "sub", treeSlug: edit.value, nodePoints: {}, reflectedNodePoints: {}, selectedNodeIds: [], coreTalentIds: [] };
     } else {
       const node = revelationNodeOptions(target).find(r => r.id === edit.key);
       if (!node || !Number.isInteger(edit.value) || edit.value < 0 || edit.value > node.max) throw new Error("재능 포인트가 노드의 상한을 벗어났습니다.");
       const board = target.talents.boards[3];
-      if (node.core) board.coreTalentIds = [...new Set([...(board.coreTalentIds ?? []).filter(id => id !== node.id), ...(edit.value ? [node.id] : [])])];
+      if (node.core) setSeasonCoreTalent(board,node,edit.value);
       else {
         if (edit.value) board.nodePoints[node.id] = edit.value; else delete board.nodePoints[node.id];
         board.selectedNodeIds = Object.keys(board.nodePoints);
@@ -342,6 +414,16 @@ export function editSeasonWorkspace(document, edit) {
     }
     if (category === "skills") {
       if (index < 5) clearNativeExtension(target, index);
+      const skills = normalizeBuild(target).skills;
+      const oldSlot = index < 5 ? skills.active[index] : skills.passive[index - 5];
+      const host = id && getSeasonSelectionRecord("skills", id);
+      oldSlot?.supports?.forEach((support, supportIndex) => {
+        if (!support || host && (!seasonSupportOptions().some(option => option.id === support.supportId)
+          || supportFitsSocket(support.supportId, host, index, supportIndex))) return;
+        const key = `${index}:${supportIndex}`;
+        (target.ss14Inputs.supportSelections ??= {})[key] = null;
+        delete target.ss14Inputs.supports?.[key];
+      });
       rebindSeasonSkillInputs(target.ss14Inputs, index, id);
       target.skillLevels = Array.from({ length: 9 }, (_, row) => target.skillLevels[row] ?? 0);
       target.skillLevels[index] = id ? 20 : 0;
@@ -443,6 +525,8 @@ export function editSeasonWorkspace(document, edit) {
     const row = seasonSlateTemplates(target, { requireBindings: false }).find(r => r.controls.some(c => c.key === edit.key));
     const control = row?.controls.find(c => c.key === edit.key);
     if (!control || edit.value !== "" && !seasonSlateOptions(control.type).some(o => o.id === edit.value)) throw new Error("SS14 석판 슬롯에 허용된 재능을 선택하세요.");
+    const choices = Object.fromEntries(row.controls.map(c=>[c.slot,c===control ? edit.value : c.value]));
+    if (hasDuplicatePedigreeCore(row.slate.slateId,choices)) throw new Error('신의 계보에 같은 핵심 재능을 두 번 장착할 수 없습니다.');
     target.ss14Inputs.slateSelections ??= {};
     const binding = target.ss14Inputs.slateSelections[row.slate.instanceId] ??= { templateId: row.slate.slateId, sourcePageSha256: row.page.sourcePageSha256,
       slots: Object.fromEntries(row.controls.filter(c => c.value && seasonSlateOptions(c.type).some(o => o.id === c.value)).map(c => [c.slot, c.value])) };
@@ -511,23 +595,50 @@ export function editSeasonWorkspace(document, edit) {
     if (edit.value === "") delete target.ss14Inputs.character[edit.key];
     else target.ss14Inputs.character[edit.key] = edit.value;
     target.ss14Inputs.ruleReceipts = seasonRulePins();
+  } else if (edit.kind === "clear-effect-conditions") {
+    delete target.ss14Inputs.componentConditions;
+    for (const binding of Object.values(target.ss14Inputs.supports ?? {})) delete binding.conditions;
+  } else if (edit.kind === nearbyEnemyCountInput) {
+    const controls = projectSeasonComponents(target).rows.flatMap(r=>r.conditionControls)
+      .filter(c=>!c.automatic && nearbyEnemyGroups.includes(c.conditionGroup));
+    if (!controls.length || !['',0,1,2].includes(edit.value)) throw new Error('주변 적 수를 선택하세요.');
+    target.ss14Inputs.componentConditions ??= {};
+    for (const c of controls) {
+      if (edit.value === '') delete target.ss14Inputs.componentConditions[c.key];
+      else target.ss14Inputs.componentConditions[c.key] = {
+        value:nearbyEnemyConditionValue(c,edit.value),sourcePageSha256:c.sourcePageSha256,
+      };
+    }
   } else if (edit.kind === "component-condition") {
-    const control = projectSeasonComponents(target).rows.flatMap((r) => r.conditionControls).find((r) => r.key === edit.key);
+    const controls = projectSeasonComponents(target).rows.flatMap(r => r.conditionControls);
+    const control = controls.find(r => r.key === edit.key);
     if (!control || !validSeasonConditionValue(control, edit.value)) throw new Error("SS14 원문에 연결된 조건 충족 여부·중첩 입력 범위를 확인하세요.");
     target.ss14Inputs.componentConditions ??= {};
-    for (const linked of projectSeasonComponents(target).rows.flatMap((r) => r.conditionControls).filter((c) => c.conditionGroup === control.conditionGroup)) {
+    const state = edit.value === '' ? '' : control.inverted ? 1 - edit.value : edit.value;
+    const [present,alone] = nearbyEnemyGroups;
+    const impliedGroup = control.conditionGroup === present && state === 0 ? alone
+      : control.conditionGroup === alone && state === 1 ? present : null;
+    for (const linked of controls.filter(c => c.conditionGroup === control.conditionGroup || c.conditionGroup === impliedGroup)) {
       if (edit.value === "") delete target.ss14Inputs.componentConditions[linked.key];
       else target.ss14Inputs.componentConditions[linked.key] = {
-        value: control.inverted === linked.inverted ? edit.value : 1 - edit.value, sourcePageSha256: linked.sourcePageSha256,
+        value: linked.inverted ? 1 - state : state, sourcePageSha256: linked.sourcePageSha256,
       };
     }
   } else if (edit.kind === "gear-log-options") {
     const binding = target.ss14Inputs.gear[edit.slotIndex];
     if (!binding || !validLogGear(edit.value, binding.itemId)) throw new Error("장비 로그 옵션의 형식 또는 장비 연결이 올바르지 않습니다.");
     binding.logGear = structuredClone(edit.value);
+    delete binding.corrosion;
     binding.rolls = {};
   } else if (edit.kind === "gear-roll" && target.ss14Inputs.gear[edit.slotIndex]?.logGear) {
     editLogGearRoll(target.ss14Inputs.gear[edit.slotIndex].logGear, edit.key, edit.value);
+  } else if (edit.kind === 'gear-corrosion'||edit.kind==='gear-corrosion-base') {
+    const slot=target.gear?.slots?.[edit.slotIndex];
+    if(!slot||slot.corrupted||slot.affixText?.trim()||slot.legendaryDraft?.corrodedSlotIds?.length||Object.keys(slot.crafts??{}).length
+      ||(edit.kind==='gear-corrosion'&&typeof edit.value!=='boolean'))throw Error('일반 레전드 장비의 옵션을 선택하세요.');
+    const binding=target.ss14Inputs.gear[edit.slotIndex];
+    if(edit.kind==='gear-corrosion-base')setSeasonCorrosionBase(binding,edit.value);
+    else setSeasonCorrosion(binding,edit.key,edit.value);
   } else if (edit.kind === "gear-roll") {
     const report = calculateSeasonBuild(target);
     const controls = report.components.flatMap((row) => row.calculations ?? []).find((entry) => entry.slotIndex === edit.slotIndex)?.controls ?? [];
@@ -536,12 +647,32 @@ export function editSeasonWorkspace(document, edit) {
     if (edit.value !== "" && (typeof edit.value !== "number" || !Number.isFinite(edit.value) || edit.value < control.min || edit.value > control.max)) throw new Error("장비 수치가 SS14 원문 범위를 벗어났습니다.");
     // One source modifier can emit multiple stats (attack AND cast speed).
     // They are one game roll, never two independent user choices.
-    for (const row of controls.filter((row) => row.sourceText === control.sourceText && row.min === control.min && row.max === control.max)) {
+    for (const row of controls.filter((row) => row.implicit===control.implicit&&row.sourceText === control.sourceText && row.min === control.min && row.max === control.max)) {
       if (edit.value === "") delete target.ss14Inputs.gear[edit.slotIndex].rolls[row.key];
       else target.ss14Inputs.gear[edit.slotIndex].rolls[row.key] = edit.value;
     }
+  } else if (edit.kind === 'module-option') {
+    const prefix = `skills.active.${edit.slotIndex}.modularization.`;
+    const activeKey = `module:${edit.slotIndex}:active`;
+    const moduleControls = () => projectSeasonComponents(target).rows.filter(row => row.path.startsWith(prefix))
+      .flatMap(row => (row.extensionControls ?? []).map(control => ({ path: row.path, control })));
+    const previous = target.ss14Inputs.extensionInputs?.[activeKey] ? moduleControls().filter(({control}) => control.value !== '') : [];
+    editNativeExtension(target, edit);
+    if (previous.length) {
+      const inputs = target.ss14Inputs.extensionInputs;
+      const rebind = (old, current) => {
+        if (!old || !current.sourcePageSha256 || old.sourcePageSha256 !== current.sourcePageSha256 || !validExtensionValue(current, old.value)) return;
+        inputs[current.key] = { sourceFingerprint: current.sourceFingerprint, sourcePageSha256: current.sourcePageSha256, value: old.value };
+      };
+      const active = moduleControls().find(({control}) => control.key === activeKey)?.control;
+      if (active) rebind(previous.find(({control}) => control.key === activeKey)?.control, active);
+      if (previous.some(({control}) => control.key !== activeKey)) for (const {path, control} of moduleControls()) {
+        if (control.key !== activeKey) rebind(previous.find(row => row.path === path && row.control.key === control.key)?.control, control);
+      }
+    }
   } else if (!editNativeSeasonSelection(target, edit) && !editNativeDivinity(target, edit) && !editNativeExtension(target, edit)) throw new Error("지원하지 않는 SS14 편집입니다.");
   next.targetBuild = targetFor(next.sourceBuild, next.id, target.name, target.skillLevels, target.ss14Inputs);
+  if (gearId) inheritGearResourceStates(document.targetBuild, next.targetBuild, edit.slotIndex);
   if(edit.kind==='shelf-apply'&&!validDocument(next))throw Error('보관 항목의 SS14 수치 연결을 확인할 수 없습니다.');
   return next;
 }

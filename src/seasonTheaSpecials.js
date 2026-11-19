@@ -75,7 +75,16 @@ export function parseTheaSpecial(replacement, build, multiplier) {
       result.mechanics.push({ kind: "thea-affliction-gain", per: 10, sourceText });
       utility(); break;
     }
-    case "32070101": { const rate = value("manaRate"); if (rate !== null) result.mechanics.push({ kind: "thea-event", rate: rate / 10, blessing: "Focus", gain: 1, cooldown: .3, sourceText }); utility(); break; }
+    case "32070101": {
+      if (combat && build.ss14Inputs?.theaEvents?.manaRate === undefined) {
+        result.mechanics.push({ kind: "thea-event-input", key: "manaRate" });
+        result.mechanics.push({ kind: "thea-mana-spend", threshold: .1, blessing: "Focus", gain: 1, cooldown: .3, sourceText });
+      } else {
+        const rate = value("manaRate");
+        if (rate !== null) result.mechanics.push({ kind: "thea-event", rate: rate / 10, blessing: "Focus", gain: 1, cooldown: .3, sourceText });
+      }
+      utility(); break;
+    }
     case "23050201": event("regainRate", { blessing: "Agility", gain: 1, regain: true }); utility(); break;
     case "23070101": case "23070201": {
       event("regainRate", { regain: true });

@@ -4,6 +4,7 @@ import { craftOptions } from './seasonItemCraft.js';
 import { memoryRange } from "./seasonMemoryRolls.js";
 import { addSeasonIngredients } from "./seasonElixirIngredients.js";
 import { inspectSeasonPrism } from "./seasonPrismPlacement.js";
+import {inversePlan,inverseFields} from "./seasonInverseImage.js";
 import { theaState } from "./seasonTheaState.js";
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { moduleOptionEffects, seasonModuleProfile } from "./seasonModules.js";
@@ -15,12 +16,13 @@ import { logAllSkillLevelBonus } from "./seasonLogGear.js";
 const safeKo = (s) => typeof s === "string" && /[가-힣]/u.test(s) && !/\p{Script=Han}/u.test(s) ? s : "한국어 원문 미제공";
 const validPage = (p) => p?.season === "SS14" && /^[a-f0-9]{64}$/u.test(p.sourcePageSha256);
 const signature = (v) => JSON.stringify(v);
+export const ELIXIR_OVERLAP_KEY='elixir:overlap';
 export const validExtensionValue = (control, value) => value === "" || typeof value === "number" && Number.isFinite(value)
   && value >= control.min && value <= control.max && (!["boolean", "tier", "count"].includes(control.kind) || Number.isInteger(value));
 
 // These are instantaneous, explicitly confirmed inputs, not simulated uptime or
 // an inferred effect bonus. Old season values/conditions never supply defaults.
-export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS, craftData = SS14_CRAFT, netherElixirBonus=0, requireBindings = build?.patchSnapshot?.season === "SS14" } = {}) {
+export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS, craftData = SS14_CRAFT, netherElixirBonus=0, craftSlot, requireBindings = build?.patchSnapshot?.season === "SS14" } = {}) {
   const rows = [];
   const make = (path, id, en, ko, record, text, detail, reason = "", boundByControl = false) => {
     const receipt = validPage(en) ? { season: "SS14", sourceUrl: en.sourceUrl, sourcePageSha256: en.sourcePageSha256,
@@ -47,8 +49,8 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       path: row.path, group: row.group, receipt: row.receipt })));
     row.blockers.push(...parsed.blockers);
   };
-  const active = build.skills?.active ?? [];
-  const elixirs = build.skills?.elixirs ?? [];
+  const active = craftSlot === undefined ? build.skills?.active ?? [] : [];
+  const elixirs = craftSlot === undefined ? build.skills?.elixirs ?? [] : [];
   const levelBonus = elixirs.some(s => s?.skillId) ? logAllSkillLevelBonus(build) : 0;
   for (const [index, slot] of elixirs.entries()) {
     if (!slot?.skillId && !(slot?.ingredientIds ?? []).some(Boolean)) continue;
@@ -138,6 +140,15 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       apply(row, capped?.[1] ?? line, scale, capped ? Number(capped[2]) : null);
     }
   }
+  const varyingElixirs=rows.filter(r=>r.elixirState?.uptime>0 && r.elixirState.uptime<100);
+  if(!theaCombatEnabled(build)&&varyingElixirs.length===2){
+    const [first,second]=varyingElixirs;
+    const fingerprint=signature(varyingElixirs.map(r=>[elixirs[r.elixirState.index],r.effectiveLevel,r.receipt.sourcePageSha256]));
+    control(first,ELIXIR_OVERLAP_KEY,'두 영약 동시 활성 시간 비율 (%)','percent',fingerprint,100);
+    const overlap=first.extensionControls.at(-1);
+    const a=first.elixirState.uptime,b=second.elixirState.uptime;
+    overlap.observedRange={min:Math.max(0,a+b-100),max:Math.min(a,b)};
+  }
   const moduleSlots = active.flatMap((slot, index) => slot?.modularization ? [{ slot, index }] : []);
   const optionCounts = new Map();
   for (const { slot } of moduleSlots) for (const id of Array.isArray(slot.modularization.moduleOptionIds) ? slot.modularization.moduleOptionIds : []) optionCounts.set(id, (optionCounts.get(id) ?? 0) + 1);
@@ -207,7 +218,8 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       }
     }
   }
-  for (const [index, slot] of (build.gear?.slots ?? []).entries()) {
+  const gearSlots = build.gear?.slots ?? [];
+  for (const [index, slot] of craftSlot === undefined ? gearSlots.entries() : [[craftSlot,gearSlots[craftSlot]]]) {
     if (!slot?.itemId) continue;
     const selected = Object.values(slot.crafts ?? {});
     const sourceIds = new Set();
@@ -259,6 +271,7 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       r.effects = []; r.blockers.push({ reason: "동일 제작 옵션이 중복되어 합산하지 않습니다." });
     }
   }
+  if (craftSlot !== undefined) return rows;
   for (const [kind, field, inventory, slug] of [["prism", "placedPrism", "prismInventory", "Ethereal_Prism"], ["inverse", "placedInverseImage", "inverseImageInventory", "Inverse_Image"]]) {
     const placement = build.talents?.[field];
     if (!placement) continue;
@@ -268,13 +281,23 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
     const ids = item ? Object.entries(item).filter(([k, v]) => /ModifierId$/u.test(k) && v != null && v !== "").map(([, v]) => String(v)) : [];
     const texts = ids.map((id) => en?.parsed.modifiers?.find((r) => r.id === id)?.text).filter(Boolean);
     const koTexts = ids.map((id) => ko?.parsed.modifiers?.find((r) => r.id === id)?.text).filter(Boolean);
-    const row = make(`talents.${field}`, kind, en, { name: kind === "prism" ? "프리즘 이전 검토" : "역상 이전 검토" }, slug,
-      texts.join("\n") || en?.parsed.body, koTexts.join("\n") || "선택 구성은 보존했습니다. 아래 미지원 사유를 확인하세요.",
-      kind === "prism" ? "" : "역상 원문은 연결했지만 반사 영역·세 종류 재능 효과 배율의 SS14 수치 근거가 없어 과거 수치를 적용하지 않습니다.");
+    const row = make(`talents.${field}`, kind, en, { name: kind === "prism" ? "제노 프리즘" : "역상" }, slug,
+      texts.join("\n") || en?.parsed.body, koTexts.join("\n") || (kind==="prism"?"제노 프리즘":"역상"),
+      "");
     row.group = "talents";
     row.comparisonFingerprint = signature({ placement, selected, board: build.talents?.boards?.[placement.boardIndex] });
     if (!item) row.blockers.push({ reason: "배치와 보관함 항목을 하나로 확인하지 못했습니다." });
     if (texts.length !== ids.length) row.blockers.push({ reason: "선택 옵션 일부의 현재 SS14 ID 원문을 찾지 못했습니다." });
+    if(kind==="inverse"&&!row.blockers.length){
+      const plan=inversePlan(build,item);
+      if(plan.reason)row.blockers.push({reason:plan.reason});
+      else {
+        row.detail=inverseFields.map(([key,label])=>label+' '+item[key]+'%').join(' · ');
+        const agreed=control(row,'inverse:layout','게임과 거울 구역 일치 확인','boolean',plan.fingerprint);
+        if(agreed===1)row.inverseTransform=plan;
+        else row.blockers.push({reason:'역상 편집에서 게임과 거울 구역이 일치하는지 확인하세요.'});
+      }
+    }
     if (kind === "prism" && !row.blockers.length) {
       const plan = inspectSeasonPrism(build, item, en);
       if (!plan.supported) row.blockers.push({ reason: plan.reason });
@@ -320,11 +343,11 @@ export function validSeasonExtensionInputs(build, controls) {
     const craft = /^craft:[0-9]:\d+:[1-9]\d*$/u.test(key);
     const ingredient = /^ingredient:[01]:[a-z-]+:(tier|minion|rate)$/u.test(key);
     const advanced = /^(?:elixir:[01]|module:[0-4]):/u.test(key) && ADVANCED_EXTENSION_FIELDS[key.split(":")[2]];
-    if (!craft && !ingredient && !advanced && !/^(elixir:[01]:(active|scale|uptime|netherIncludes|netherOtherEffect)|module:[0-4]:(active|moved10)|prism:layout)$/u.test(key) || !b
+    if (!craft && !ingredient && !advanced && key!==ELIXIR_OVERLAP_KEY && !/^(elixir:[01]:(active|scale|uptime|netherIncludes|netherOtherEffect)|module:[0-4]:(active|moved10)|(?:prism|inverse):layout)$/u.test(key) || !b
       || typeof b.sourceFingerprint !== "string" || b.sourceFingerprint.length > 20000
       || !/^[a-f0-9]{64}$/u.test(b.sourcePageSha256) || typeof b.value !== "number" || !Number.isFinite(b.value)
-      || !craft && (b.value < (key.endsWith(":tier") ? 1 : 0) || b.value > (advanced ? advanced.max : key.endsWith(':netherOtherEffect')?1000:/:(scale|uptime)$/u.test(key) ? 100 : key.endsWith(":tier") ? 5 : key.endsWith(":rate") ? 2 : 1)
-        || (advanced ? ["boolean", "count"].includes(advanced.kind) : !/:(scale|uptime|rate|netherOtherEffect)$/u.test(key)) && !Number.isInteger(b.value))) return false;
+      || !craft && (b.value < (key.endsWith(":tier") ? 1 : 0) || b.value > (advanced ? advanced.max : key.endsWith(':netherOtherEffect')?1000:/:(scale|uptime|overlap)$/u.test(key) ? 100 : key.endsWith(":tier") ? 5 : key.endsWith(":rate") ? 2 : 1)
+        || (advanced ? ["boolean", "count"].includes(advanced.kind) : !/:(scale|uptime|overlap|rate|netherOtherEffect)$/u.test(key)) && !Number.isInteger(b.value))) return false;
     const c = controls.find((c) => c.key === key && c.sourcePageSha256 === b.sourcePageSha256);
     return !c || validExtensionValue(c, b.value);
   });

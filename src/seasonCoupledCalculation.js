@@ -1,20 +1,21 @@
 import { findItemById } from "./catalog.js";
-import { parseSeasonSkillMechanics } from "./seasonSkillMechanics.js";
+import { parseSeasonSkillMechanics, VOLTAIC_RIPPLE_ID } from "./seasonSkillMechanics.js";
 import { evaluateTlidbSkillDamage } from "./tlidbSkillDamageRuntime.js";
 import { seasonActionRateCap } from './seasonCalculation.js';
-import { checkSeasonSupportHost } from "./seasonSupport.js";
-import { SS14_THEA_EFFECTS } from "./data/ss14TheaEffects.generated.js";
+import { checkSeasonSupportHost, recentDamageConflict } from "./seasonSupport.js";
 import { iceLancesShotgunPlan } from './seasonIceLancesShotgun.js';
 import { seasonDamageContext } from "./seasonWeaponInputs.js";
-import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_STATS, SEASON_DEFENSIVE_STATS, SEASON_MINION_STATS } from "./seasonGearEffects.js";
+import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_STATS, SEASON_GEAR_COST_STATS, SEASON_GEAR_NUMBED_STATS, SEASON_GEAR_NUMBED_MODIFIERS, SEASON_DEFENSIVE_STATS, SEASON_MINION_STATS, SEASON_REAPING_STATS, seasonOutgoingDamageConversion } from "./seasonGearEffects.js";
 import { SEASON_BLESSING_CAP_STATS } from './seasonBlessings.js';
+import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
+import { isObservedTerraGearEffect } from './seasonGearEffects.js';
 
 // This is deliberately a direct-card projection, not a character model. Every
 // gear effect must be either consumed or explicitly disclosed outside its scope.
-const outsideScope = new Set([...SEASON_LOCAL_WEAPON_STATS, ...SEASON_GLOBAL_FLAT_STATS, ...SEASON_GEAR_LEVEL_STATS, ...SEASON_DEFENSIVE_STATS, ...SEASON_MINION_STATS, ...SEASON_BLESSING_CAP_STATS, 'max_vorax_gear_equipped', "strength", "dexterity", "intelligence", "all_stats", "all_attributes",
+const outsideScope = new Set([...SEASON_LOCAL_WEAPON_STATS, ...SEASON_GLOBAL_FLAT_STATS, ...SEASON_GEAR_LEVEL_STATS, ...SEASON_GEAR_COST_STATS, ...SEASON_GEAR_NUMBED_STATS, ...SEASON_GEAR_NUMBED_MODIFIERS, ...SEASON_DEFENSIVE_STATS, ...SEASON_MINION_STATS, ...SEASON_BLESSING_CAP_STATS, 'max_vorax_gear_equipped', "strength", "dexterity", "intelligence", "all_stats", "all_attributes",
   "weapon_critical_strike_rating", "weapon_attack_speed", "spell_lightning_damage_min", "spell_lightning_damage_max",
   "spell_projectile_skill_levels", "all_skill_levels", "jump_count", "blessing_duration", "physical_damage_taken", "life_regeneration_flat", "elemental_ailment_avoidance", "cooldown_recovery_speed", "skill_effect_duration", "skill_duration",
-  "max_life", "max_mana", "max_energy_shield", "gear_energy_shield", "gear_armor", "gear_evasion",
+  "max_life", "max_mana", "max_energy_shield", "gear_energy_shield", "gear_armor", "gear_evasion", "sealed_mana_compensation",
   "armor", "evasion", "movement_speed", "projectile_speed", "fire_resistance", "cold_resistance",
   "lightning_resistance", "erosion_resistance", "elemental_resistance", "all_resistance",
   "critical_strike_rating", "spell_critical_strike_rating", "attack_critical_strike_rating",
@@ -26,11 +27,12 @@ const outsideScope = new Set([...SEASON_LOCAL_WEAPON_STATS, ...SEASON_GLOBAL_FLA
   "fire_penetration", "cold_penetration", "lightning_penetration", "erosion_resistance_penetration",
   "elemental_resistance_penetration", "armor_damage_mitigation_penetration", "projectile_armor_penetration", "cold_damage_taken", "spell_damage_taken", "affliction_effect"]);
 const damageStats = { damage: "skill-damage", hit_damage: "skill-hit-damage", spell_damage: "skill-spell-damage", attack_damage: "skill-attack-damage",
-  elemental_damage: "skill-elemental-damage", physical_damage: "skill-physical-damage", fire_damage: "skill-fire-damage",
+  elemental_damage: "skill-elemental-damage", attack_elemental_damage: "skill-elemental-damage", physical_damage: "skill-physical-damage", fire_damage: "skill-fire-damage",
   cold_damage: "skill-cold-damage", lightning_damage: "skill-lightning-damage", erosion_damage: "skill-erosion-damage",
   additional_cold_damage: "skill-cold-damage",
   cast_speed: "skill-cast-speed", attack_speed: "skill-attack-speed", area_damage: "skill-area-damage",
   projectile_damage: "skill-projectile-damage", min_damage: "skill-minimum-damage", max_damage: "skill-maximum-damage", damage_over_time: "skill-damage-over-time" };
+for (const stat of SEASON_REAPING_STATS) damageStats[stat] = stat.replaceAll("_", "-");
 damageStats.spell_projectile_damage = "skill-projectile-damage";
 damageStats.clockwork_damage = "skill-damage";
 damageStats.terra_damage = 'skill-damage';
@@ -59,11 +61,20 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
   const effects = [];
   const omitted = [];
   const componentReceipts = [];
-  for (const support of components.filter(c => c.category === "supports")) for (const linked of support.calculations ?? []) {
-    for (const mechanic of linked.mechanics ?? []) if (mechanic.kind === "periodic-burst") {
-      const uptime = build.ss14Inputs?.dps?.skills?.[0]?.periodicBurstUptime;
-      if (![0, 100].includes(uptime)) blockers.push("간헐적 폭발의 현재 적용 여부를 선택하세요.");
-      else effects.push({ stat: "skill-cast-speed", operation: "add", unit: "percent", value: mechanic.value * uptime / 100, sourceText: mechanic.sourceText });
+  const recentDamageStates=components.filter(c=>c.category==='supports').flatMap(c=>c.calculations??[])
+    .flatMap(row=>row.mechanics??[]).filter(m=>m.kind==='recent-nonphysical-damage-types');
+  if(new Set(recentDamageStates.map(m=>m.types.join(','))).size>1)blockers.push(recentDamageConflict);
+  const periodicBursts=components.filter(c=>c.category==='supports').flatMap(({id,calculations})=>(calculations??[]).flatMap(linked=>
+    (linked.mechanics??[]).filter(m=>m.kind==='periodic-burst').map(mechanic=>({id,linked,mechanic}))));
+  if (periodicBursts.length) {
+    const uptime=build.ss14Inputs?.dps?.skills?.[0]?.periodicBurstUptime;
+    if (![0,100].includes(uptime)) blockers.push('간헐적 폭발의 현재 적용 여부를 선택하세요.');
+    else if (uptime===100 && periodicBursts.length>1) blockers.push('간헐적 폭발을 여러 칸에 장착한 경우의 버프 중첩은 확인되지 않았습니다.');
+    else if (uptime===100) {
+      const [{id,linked,mechanic}]=periodicBursts;
+      for (const stat of ['skill-attack-speed','skill-cast-speed']) effects.push({ stat, operation:'add', unit:'percent',
+        value:mechanic.value, sourceText:mechanic.sourceText, effectSource:{path:`skills.rows.${linked.rowIndex}.supports.${linked.supportIndex}`,
+          itemId:id,sourceText:mechanic.sourceText,stat} });
     }
   }
   let blackHoleBuffSeen = false;
@@ -78,7 +89,13 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
     else effects.push({ stat: "skill-damage-over-time", operation: "more", value: euphoria.per * Math.floor(affliction / 10) * state, unit: "percent", sourceText: euphoria.sourceText });
   }
   for (const effect of componentProjection.effects) {
-    if (damageStats[effect.stat] && ["add_percent", "more"].includes(effect.operation)) {
+    const conversion = seasonOutgoingDamageConversion(effect);
+    if (conversion && Number.isFinite(effect.value) && !effect.condition && !effect.conditionRequirements && !effect.per && !effect.target) {
+      const source = componentProjection.rows.find(row => row.path === effect.path);
+      effects.push({ ...effect, ...conversion, operation: 'set', optionalConversionSource: true,
+        effectSource: { path: effect.path, itemId: source?.itemId, name: source?.name, sourceText: effect.sourceText, stat: effect.stat } });
+      componentReceipts.push(effect.receipt);
+    } else if (damageStats[effect.stat] && ["add_percent", "more"].includes(effect.operation)) {
       effects.push({ ...effect, effectSource: { path: effect.path, sourceText: effect.sourceText, stat: effect.stat },
         stat: damageStats[effect.stat], operation: effect.operation === "add_percent" ? "add" : "more" });
       componentReceipts.push(effect.receipt);
@@ -89,12 +106,20 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
   for (const entry of gear) {
     if (entry.status !== "mapped") { blockers.push("선택 장비의 SS14 효과·수치 연결이 미완료입니다."); continue; }
     for (const effect of entry.rawEffects ?? []) {
+      const conversion = seasonOutgoingDamageConversion(effect);
       if (/^(fire|cold|lightning)_damage_reflection$/u.test(effect.stat)) {
         if (build.ss14Inputs?.dps?.skills?.[0]?.incomingHits !== 0) blockers.push("반사 피격 횟수를 선택하세요. 현재 반사 없는 전투 조건(0회)에서 전체 DPS를 계산합니다.");
         else omitted.push({ slotIndex: entry.slotIndex, stat: effect.stat, sourceText: effect.sourceText, reason: "explicit-no-incoming-hits" });
       } else if (effect.condition || effect.conditionRequirements || effect.per || effect.target) {
         blockers.push("조건·대상·누적 효과의 결합 계산은 미지원입니다.");
-      } else if (outsideScope.has(effect.stat)) {
+      } else if (conversion) {
+        if (!Number.isFinite(effect.value)) {
+          blockers.push(`장비 옵션 수치를 입력하세요: ${effect.sourceText ?? effect.stat}`);
+          continue;
+        }
+        effects.push({ ...effect, ...conversion, operation: 'set', optionalConversionSource: true,
+          effectSource: { path: `gear.slots.${entry.slotIndex}`, itemId: entry.itemId, sourceText: effect.sourceText, stat: effect.stat } });
+      } else if (outsideScope.has(effect.stat)||isObservedTerraGearEffect(effect)) {
         omitted.push({ slotIndex: entry.slotIndex, stat: effect.stat, sourceText: effect.sourceText, reason: "outside-direct-damage-scope" });
       } else if (damageStats[effect.stat] && effect.roll && !Number.isFinite(effect.value)) {
         blockers.push(`장비 옵션 수치를 입력하세요: ${effect.sourceText ?? effect.stat}`);
@@ -113,6 +138,8 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
   const rows = components.filter((row) => row.category === "skills" && !elixirs.has(row.id)).flatMap((row) => (row.calculations ?? []).filter(entry => !entry.mechanics?.some(m => m.kind === "utility-skill")).map((entry) => {
     const reasons = [...blockers, ...entry.blockers];
     const record = skills.records?.[row.id];
+    const weaponIssue=seasonWeaponRestrictionIssue(build,record);
+    if(weaponIssue)reasons.push(`${row.name}: ${weaponIssue}`);
     const item = findItemById(row.id);
     const supportEffects = [];
     const supportReceipts = [];
@@ -128,6 +155,13 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
       }
     }
     const linkedSupports = components.filter(c => c.category === "supports").flatMap(c => c.calculations ?? []).filter(c => c.rowIndex === entry.rowIndex);
+    const numbedSupport = linkedSupports.some(c => c.mechanics?.some(m => m.kind === "support-numbed-on-hit"));
+    const voltageTurmoil=linkedSupports.some(c=>c.mechanics?.some(m=>m.kind==='voltage-turmoil'));
+    const voltageJolt=linkedSupports.some(c=>c.mechanics?.some(m=>m.kind==='voltage-jolt'));
+    const voltageAfterwave=linkedSupports.some(c=>c.mechanics?.some(m=>m.kind==='voltage-afterwave'));
+    const terraChargeMaximum=row.id===VOLTAIC_RIPPLE_ID
+      ? 1+gear.filter(g=>g.status==='mapped').flatMap(g=>g.rawEffects??[])
+        .reduce((sum,e)=>sum+(isObservedTerraGearEffect(e)&&e.stat==='max_terra_charges'&&e.operation==='add'&&Number.isInteger(e.value)?e.value:0),0) : 1;
     const jumpControls = linkedSupports.flatMap(c => c.conditionControls ?? []).filter(c => c.key === "jumpsBeforeHit" || c.key === 'sameTargetHits' || c.key.startsWith('repeatJump-'));
     let maximumJumps;
     if (jumpControls.length) {
@@ -146,21 +180,25 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
     }
     const shotgun = iceLancesShotgunPlan(entry.mechanics?.find(m => m.kind === 'ice-lances-projectile'), linkedSupports, maximumJumps);
     reasons.push(...shotgun.blockers);
+    const observedReaping = entry.mechanics?.find(m => m.kind === "wilting-beam-reaping");
+    const beamCount = observedReaping?.baseBeams
+      ? observedReaping.baseBeams + linkedSupports.flatMap(c=>c.mechanics??[])
+        .filter(m=>m.kind==="wilting-extra-beam").reduce((sum,m)=>sum+m.value,0)
+      : null;
+    if (!beamCount && supportEffects.some(e=>e.perWiltingBeam))
+      reasons.push("수확 회복 속도에 적용할 부식 광선 수를 확인할 수 없습니다.");
     let evaluation = null;
+    let weaponHands = null;
     let evaluatedEffects = [];
-    const levelBonus = componentProjection.rows.flatMap(r => r.mechanics ?? [])
-      .filter(m => m.kind === "thea-skill-level" && record?.tags?.includes(m.tag)).reduce((n, m) => n + m.value, 0);
-    const growth = SS14_THEA_EFFECTS.levelGrowth;
-    const levelMultiplier = (1 + growth.firstTierMore / 100) ** Math.min(10, levelBonus) * (1 + growth.laterMore / 100) ** Math.max(0, levelBonus - 10);
-    if (levelBonus && (row.id !== "skills-tlidb-com-cn-ice-lances"
-      || build.ss14Inputs?.theaEffectsReceipt !== SS14_THEA_EFFECTS.receiptSha256)) reasons.push("이 스킬의 초과 레벨 효과와 SS14 근거 연결이 필요합니다.");
     if (!reasons.length && record?.season === "SS14" && record.sourceRecordKey === item?.tlidbText?.en?.sourceRecordKey) {
       const parsed = parseSeasonSkillMechanics({ id: row.id, categoryId: "skills", tlidbText: { en: {
         ...record, sourcePageVersion: "SS14", sourceFieldStatus: { detail: "exact" },
-      } } }, { season: "SS14", level: entry.level + levelBonus, combat: build.ss14Inputs?.dps?.skills?.[entry.rowIndex] ?? {}, affliction: build.ss14Inputs?.dps?.enemy?.affliction });
+      } } }, { season: "SS14", level: entry.level, combat: build.ss14Inputs?.dps?.skills?.[entry.rowIndex] ?? {}, affliction: build.ss14Inputs?.dps?.enemy?.affliction, voltageTurmoil, terraChargeMaximum });
       const tags = new Set((record.tags ?? []).map((tag) => tag.toLowerCase()));
       const core = build.skills?.active?.[entry.rowIndex]?.supports?.some(s => s?.supportId === "supports-ss14-clockwork-core");
-      const applicable = effects.filter((effect) => !(effect.stat === "skill-attack-damage" && tags.has("spell") && !tags.has("attack"))
+      const applicable = effects.filter((effect) => (observedReaping || !SEASON_REAPING_STATS.has(effect.effectSource?.stat))
+        && !(effect.stat === "skill-attack-damage" && tags.has("spell") && !tags.has("attack"))
+        && !(effect.effectSource?.stat==='attack_elemental_damage'&&!tags.has('attack'))
         && !(effect.stat === 'skill-projectile-damage' && !tags.has('projectile'))
         && !(effect.stat === 'skill-area-damage' && !tags.has('area'))
         && !(effect.effectSource?.stat === "clockwork_damage" && !core)
@@ -179,10 +217,13 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         && !(effect.stat === "skill-attack-speed" && !tags.has("attack")) && !(effect.stat === "skill-cast-speed" && !tags.has("spell")));
       evaluatedEffects = [...parsed.effects.map(effect => ({ ...effect, effectSource: {
         path: `skills.rows.${entry.rowIndex}`, itemId: row.id, sourceText: effect.sourceText, stat: effect.stat,
-      } })), ...applicable, ...supportEffects];
+      } })), ...applicable, ...supportEffects.map(e=>e.perWiltingBeam ? {...e,value:e.value*beamCount} : e)];
       const context = seasonDamageContext(build, entry.rowIndex, row.id);
       context.actionRateCap = seasonActionRateCap('SS14');
+      context.damageConversion = 'ss14';
+      context.persistentActionCadence = true;
       context.ignoreInapplicableCooldown = true;
+      if (observedReaping) context.reapingEventsPerSecond = 0;
       if (row.id === "skills-tlidb-com-cn-ice-lances") context.projectiles = { base: 1, hitCount: 1 };
       if (tags.has("spell") || tags.has('attack')) {
         const added = [...gear.flatMap(e => e.rawEffects ?? []),...componentProjection.effects];
@@ -192,41 +233,76 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
             [type]: { min: (context.addedDamage?.[type]?.min ?? 0) + sum("min"), max: (context.addedDamage?.[type]?.max ?? 0) + sum("max") } };
         }
       }
-      evaluation = evaluateTlidbSkillDamage({ effects: evaluatedEffects, level: entry.level, includeDamagePools: true,
+      const {weaponHands: candidateHands,...combatContext} = context;
+      const evaluate = (weaponDamage,inputEffects=evaluatedEffects) => evaluateTlidbSkillDamage({ effects:inputEffects, level: entry.level, includeDamagePools: true, includeHitStagesByType: true,
         context: { addedDamage: 0, criticalStrikeRating: 0, criticalStrikeDamage: 100,
-          enemyArmor: 0, enemyResistances: {}, damageTags: [...tags], target: "self", ...context } });
+          enemyArmor: 0, enemyResistances: {}, damageTags: [...tags], target: "self", ...combatContext, weaponDamage } });
+      evaluation = evaluate(context.weaponDamage);
+      if (candidateHands) {
+        const rotations = candidateHands.map((hand,index)=>{
+          const result = index===0 ? evaluation : evaluate(hand.weaponDamage);
+          const hitTypes = new Set(result.hit.pools?.filter(pool=>pool.max>0).map(pool=>pool.type));
+          const inapplicable = result.excluded.filter(e=>e.affectsCompletion && e.reason==='damage-modifier-target-unavailable' && (
+            /^(?:supported-)?skill-(?:maximum-)?(?:fire|cold|lightning|physical|erosion)-damage$/u.test(e.stat)
+              && !hitTypes.has(e.stat.split('-').at(-2))
+            || /^(?:supported-)?skill-elemental-damage$/u.test(e.stat) && !['fire','cold','lightning'].some(type=>hitTypes.has(type))));
+          if (!hitTypes.size || !inapplicable.length) return result;
+          const skipped = new Set(inapplicable.map(e=>e.inputIndex));
+          const indices = evaluatedEffects.map((_,i)=>i).filter(i=>!skipped.has(i));
+          const reduced = evaluate(hand.weaponDamage,indices.map(i=>evaluatedEffects[i]));
+          const restore = e=>({...e,inputIndex:indices[e.inputIndex]});
+          return {...reduced,excluded:reduced.excluded.map(restore),applied:reduced.applied.map(restore)};
+        });
+        evaluation = rotations[0];
+        if (rotations.every(e=>e.complete && e.hit.projectileHits===1 && e.dot.dps===0
+          && !e.reaping && !e.spellBurst && !e.luckyDamage && !e.doubleDamage && !e.tripleDamage
+          && !e.critical?.conditionalDamageMultiplier && (e.actionRate??e.hit.rate)===(evaluation.actionRate??evaluation.hit.rate))) {
+          weaponHands = rotations.map((e,i)=>({slotIndex:i, baseCriticalRating:candidateHands[i].baseCriticalRating,
+            receipts:candidateHands[i].receipts, hitDps:e.hit.dps, pools:e.hit.pools, excluded:e.excluded,
+            conversionTrace:e.applied.filter(effect=>['conversion','gained-as-extra'].includes(effect.stage))
+              .map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null}))}));
+        } else reasons.push('쌍수 교대 공격의 두 무기 적중·공격 속도를 확인할 수 없습니다.');
+      }
       // A verified cold-only pool cannot benefit from a fire/lightning-only
       // increase. Do not confuse that inapplicability with an unknown pool or
       // discard a failed conversion/added-damage calculation.
       const unmatched = evaluation.excluded.filter(e => e.affectsCompletion);
       const pools = [...(evaluation.hit.pools ?? []), ...(evaluation.dot.pools ?? [])];
-      if (pools.length && unmatched.length && unmatched.every(e => e.reason === "damage-modifier-target-unavailable"
-        && (/^skill-(?:maximum-)?(fire|cold|lightning|physical|erosion)-damage$/u.test(e.stat)
+      if (!candidateHands && pools.length && unmatched.length && unmatched.every(e => e.reason === "damage-modifier-target-unavailable"
+        && (/^(?:supported-)?skill-(?:maximum-)?(fire|cold|lightning|physical|erosion)-damage$/u.test(e.stat)
           && !pools.some(p => p.type === e.stat.split("-").at(-2))
           || e.stat === "skill-damage-over-time" && !evaluation.dot.pools?.length))) {
         const excluded = new Set(unmatched.map(e => e.inputIndex));
         omitted.push(...unmatched.map(e => ({ rowIndex: entry.rowIndex, stat: e.stat, sourceText: e.sourceText, reason: "verified-damage-type-absent" })));
         evaluatedEffects = evaluatedEffects.filter((_, index) => !excluded.has(index));
-        evaluation = evaluateTlidbSkillDamage({ effects: evaluatedEffects, level: entry.level, includeDamagePools: true,
-          context: { addedDamage: 0, criticalStrikeRating: 0, criticalStrikeDamage: 100,
-            enemyArmor: 0, enemyResistances: {}, damageTags: [...tags], target: "self", ...context } });
+        evaluation = evaluate(context.weaponDamage);
       }
       if (parsed.blockers.length || !evaluation.complete) reasons.push("SS14 스킬·장비 직접 효과 결합 해석 미완료");
     }
     const supported = !reasons.length && Number.isFinite(evaluation?.totalDps);
-    return { id: row.id, rowIndex: entry.rowIndex, level: entry.level + levelBonus, name: row.name, supported, shotgun,
-      values: { dps: supported ? evaluation.totalDps : null, unmodifiedDps: Number.isFinite(entry.values.baseDps) ? entry.values.baseDps * levelMultiplier : null },
+    const alternatingHitDps = weaponHands && (weaponHands[0].hitDps+weaponHands[1].hitDps)/2;
+    const channelLimits = observedReaping ? evaluatedEffects.filter(e => /channeled-stacks/u.test(e.stat)) : [];
+    const baseChannelStacks = channelLimits.length === 1 && channelLimits[0].stat === "max-channeled-stacks"
+      && channelLimits[0].operation === "set" && Number.isInteger(channelLimits[0].value) && channelLimits[0].value > 0
+      ? channelLimits[0].value : null;
+    return { id: row.id, rowIndex: entry.rowIndex, level: entry.level, name: row.name, supported, shotgun, numbedSupport, voltageJolt, voltageAfterwave, terraChargeMaximum,
+      values: { dps: supported ? alternatingHitDps??evaluation.totalDps : null, unmodifiedDps: Number.isFinite(entry.values.baseDps) ? entry.values.baseDps : null },
       igniteSupportEffects: supportEffects.filter(e => ['supported-skill-damage', 'supported-skill-fire-damage',
         'supported-skill-elemental-damage', 'supported-skill-ailment-damage', 'supported-skill-damage-over-time'].includes(e.stat))
         .map(e => e.operation === 'add' && e.unit === 'percent' ? { ...e, operation: 'add_percent' } : e),
-      offenseBasis: supported ? { hitDps: evaluation.hit.dps, dotDps: evaluation.dot.dps,
-        pools: evaluation.hit.pools, dotPools: evaluation.dot.pools, rate: evaluation.hit.rate, projectileHits: evaluation.hit.projectileHits,
-        excluded: evaluation.excluded, nativeSpellBurst: evaluation.spellBurst,
-        otherExpectation: Boolean(evaluation.luckyDamage || evaluation.doubleDamage || evaluation.tripleDamage || evaluation.reaping
+      damageStages: supported && !weaponHands ? evaluation.damageStages : null,
+      offenseBasis: supported ? { hitDps: alternatingHitDps??evaluation.hit.dps, dotDps: evaluation.dot.dps, weaponHands,
+        pools: weaponHands ? weaponHands.flatMap(hand=>hand.pools.map(pool=>({...pool,weaponSlot:hand.slotIndex}))) : evaluation.hit.pools,
+        dotPools: evaluation.dot.pools, rate: evaluation.actionRate ?? evaluation.hit.rate, projectileHits: evaluation.hit.projectileHits,
+        excluded: (weaponHands?.flatMap(hand=>hand.excluded)??evaluation.excluded).map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null})),
+        nativeSpellBurst: evaluation.spellBurst,
+        reaping: observedReaping && evaluation.reaping ? { ...evaluation.reaping, baseChannelStacks, beamCount } : null,
+        otherExpectation: Boolean(evaluation.luckyDamage || evaluation.doubleDamage || evaluation.tripleDamage
+          || evaluation.reaping && (!observedReaping || evaluation.reaping.repeatChance !== undefined)
           || evaluation.critical?.conditionalDamageMultiplier),
         criticalEffects: evaluatedEffects.filter((e) => /critical/iu.test(e.stat)) } : null,
       blockers: [...new Set(reasons)], receipts: [entry.receipt, ...gear.map((entry) => entry.receipt), ...supportReceipts, ...componentReceipts].filter(Boolean),
-      trace: supported ? evaluation.applied.map(effect => ({ ...effect,
+      trace: supported && !weaponHands ? evaluation.applied.map(effect => ({ ...effect,
         effectSource: evaluatedEffects[effect.inputIndex]?.effectSource ?? null })) : [] };
   }));
   return { scope: "ss14-selected-components-direct-effects-only", rows, omitted,

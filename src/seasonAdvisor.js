@@ -1,18 +1,25 @@
 import { calculateSeasonBuild } from "./seasonBuild.js";
+import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS, calculateEditorSeasonBuild } from './seasonAssumedDps.js';
 import { normalizeBuild } from "./engine.js";
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
-import { WEAPON_FIELDS } from './seasonWeaponInputs.js';
+import { ADDED_FIELDS, WEAPON_FIELDS } from './seasonWeaponInputs.js';
 import { getSeasonSelectionRecord } from './seasonSelections.js';
+import { boundSeasonConditionGroups, exclusiveResourceStates, incompatibleNearbyEnemyStates } from './seasonEffectConditions.js';
+import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
+  assumedDps: "방어 전 DPS",
   life: "최대 HP 참고값", mana: "최대 MP 참고값", shield: "최대 보호막 참고값",
   lifeRegenerationGranted: "HP 자연 회복 기여", shieldRechargePerSecond: "보호막 충전 속도",
   directDps: "첫 액티브 스킬의 직접 효과 DPS",
   expectedHitDps: "첫 액티브 스킬의 속성·크리티컬·더블 대미지 기대 DPS",
   elixirAverageDps: "영약 관측 유지율을 반영한 첫 스킬 부분 DPS",
 };
+export function preferredSeasonDpsMetric(report) {
+  return !report.fullDps.supported && report.assumedDps?.supported ? 'assumedDps' : 'fullDps';
+}
 const stable = (value) => JSON.stringify(value, (_, v) => v && typeof v === "object" && !Array.isArray(v)
   ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
 const scenario = (build) => {
@@ -33,31 +40,81 @@ const scenario = (build) => {
   combat: build.conditions, calculation: build.calculation, seals: build.skillSeals, custom: build.customAffixes });
 };
 
+function extensionEncounterValues(build, report) {
+  const entries = new Map();
+  for (const row of report?.componentProjection?.rows ?? []) for (const control of row.extensionControls ?? []) {
+    const {key, value} = control;
+    if (value === '' || !/^(?:module:|elixir:|ingredient:.*:(?:minion|rate)$)/u.test(key)) continue;
+    const presence = /^module:([0-4]):active$/u.exec(key);
+    const owner = presence ? build.skills?.active?.[Number(presence[1])]?.skillId : `${row.path}:${row.itemId}`;
+    entries.set(`${key}:${owner}:${control.sourcePageSha256}`, value);
+  }
+  return entries;
+}
+
 // Build choices (hero, memories, skill identity and base rating) belong to the
 // compared build. Only shared encounter assumptions constrain a full-DPS diff.
-export function sameSeasonEncounter(left, right) {
-  const encounter = build => ({ character:build.ss14Inputs.character, enemy:build.ss14Inputs.dps?.enemy,
+export function sameSeasonEncounter(left, right, leftReport, rightReport, metric = 'fullDps') {
+  const target = build => {
+    const enemy=build.ss14Inputs.dps?.enemy;
+    return metric==='assumedDps' ? Object.fromEntries(Object.entries(enemy??{}).filter(([key])=>
+      !ASSUMED_DPS_IGNORED_DEFENSE_FIELDS.includes(key))) : enemy;
+  };
+  const encounter = build => ({ character:Object.fromEntries(
+    Object.entries(build.ss14Inputs.character??{}).filter(([key])=>key!=='observedManaRecovery')), enemy:target(build),
     blessings:build.ss14Inputs.blessings, heroCombat:build.ss14Inputs.heroCombat,
     theaCycle:build.ss14Inputs.theaCycle, theaEvents:build.ss14Inputs.theaEvents,
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
-  for (const [index, a] of Object.entries(left.ss14Inputs.dps?.skills ?? {})) {
-    const b = right.ss14Inputs.dps?.skills?.[index];
-    if (!b) continue;
+  const leftInputs = left.ss14Inputs.dps?.skills ?? {}, rightInputs = right.ss14Inputs.dps?.skills ?? {};
+  const slotId = (build, index) => (index < 5 ? build.skills?.active?.[index] : build.skills?.passive?.[index-5])?.skillId;
+  const timed = theaCombatEnabled(left) && left.ss14Inputs.theaCycle?.mode === 'automatic';
+  const singleSkill = leftReport?.coupledSkills?.rows.length === 1 && rightReport?.coupledSkills?.rows.length === 1;
+  for (const index of new Set([...Object.keys(leftInputs), ...Object.keys(rightInputs)])) {
+    const a = leftInputs[index] ?? {}, b = rightInputs[index] ?? {};
+    const leftId = a.itemId ?? slotId(left, Number(index)), rightId = b.itemId ?? slotId(right, Number(index));
+    const sameSkill = leftId && leftId === rightId && (!a.itemId || !b.itemId || a.sourcePageSha256 === b.sourcePageSha256);
+    // An absent optional flat-damage input supplies no damage. Entering a
+    // positive value on the same skill changes the encounter assumption.
+    if (sameSkill && Object.keys(ADDED_FIELDS).some(key => (a[key] ?? 0) !== (b[key] ?? 0))) return false;
+    if (sameSkill && ((a.hitChance ?? 100) !== (b.hitChance ?? 100)
+      || (a.useShare ?? (singleSkill ? 100 : undefined)) !== (b.useShare ?? (singleSkill ? 100 : undefined)))) return false;
+    const row = report => report?.fullDps?.rows?.find(r=>r.rowIndex===Number(index));
+    const leftWindows = timed ? row(leftReport)?.dotWindows : undefined;
+    const rightWindows = timed ? row(rightReport)?.dotWindows : undefined;
+    if (sameSkill && timed && (stable(leftWindows) !== stable(rightWindows)
+      || stable(row(leftReport)?.fissure?.times) !== stable(row(rightReport)?.fissure?.times))) return false;
     for (const key of Object.keys(a)) {
-      if (['itemId','sourcePageSha256',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
+      if (['itemId','sourcePageSha256','dotWindows','fissureTimes',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
+      if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime') continue;
       if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
     }
   }
-  // New or removed item conditions have no effect on the other build; a
-  // changed shared condition is a different encounter and remains blocked.
-  for (const [key,a] of Object.entries(left.ss14Inputs.componentConditions ?? {})) {
-    const b=right.ss14Inputs.componentConditions?.[key];
-    if (b && a.value !== b.value) return false;
+  // A shared manual state can move between item or board sources. An
+  // automatic state follows the gear and is part of the build change.
+  const leftConditions = boundSeasonConditionGroups(leftReport?.componentProjection, left.ss14Inputs.componentConditions);
+  const rightConditions = boundSeasonConditionGroups(rightReport?.componentProjection, right.ss14Inputs.componentConditions);
+  for (const [group, a] of leftConditions) {
+    const b = rightConditions.get(group);
+    if (b && (a.size !== b.size || [...a].some(value => !b.has(value)))) return false;
+  }
+  if (exclusiveResourceStates.some(([low,full]) => (leftConditions.get(low)?.has(1) && rightConditions.get(full)?.has(1))
+    || (rightConditions.get(low)?.has(1) && leftConditions.get(full)?.has(1)))) return false;
+  if (incompatibleNearbyEnemyStates(leftConditions,rightConditions)) return false;
+  for (const [key, a] of Object.entries(left.ss14Inputs.supports ?? {})) {
+    const b = right.ss14Inputs.supports?.[key];
+    if (!b || a.itemId !== b.itemId || a.sourcePageSha256 !== b.sourcePageSha256) continue;
+    for (const [condition, value] of Object.entries(a.conditions ?? {})) {
+      if (Object.hasOwn(b.conditions ?? {}, condition) && value !== b.conditions[condition]) return false;
+    }
+  }
+  const rightExtensions = extensionEncounterValues(right, rightReport);
+  for (const [key, value] of extensionEncounterValues(left, leftReport)) {
+    if (rightExtensions.has(key) && value !== rightExtensions.get(key)) return false;
   }
   return true;
 }
-const metricValue = (report, metric) => metric === "fullDps" ? report.fullDps.dps : metric === "elixirAverageDps" ? report.elixirAverage?.expectedDps : metric === "directDps"
+const metricValue = (report, metric) => metric === "fullDps" || metric === 'assumedDps' ? report[metric]?.dps ?? null : metric === "elixirAverageDps" ? report.elixirAverage?.expectedDps : metric === "directDps"
   ? report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.values.dps ?? null : metric === "expectedHitDps"
     ? report.offense.rows.find((r) => r.rowIndex === 0)?.values.expectedDps ?? null : report.character.values[metric];
 const unresolved = (report) => stable([
@@ -93,25 +150,29 @@ function validationReasons(document, report) {
 
 // Compare results already produced by the SS14 engine; editing must not run a
 // second simulation or write either document just to display its delta.
-export function compareSeasonDpsSnapshots(before, after) {
+export function compareSeasonDpsSnapshots(before, after, metric = 'fullDps') {
   const reasons = [];
+  let encounterMatches = null;
+  const labelForMetric = metric === 'assumedDps' ? '방어 전 DPS' : '전체 DPS';
   for (const [label, snapshot] of [['기준', before], ['현재', after]]) {
     if (!snapshot?.document || !snapshot.report) { reasons.push(`${label} 계산 결과가 없습니다.`); continue; }
     reasons.push(...validationReasons(snapshot.document, snapshot.report).map(r => `${label}: ${r}`));
-    if (!snapshot.report.fullDps.supported || !Number.isFinite(snapshot.report.fullDps.dps)) {
-      const blockers = snapshot.report.fullDps.blockers ?? [];
-      reasons.push(...(blockers.length ? blockers : ['전체 DPS 미지원']).map(r => `${label}: ${r}`));
+    const result = snapshot.report[metric];
+    if (!result?.supported || !Number.isFinite(result.dps)) {
+      const blockers = result?.blockers ?? [];
+      reasons.push(...(blockers.length ? blockers : [labelForMetric+' 미지원']).map(r => `${label}: ${r}`));
     }
   }
   if (before?.document && after?.document && before.report && after.report) {
     if (stable(before.document.sourceBuild) !== stable(after.document.sourceBuild)) reasons.push('원래 빌드가 서로 다릅니다.');
-    if (!sameSeasonEncounter(before.document.targetBuild, after.document.targetBuild)) reasons.push('전투 조건이 달라 빌드 변경만의 차이를 비교할 수 없습니다.');
+    encounterMatches = sameSeasonEncounter(before.document.targetBuild, after.document.targetBuild, before.report, after.report, metric);
+    if (!encounterMatches) reasons.push('전투 조건이 달라 빌드 변경만의 차이를 비교할 수 없습니다.');
   }
-  const baseValue = before?.report?.fullDps?.supported ? before.report.fullDps.dps : null;
-  const value = after?.report?.fullDps?.supported ? after.report.fullDps.dps : null;
+  const baseValue = before?.report?.[metric]?.supported ? before.report[metric].dps : null;
+  const value = after?.report?.[metric]?.supported ? after.report[metric].dps : null;
   const supported = reasons.length === 0;
   const delta = supported ? value - baseValue : null;
-  return {supported, baseValue, value, delta, percent: supported && baseValue !== 0 ? delta / baseValue * 100 : null,
+  return {supported, encounterMatches, baseValue, value, delta, percent: supported && baseValue !== 0 ? delta / baseValue * 100 : null,
     reasons: [...new Set(reasons)]};
 }
 
@@ -120,7 +181,9 @@ export function compareSeasonDpsSnapshots(before, after) {
 export function recommendSeasonWorkspaces(document, candidates, metric = "life") {
   if (!Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
   exportSeasonWorkspace(document);
-  const baseline = calculateSeasonBuild(document.targetBuild, { sourceBuild: document.sourceBuild });
+  const dpsMetric = metric === 'fullDps' || metric === 'assumedDps';
+  const calculate = metric === 'assumedDps' ? calculateEditorSeasonBuild : calculateSeasonBuild;
+  const baseline = calculate(document.targetBuild, { sourceBuild: document.sourceBuild });
   const baseValue = metricValue(baseline, metric);
   const baselineReasons = validationReasons(document, baseline);
   if (!Number.isFinite(baseValue)) baselineReasons.push("기준 문서의 선택 지표가 미지원입니다.");
@@ -132,12 +195,12 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life")
     seen.add(candidate.id);
     try {
       exportSeasonWorkspace(candidate);
-      const report = calculateSeasonBuild(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
+      const report = calculate(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
       reasons.push(...validationReasons(candidate, report));
       if (stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
-      if (metric === 'fullDps' ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild)
+      if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,metric)
         : scenario(document.targetBuild) !== scenario(candidate.targetBuild)) reasons.push("기본 속성·전투 조건이 서로 다릅니다.");
-      if (metric !== 'fullDps' && unresolved(baseline) !== unresolved(report)) reasons.push("미해석 효과 또는 근거가 달라 우열을 확정할 수 없습니다.");
+      if (!dpsMetric && unresolved(baseline) !== unresolved(report)) reasons.push("미해석 효과 또는 근거가 달라 우열을 확정할 수 없습니다.");
       if (["directDps", "expectedHitDps", "elixirAverageDps"].includes(metric) && baseline.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id
         !== report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id) reasons.push("서로 다른 스킬의 직접 DPS는 비교하지 않습니다.");
       row.value = metricValue(report, metric);

@@ -6,6 +6,7 @@ export const SEASON_ISSUE_LABELS = {
 };
 export function seasonIssueCause(value) {
   const reason = typeof value === 'string' ? value : value?.reason ?? value?.inactiveReason ?? '';
+  if (/사용자 옵션 \d+: SS14에서 해석할 수 없는 옵션/u.test(reason)) return 'parsing';
   if (/^(?:tlidb-effect-(?:stat|operation)-unmapped|tlidb-condition-input-unmapped|conditional-input-mapping-unavailable|tlidb-per-unit-input-unavailable)$/u.test(reason)) return 'integration';
   if (/^(?:conditional|per-unit|capped)-effect-pattern-unsupported$|^unsupported-numeric-tooltip-clause$|^calculation-mechanic-without-structured-value$/u.test(reason)) return 'parsing';
   if (/^unsupported-nonnumeric-mechanic-or-flavor$|호환 조건·효과 해석 미완료/u.test(reason)) return 'unresolved';

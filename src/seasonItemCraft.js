@@ -33,8 +33,23 @@ export function craftOptions(id) {
     if (!['craft_prefix', 'craft_suffix'].includes(family)) continue;
     const page = SS14_CRAFT.pages['ko/' + identity.slug];
     const row = page?.rows.find(r => r.id === identity.modifierId);
-    if (row && SS14_CRAFT.pages['en/'+slug].rows.some(r=>r.id===row.id) && !/\p{Script=Han}/u.test(row.text)) rows.push({ ...identity, key, family, name: (family === 'craft_prefix' ? '접두' : '접미') + ' · T' + row.tier + ' · ' + row.text });
+    if (row && SS14_CRAFT.pages['en/'+slug].rows.some(r=>r.id===row.id) && !/\p{Script=Han}/u.test(row.text)) rows.push({ ...identity, key, family, tier:String(row.tier), text:row.text, name: (family === 'craft_prefix' ? '접두' : '접미') + ' · T' + row.tier + ' · ' + row.text });
   }
   options.set(id, rows);
   return rows;
+}
+export function craftFamilySlots(crafts,family) {
+  const slots=Array(3).fill(null), unslotted=[];
+  for(const affix of Object.values(crafts??{})){
+    if(affix?.affixId?.split(':')[1]!==family)continue;
+    const p=affix.position;
+    if(Number.isInteger(p)&&p>=0&&p<3&&!slots[p])slots[p]=affix;
+    else unslotted.push(affix);
+  }
+  for(const affix of unslotted){
+    const empty=slots.indexOf(null);
+    if(empty<0)slots.push(affix);
+    else slots[empty]=affix;
+  }
+  return slots;
 }

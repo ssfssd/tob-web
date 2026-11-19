@@ -12,13 +12,13 @@ export const THEA_EVENT_FIELDS = {
   afflictionRate: { label: "계시 보너스 전 초당 심화 증가", max: 1000 },
   dotTriggerRate: { label: "지속 대미지에서 발생하는 축복 판정 횟수 / 초", max: 100 },
   scorchResistance: { label: "스코치의 모든 저항 감소 (%)", max: 30, choices: [20, 30] },
-  numbedEnabled: { label: "주력 스킬의 마취 계산 사용", max: 1, boolean: true },
-  numbedChance: { label: "계시 보너스 전 마취 확률 (%)", max: 100 },
+  numbedEnabled: { label: "마취 계산 사용", max: 1, boolean: true },
+  numbedChance: { label: "주력 스킬의 기본 마취 확률 (%)", max: 100 },
   enemyLifeShield: { label: "대상의 최대 HP와 보호막 합계", max: 1000000000000000 },
   numbedThreshold: { label: "마취 1중첩에 필요한 최대 HP·보호막 비율 (%)", max: 100 },
-  numbedDuration: { label: "마취 지속 시간 (초)", max: 120 },
+  numbedDuration: { label: "장비 적용 전 마취 지속 시간 (초)", max: 120 },
   numbedLimit: { label: "마취 최대 중첩", max: 100, integer: true },
-  numbedEffect: { label: "계시 보너스 전 마취 효과 증가 (%)", max: 10000 },
+  numbedEffect: { label: "장비·계시 적용 전 마취 효과 증가 (%)", max: 10000 },
   ...Object.fromEntries([0, 1].flatMap(i => [
     [`elixir${i}Interval`, { label: `영약 ${i + 1} 사용 간격 (초)`, max: 1800 }],
     [`elixir${i}Start`, { label: `영약 ${i + 1} 첫 사용 시점 (초)`, max: 1800 }],
@@ -64,12 +64,19 @@ export function validTheaEvents(value) {
 // Periodic event scenarios have an explicit phase: first event after one
 // interval. Probability is rolled per event, never rounded into fractional
 // blessing stacks. A fixed seed makes the numerical estimate reproducible.
-export function createTheaEventRuntime(events, seed = 1, blessingDurations = { Focus: 10, Agility: 10, Tenacity: 10 }) {
+export function createTheaEventRuntime(events, seed = 1, blessingDurations = { Focus: 10, Agility: 10, Tenacity: 10 },
+  { warmup = 0, end = Infinity } = {}) {
   let randomState = seed >>> 0;
   const random = () => { randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0; return randomState / 4294967296; };
-  const clocks = events.filter(e => e.rate > 0).sort((a, b) => Number(Boolean(b.consume)) - Number(Boolean(a.consume))).map(e => ({ ...e, next: 1 / e.rate, ready: 0 }));
+  const clocks = events.filter(e => e.rate > 0).sort((a, b) => Number(Boolean(b.consume)) - Number(Boolean(a.consume))).map(e => ({ ...e, next: 1 / e.rate, occurrence: 1, ready: 0 }));
   const consumed = []; const regained = []; const windows = {};
-  const totals = { gained: { Focus: 0, Agility: 0, Tenacity: 0 }, consumed: { Focus: 0, Agility: 0, Tenacity: 0 }, failedConsumption: 0 };
+  const emptyCounts = () => ({ gained: { Focus: 0, Agility: 0, Tenacity: 0 }, consumed: { Focus: 0, Agility: 0, Tenacity: 0 } });
+  const totals = { ...emptyCounts(), failedConsumption: 0 };
+  const measuredTotals = emptyCounts();
+  const count = (time, kind, blessing, amount) => {
+    totals[kind][blessing] += amount;
+    if (time >= warmup && time < end) measuredTotals[kind][blessing] += amount;
+  };
   const stateAt = time => ({ recentAgility: consumed.filter(t => t > time - 4 + 1e-8).length,
     recentRegains: regained.filter(t => t > time - 8 + 1e-8).length,
     veryLucky: Number((windows.veryLucky ?? 0) > time + 1e-8),
@@ -80,20 +87,20 @@ export function createTheaEventRuntime(events, seed = 1, blessingDurations = { F
     if (e.regain && regained.at(-1) !== time) regained.push(time);
     if (e.consume) {
       if (stacks[e.blessing] < e.consume) { totals.failedConsumption++; return false; }
-      stacks[e.blessing] -= e.consume; totals.consumed[e.blessing] += e.consume;
+      stacks[e.blessing] -= e.consume; count(time, 'consumed', e.blessing, e.consume);
       if (!stacks[e.blessing]) expires[e.blessing] = Infinity;
       if (e.blessing === "Agility") consumed.push(time);
     }
     if (e.gain || e.fill) {
       const gain = e.fill ? caps[e.blessing] - stacks[e.blessing] : Math.min(e.gain, caps[e.blessing] - stacks[e.blessing]);
-      stacks[e.blessing] += gain; totals.gained[e.blessing] += gain; expires[e.blessing] = time + blessingDurations[e.blessing];
+      stacks[e.blessing] += gain; count(time, 'gained', e.blessing, gain); expires[e.blessing] = time + blessingDurations[e.blessing];
     }
     if (e.window) windows[e.window] = time + e.duration;
     e.ready = time + (e.cooldown ?? 0);
     return true;
   };
   return {
-    totals,
+    totals, measuredTotals,
     trigger,
     next(time) { return Math.min(Infinity, ...clocks.map(c => c.next), ...consumed.map(t => t + 4).filter(t => t > time + 1e-8),
       ...regained.map(t => t + 8).filter(t => t > time + 1e-8), ...Object.values(windows).filter(t => t > time + 1e-8)); },
@@ -102,7 +109,7 @@ export function createTheaEventRuntime(events, seed = 1, blessingDurations = { F
       const outcomes = [];
       for (const e of clocks) {
         if (e.next > time + 1e-8) continue;
-        e.next += 1 / e.rate;
+        e.next = ++e.occurrence / e.rate;
         const cast = consumed => { if (e.castBonus) outcomes.push({ kind: e.castBonus, consumed, state: { stacks: { ...stacks }, caps: { ...caps }, events: stateAt(time) } }); };
         cast(trigger(e, time, stacks, caps, expires));
       }

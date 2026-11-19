@@ -1,6 +1,10 @@
 import { findItemById } from './catalog.js';
 import { boundBlessingStacks, blessingConditionValue } from './seasonBlessings.js';
 import { seasonConditionalExpression, scaleSeasonConditionalEffects, seasonBooleanCondition } from './seasonEffectConditions.js';
+import { MIND_INFUSION_TRIGGER_STATE } from './seasonGearEffects.js';
+import { resolveMindInfusionMovement } from './seasonMindInfusion.js';
+import { theaState } from './seasonTheaState.js';
+import { fixedNumbedStacks } from './seasonTheaCombatInputs.js';
 
 // Only instantaneous predicates with an exact meaning belong here. Cadence,
 // capped stacks and per-stat scaling must stay in their own mechanic models.
@@ -32,12 +36,25 @@ function controlFor(condition) {
   if (condition?.type === 'resource-state' && condition.resource === 'energy_shield' && condition.state === 'not_full')
     return { conditionGroup: 'self-full-energy-shield', kind: 'boolean', max: 1, inverted: true };
   if (typeof condition !== 'string') return null;
+  if (condition === MIND_INFUSION_TRIGGER_STATE)
+    return {conditionGroup:condition,kind:'boolean',max:1,label:'이동으로 발동한 버프 적용 중',fixedScenarioOnly:true};
+  if (condition==='to an enemy when they have at least 10 stack(s) of Numbed')
+    return {conditionGroup:condition,kind:'boolean',max:1,label:'대상의 마취 10중첩 이상',numbedMinimum:10};
+  if (condition==='against Frostbitten enemies')
+    return {conditionGroup:condition,kind:'boolean',max:1,label:'대상이 빙결 상태'};
   const aliases={ 'when at Low Life':['self-low-life',false], 'when at Full Life':['at Full Life',false],
     'when Life is not full':['at Full Life',true], 'while Life is not full':['at Full Life',true],
     'when Blur is active':['while Blur is active',false], 'while Blur is not active':['while Blur is active',true],
     "when you don't have a Barrier":['while Barrier is active',true],
-    'if no enemies are defeated recently':['if you have defeated an enemy recently',true] };
-  if(aliases[condition])return {conditionGroup:aliases[condition][0],inverted:aliases[condition][1],kind:'boolean',max:1};
+    'if no enemies are defeated recently':['if you have defeated an enemy recently',true],
+    'when there are no enemies nearby':['nearby-enemy-present',true,'주변에 적 없음'],
+    'when no enemies are Nearby':['nearby-enemy-present',true,'주변에 적 없음'],
+    'when there are at least 1 enemies Nearby':['nearby-enemy-present',false,'주변에 적 한 명 이상'],
+    'when there are only 1 enemies nearby':['nearby-enemy-alone',false,'주변에 적 한 명만 있음'] };
+  if(aliases[condition]){
+    const [conditionGroup,inverted,label]=aliases[condition];
+    return {conditionGroup,inverted,kind:'boolean',max:1,...(label?{label}:{})};
+  }
   const empty=condition.match(/^for each empty (Active|Passive) Skill Slot$/u);
   if(empty)return {conditionGroup:condition,kind:'count',max:empty[1]==='Active'?5:4,empty:empty[1].toLowerCase()};
   const level=condition.match(/^(?:per|for every) (\d+) level(?:s|\(s\))$/u);
@@ -79,6 +96,13 @@ function equipmentState(control, build) {
 export function resolveSeasonGearConditions(effects, build, { path, sourcePageSha256 } = {}) {
   const resolved = [], conditions = [], inactive = [], blockers = [];
   const stacks = boundBlessingStacks(build);
+  const combatState = build?.ss14Inputs?.theaEvents?.combatMode === 1 ? theaState(build) : undefined;
+  const observedNumbed=fixedNumbedStacks(build);
+  const elixirs=(build?.skills?.elixirs??[]).flatMap((slot,index)=>slot?.skillId?[index]:[]);
+  const extensions=build?.ss14Inputs?.extensionInputs;
+  const elixirValues=elixirs.map(index=>combatState?combatState.events?.[`elixir${index}`]:extensions?.[`elixir:${index}:active`]?.value);
+  const elixirActive=elixirs.length&&(combatState||elixirs.some(index=>Number.isFinite(extensions?.[`elixir:${index}:uptime`]?.value)))
+    && elixirValues.every(value=>value===0||value===1) ? Number(elixirValues.includes(1)) : undefined;
   for (const effect of effects) {
     if (!effect.condition) { resolved.push(effect); continue; }
     const candidate=seasonConditionalExpression(effect.sourceText??'');
@@ -92,13 +116,27 @@ export function resolveSeasonGearConditions(effects, build, { path, sourcePageSh
     const sourceLineIndex = effects.findIndex(e => e.sourceText === effect.sourceText);
     const key = `${path}:${sourceLineIndex}`;
     const binding = build?.ss14Inputs?.componentConditions?.[key];
-    const automatic = equipmentState(control, build) ?? blessingConditionValue(control, stacks);
+    const numbedMinimum=control.numbedMinimum ?? (['for numbed enemies','against numbed enemies'].includes(conditionText)?1:0);
+    const timedNumbed = !!combatState && numbedMinimum>0;
+    const boundNumbed = numbedMinimum>0 && (timedNumbed || observedNumbed!==undefined);
+    const automatic = boundNumbed ? Number((timedNumbed ? combatState.events?.numbedStacks??0 : observedNumbed)>=numbedMinimum)
+      : (control.conditionGroup==='while an Elixir Skill is active'?elixirActive:undefined)
+        ?? equipmentState(control, build) ?? blessingConditionValue(control, stacks);
     const value = automatic ?? (binding?.sourcePageSha256 === sourcePageSha256 ? binding.value : undefined);
     const valid = Number.isInteger(value) && value >= 0 && value <= (control.kind === 'count' && automatic !== undefined ? 100 : control.max);
     if (!conditions.some(c => c.key === key)) conditions.push({ ...control, key, sourcePageSha256,
-      sourceLineIndex, sourceText: effect.sourceText, value: valid ? value : '', automatic: automatic !== undefined });
+      sourceLineIndex, sourceText: effect.sourceText, value: valid ? value : '', automatic: automatic !== undefined,
+      ...(numbedMinimum ? {timedNumbed,numbedMinimum,label:control.label??'대상이 마취 상태',
+        ...(!timedNumbed&&boundNumbed ? {observedNumbed} : {})} : {}) });
     if (!valid) { blockers.push({ sourceText: effect.sourceText, reason: '장비 효과의 적용 조건을 선택하세요.' }); continue; }
-    if (!value) { inactive.push({ sourceText: effect.sourceText, reason: '입력 조건 미충족' }); continue; }
+    if (!value) { inactive.push({ sourceText: effect.sourceText, reason: boundNumbed ? '대상 마취 중첩이 옵션 조건을 충족하지 않습니다.' : '입력 조건 미충족' }); continue; }
+    if (effect.condition === MIND_INFUSION_TRIGGER_STATE) {
+      const movement=resolveMindInfusionMovement(effect,build,key,sourcePageSha256);
+      conditions.push(...movement.conditions);
+      resolved.push(...movement.effects);
+      blockers.push(...movement.blockers);
+      continue;
+    }
     const { condition, conditionRequirements, ...plain } = effect;
     if (conditionRequirements?.length) { resolved.push(effect); continue; }
     if(model&&control.conditionGroup.startsWith('snapshot:')) {

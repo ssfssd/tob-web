@@ -46,7 +46,7 @@ const supportLabels = {
   "supported-skill-damage": "보조 대상 스킬 대미지", "supported-skill-cast-speed": "보조 대상 시전 속도",
   "supported-skill-hit-damage": "보조 대상 적중 대미지",
   "supported-skill-attack-speed": "보조 대상 공격 속도", "supported-skill-cooldown-recovery-speed": "보조 대상 쿨타임 회복 속도",
-  "supported-skill-projectile-quantity": "보조 대상 투사체 수", "mana-cost-multiplier": "보조 MP 소모 배율", "buff-duration": "버프 지속 시간",
+  "supported-skill-projectile-quantity": "보조 대상 투사체 수", "mana-cost-multiplier": "보조 MP 소모 배율", "supported-skill-mana-cost-to-life": "MP 소모 전환", "buff-duration": "버프 지속 시간",
   "supported-skill-area": "보조 대상 스킬 범위", "supported-skill-projectile-speed": "보조 대상 투사체 속도",
 };
 Object.assign(SEASON_STAT_LABELS,{aura_effect:'오라 효과',sealed_mana_compensation:'MP 봉인 보상',warcry_effect:'함성 효과',elixir_effect:'영약 스킬 효과',
@@ -55,7 +55,8 @@ Object.assign(SEASON_STAT_LABELS,{aura_effect:'오라 효과',sealed_mana_compen
   fire_damage_taken:'적이 받는 화염 대미지',affliction_effect:'심화 효과'});
 Object.assign(SEASON_STAT_LABELS,{base_ailment_damage_min:'기본 이상 최소 대미지',base_ailment_damage_max:'기본 이상 최대 대미지',
   ill_omen_efficiency:'오멘 누적 효율',damaging_ailment_chance:'대미지형 상태 이상 확률',frostbite_effect:'빙결 효과',
-  numbed_effect:'마취 효과',numbed_additional_stacks:'마취 추가 중첩',deterioration_damage:'악화 대미지'});
+  numbed_duration:'마취 지속 시간',numbed_effect:'마취 효과',numbed_base_lightning_taken:'마취 1중첩당 받는 번개 대미지',
+  numbed_additional_stacks:'마취 추가 중첩',deterioration_damage:'악화 대미지'});
 Object.assign(SEASON_STAT_LABELS,{terra_damage:'지면 스킬 대미지',demolisher_damage:'파괴 스킬 대미지'});
 Object.assign(SEASON_STAT_LABELS,{attack_aggression_effect:'맹공 효과',spell_aggression_effect:'주술 과격 효과',
   minion_attack_damage:'소환체 공격 대미지',minion_spell_damage:'소환체 주술 대미지',mobility_cooldown_recovery_speed:'이동 스킬 쿨타임 회복 속도',
@@ -95,6 +96,18 @@ const round = n => finite(n) ? Math.round(n * 1e8) / 1e8 : null;
 const validEffect = e => finite(e.value) && !e.condition && !e.conditionRequirements && !e.per && !e.target
   && (!e.roll || finite(e.roll.min) && finite(e.roll.max) && e.value >= e.roll.min && e.value <= e.roll.max);
 
+export function summarizeSeasonOptionSources(stat, sources) {
+  let flat = null, increased = null, more = null, fixed = null, conflict = false;
+  for (const {operation,unit,value} of sources) {
+    if (stat === 'mana-cost-multiplier' && operation === 'set') more = (more ?? 1) * value / 100;
+    else if (operation === 'add' && unit !== 'percent') flat = (flat ?? 0) + value;
+    else if (operation === 'add_percent' || operation === 'add') increased = (increased ?? 0) + value;
+    else if (['more','more_percent'].includes(operation)) more = (more ?? 1) * (1 + value / 100);
+    else { if (fixed !== null && fixed !== value) conflict = true; fixed = value; }
+  }
+  return {flat:round(flat),increased:round(increased),more:round(more),fixed:conflict ? null : fixed,conflict};
+}
+
 // This is arithmetic over accepted SS14 options, not another DPS engine.
 // Keep local weapon/armor properties apart; never add a percentage to a flat
 // amount, or add independent "more" multipliers to each other.
@@ -107,14 +120,8 @@ export function calculateSeasonNumericStats(report) {
     }
     const scope = stat === "buff-duration" || /^(?:gear_|weapon_)/u.test(stat) ? owner.path : owner.scope ?? "global";
     const key = `${scope}:${stat}`;
-    const row = groups.get(key) ?? { key, stat, label, scope, scopeLabel: effectSourceLabel(scope), flat: null, increased: null, more: null, fixed: null,
-      conflict: false, sources: [] };
+    const row = groups.get(key) ?? { key, stat, label, scope, scopeLabel: effectSourceLabel(scope), sources: [] };
     const operation = /^supported-skill-added-\w+-damage-(min|max)$/u.test(stat) && effect.operation === "set" ? "add" : effect.operation;
-    if (stat === "mana-cost-multiplier" && operation === "set") row.more = (row.more ?? 1) * effect.value / 100;
-    else if (operation === "add" && effect.unit !== "percent") row.flat = (row.flat ?? 0) + effect.value;
-    else if (operation === "add_percent" || operation === "add") row.increased = (row.increased ?? 0) + effect.value;
-    else if (["more", "more_percent"].includes(operation)) row.more = (row.more ?? 1) * (1 + effect.value / 100);
-    else { if (row.fixed !== null && row.fixed !== effect.value) row.conflict = true; row.fixed = effect.value; }
     row.sources.push({ ...owner, value: effect.value, operation, unit: effect.unit,
       sourceText: effect.sourceText, receipt: effect.receipt ?? owner.receipt });
     groups.set(key, row);
@@ -144,14 +151,15 @@ export function calculateSeasonNumericStats(report) {
       for (const effect of entry.effects ?? []) accept(effect, owner);
     }
   }
-  const options = [...groups.values()].map(r => ({ ...r, flat: round(r.flat), increased: round(r.increased),
-    more: round(r.more), fixed: r.conflict ? null : r.fixed }));
+  const options = [...groups.values()].map(r => ({ ...r, ...summarizeSeasonOptionSources(r.stat,r.sources) }));
   const skills = report.components.filter(c => c.category === "skills").flatMap(component => (component.calculations ?? []).map(entry => {
     const direct = report.coupledSkills.rows.find(r => r.rowIndex === entry.rowIndex && r.id === component.id);
     const offense = report.offense.rows.find(r => r.rowIndex === entry.rowIndex && r.id === component.id);
     const pools = direct?.offenseBasis?.pools;
     const sum = side => pools?.length && pools.every(p => finite(p[side])) ? round(pools.reduce((n, p) => n + p[side], 0)) : null;
-    return { id: component.id, name: component.name, rowIndex: entry.rowIndex, level: direct?.level ?? entry.level,
+    const tags = SS14_CARDS_EN.records[component.id]?.tags ?? [];
+    const rateLabel = tags.includes("Attack") ? "공격 속도" : tags.includes("Spell") ? "시전 속도" : "사용 속도";
+    return { id: component.id, name: component.name, rowIndex: entry.rowIndex, rateLabel, level: direct?.level ?? entry.level,
       values: { ...entry.values, minHit: sum("min"), maxHit: sum("max"), rate: direct?.offenseBasis?.rate ?? null,
         criticalRating: offense?.values.criticalRating ?? null, criticalChance: offense?.values.effectiveCriticalChance ?? null,
         criticalDamage: offense?.values.criticalDamage ?? null }, receipt: entry.receipt,

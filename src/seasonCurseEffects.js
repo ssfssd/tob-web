@@ -9,7 +9,7 @@ export const SEASON_CURSE_STATS=new Set(['curse_effect','max_curses',
   ...['physical','fire','cold','lightning','erosion'].map(t=>`enemy_${t}_damage_taken`)]);
 const fail=(row,reason)=>{row.blockers.push({reason});row.status='partial';};
 // This is the current target's selected curse state, not an uptime estimate.
-export function applySeasonCurses(rows,build) {
+export function applySeasonCurses(rows,build,levelBonus) {
   const slots=[...(build.skills?.active??[]),...(build.skills?.passive??[])];
   const global=rows.flatMap(r=>r.effects),rules=SS14_DESTINY_RULES.curse;
   const bonus=global.filter(e=>e.stat==='curse_effect');
@@ -18,7 +18,8 @@ export function applySeasonCurses(rows,build) {
   for(const [index,slot] of slots.entries()) {
     const card=SS14_CARDS_EN.records[slot?.skillId];if(!card?.tags?.includes('Curse'))continue;
     const ko=SS14_CARDS.records[slot.skillId],path=`skills.curse.${index}`;
-    const row={path,itemId:slot.skillId,group:'skills',buffSkill:index,name:ko?.name??'한국어 원문 미제공',
+    const baseLevel=slot.level??20, levelIncrease=levelBonus(card,index), level=baseLevel+levelIncrease;
+    const row={path,itemId:slot.skillId,group:'skills',buffSkill:index,level,baseLevel,levelBonus:levelIncrease,name:ko?.name??'한국어 원문 미제공',
       detail:ko?.koreanTextVerified?ko.detail:'한국어 원문 미제공',receipt:card,effects:[],blockers:[],conditionControls:[],inactive:[],mechanics:[],status:'mapped'};
     rows.push(row);
     const pin=build.ss14Inputs?.skills?.[index];
@@ -29,12 +30,13 @@ export function applySeasonCurses(rows,build) {
     row.conditionControls.push({key,conditionGroup:key,kind:'boolean',max:1,label:`${row.name} 대상에게 적용 중`,
       sourcePageSha256:card.sourcePageSha256,sourceText:card.detail,value:[0,1].includes(state)?state:''});
     if(![0,1].includes(state)){fail(row,'대상에게 저주가 적용되어 있는지 선택하세요.');continue;}
-    const resolved=resolveSeasonSkillLevel({id:slot.skillId,categoryId:'skills',tlidbText:{en:{...card,sourcePageVersion:'SS14',sourceFieldStatus:{detail:'exact'}}}},slot.level??20);
-    if(resolved.blockers.length){fail(row,'선택한 저주 레벨의 SS14 수치 미확보');continue;}
+    const resolved=resolveSeasonSkillLevel({id:slot.skillId,categoryId:'skills',tlidbText:{en:{...card,sourcePageVersion:'SS14',sourceFieldStatus:{detail:'exact'}}}},level);
+    if(resolved.blockers.length){fail(row,`SS14 ${level}레벨의 저주 수치가 필요합니다.`);continue;}
+    row.progressionReceipt=resolved.receipt;
     let supportIncrease=0,supportMore=1;
     for(const [supportIndex,support] of (slot.supports??[]).entries()) {
       if(!support?.supportId)continue;
-      const linked=inspectSeasonSupport(support,{rowIndex:index,supportIndex,isTarget:true,build,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`]});
+      const linked=inspectSeasonSupport({...support,level:support.level+levelBonus(null,index,true)},{rowIndex:index,supportIndex,isTarget:true,build,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`]});
       for(const reason of linked.blockers)fail(row,reason);
       if(checkSeasonSupportHost(support.supportId,card,{values:{}},index)!==true)fail(row,'저주와 보조의 호환 조건을 확인하세요.');
       for(const effect of linked.effects) {
@@ -52,7 +54,7 @@ export function applySeasonCurses(rows,build) {
     for(const raw of text.split('\n').filter(Boolean)) {
       const line=raw.trim().replace(/[.]$/u,'');
       if(/^Casts (?:the|this) skill and Curses enemies within the target area$/u.test(line)||/^Lasts(?: for)? [\d.]+ s$/u.test(line))continue;
-      const match=line.match(/^(?:Cursed enemies )?\+([\d.]+) % additional (Physical|Fire|Cold|Lightning|Erosion|Hit Damage|Damage Over Time)(?: Damage)? taken(?: by Cursed enemies)?$/u);
+      const match=line.match(/^(?:Cursed enemies )?\+?([\d.]+) % additional (Physical|Fire|Cold|Lightning|Erosion|Hit Damage|Damage Over Time)(?: Damage)? taken(?: by Cursed enemies)?$/u);
       if(match) {
         const type={'Hit Damage':'hit','Damage Over Time':'dot'}[match[2]]??match[2].toLowerCase();
         row.effects.push({stat:`enemy_${type}_damage_taken`,operation:'more',unit:'percent',value:Number(match[1])*multiplier,

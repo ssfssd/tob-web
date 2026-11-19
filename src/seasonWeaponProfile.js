@@ -3,27 +3,32 @@ import { getSeasonSelectionRecord } from './seasonSelections.js';
 import { parseTlidbGearTooltip } from './tlidbGearTooltipCalculation.js';
 import { normalizeSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS } from './seasonGearEffects.js';
 import { inspectLogGear } from './seasonLogGear.js';
+import { corrosionCard } from './seasonCorrosion.js';
 import { resolveSeasonGearConditions } from './seasonGearConditions.js';
+import { seasonExtensionRows } from './seasonExtensions.js';
+import { parseSeasonComponentLines } from './seasonComponents.js';
 
 const finite = Number.isFinite;
 const intrinsic = e => e.operation === 'set' && /^(?:[\d.]+ - [\d.]+ Physical Damage|[\d.]+ Critical Strike Rating|[\d.]+ Attack Speed)$/u.test(e.sourceText);
 
 // Derived on every calculation, never persisted over the original or over the
 // user's encounter inputs. Old manual-only documents keep their existing path.
-export function seasonWeaponProfile(build, slotIndex = 0) {
+export function seasonWeaponProfile(build, slotIndex = 0, { individual = false } = {}) {
   const slots = build?.gear?.slots ?? [];
   const enabled = build?.patchSnapshot?.season === 'SS14' && Boolean(slots[0]?.itemId || slots[1]?.itemId
     || Object.hasOwn(build?.ss14Inputs?.selections?.gear ?? {}, 0));
   const result = { enabled, supported: false, slotIndex, itemId: slots[slotIndex]?.itemId, values: {}, blockers: [], receipts: [] };
   if (!enabled) return result;
   const fail = reason => { result.blockers.push(reason); return result; };
-  const slot = slots[slotIndex], record = getSeasonSelectionRecord('gear', slot?.itemId);
+  const slot = slots[slotIndex];
   const binding = build.ss14Inputs?.gear?.[slotIndex];
+  const record=corrosionCard(getSeasonSelectionRecord('gear',slot?.itemId),binding);
   if (!slot?.itemId) return fail('공격에 사용할 메인 무기를 선택하세요. 이전 무기 수치를 재사용하지 않습니다.');
   if (!record || binding?.itemId !== slot.itemId || binding.sourcePageSha256 !== record.sourcePageSha256)
     return fail('선택 무기의 SS14 기본 수치 근거를 확인할 수 없습니다.');
   result.receipts.push({ season: 'SS14', sourceUrl: record.sourceUrl, sourcePageSha256: record.sourcePageSha256 });
-  if (slot.corrupted || slot.affixText?.trim() || Object.keys(slot.crafts ?? {}).length || slot.legendaryDraft?.corrodedSlotIds?.length)
+  const craftCount = Object.keys(slot.crafts ?? {}).length;
+  if (slot.corrupted || slot.affixText?.trim() || slot.legendaryDraft?.corrodedSlotIds?.length || binding.logGear && craftCount)
     return fail('무기의 제작 등 추가 변경을 SS14 수치로 확인해야 합니다.');
   const parsed = normalizeSeasonGearEffects(parseTlidbGearTooltip({ id: slot.itemId, categoryId: 'gear', tlidbText: { en: {
     ...record, sourcePageVersion: 'SS14', sourceFieldStatus: { detail: 'exact' },
@@ -45,6 +50,13 @@ export function seasonWeaponProfile(build, slotIndex = 0) {
     if (conditional.blockers.some(b => effects.some(e => e.sourceText === b.sourceText && SEASON_LOCAL_WEAPON_STATS.has(e.stat))))
       return fail('무기 자체 옵션의 적용 조건을 선택하세요.');
     effects = conditional.effects;
+  }
+  if (craftCount) {
+    const crafts = seasonExtensionRows(build,{parseLines:parseSeasonComponentLines,craftSlot:slotIndex});
+    if (crafts.length !== craftCount || crafts.some(row=>!row.receipt || row.blockers.length))
+      return fail('무기의 제작 옵션과 수치를 확인하세요.');
+    result.receipts.push(...crafts.map(row=>row.receipt));
+    effects.push(...crafts.flatMap(row=>row.effects));
   }
   const local = effects.filter(e => SEASON_LOCAL_WEAPON_STATS.has(e.stat));
   if (local.some(e => !finite(e.value) || e.condition || e.conditionRequirements || e.target || e.per))
@@ -85,8 +97,9 @@ export function seasonWeaponProfile(build, slotIndex = 0) {
     result.blockers.push('무기 대미지·공격 속도의 유효 범위를 확인하세요.');
   if (slotIndex === 0 && slots[1]?.itemId) {
     const offhand = findItemById(slots[1].itemId);
-    if (offhand?.tags?.includes('mainHand')) result.blockers.push('쌍수의 무기별 적중·크리티컬 결합은 아직 미지원입니다. 무기 평균값으로 대체하지 않습니다.');
-    else if (!offhand?.tags?.includes('offHand')) result.blockers.push('서브 무기 칸의 무기·방패 구분을 확인할 수 없습니다.');
+    if (offhand?.tags?.includes('mainHand')) {
+      if (!individual) result.blockers.push('쌍수의 무기별 적중·크리티컬 결합은 아직 미지원입니다. 무기 평균값으로 대체하지 않습니다.');
+    } else if (!offhand?.tags?.includes('offHand')) result.blockers.push('서브 무기 칸의 무기·방패 구분을 확인할 수 없습니다.');
     if (findItemById(slot.itemId)?.tags?.includes('twoHand')) result.blockers.push('양손 무기와 서브 무기를 동시에 사용할 수 없습니다.');
   }
   result.blockers = [...new Set(result.blockers)];

@@ -6,6 +6,7 @@ import { createTheaEventRuntime, validTheaEvents } from "./seasonTheaEvents.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { calculateTheaCombatAverage } from "./seasonTheaCombat.js";
+import { manualResourceBalance } from "./seasonDps.js";
 
 export function validTheaInputs(inputs) {
   if (inputs.theaCombatReceipt !== undefined && !/^[a-f0-9]{64}$/u.test(inputs.theaCombatReceipt)) return false;
@@ -33,13 +34,17 @@ export function simulateTheaCycle({ seconds, warmup = 0, caps = { Focus: 4, Agil
   const expires = { Focus: Infinity, Agility: Infinity, Tenacity: Infinity };
   let boons = []; let nextGrant = 2; let grantIndex = 0; let ready = 0; let time = 0;
   const segments = new Map(); const casts = []; const end = seconds + warmup;
-  const runtime = createTheaEventRuntime(events, seed, blessingDurations); const castBonuses = [];
+  const runtime = createTheaEventRuntime(events, seed, blessingDurations, {warmup, end}); const castBonuses = [];
   const snapshot = () => ({ stacks: { ...stacks }, caps: { ...caps }, boons: boons.map(b => ({ consumed: b.consumed, atMax: 1 })),
     events: { ...runtime.state(time), ...(combat?.state(time, stacks, runtime.state(time)) ?? {}) } });
   let activeTime = 0; let doubleTime = 0;
   while (time < end) {
-    const next = Math.min(end, nextGrant, runtime.next(time), combat?.next(time) ?? Infinity, ...Object.values(expires), ...boons.map(b => b.expires),
-      stacks.Focus === caps.Focus && ready > time ? ready : Infinity);
+    const candidates = [end, nextGrant, runtime.next(time), combat?.next(time) ?? Infinity, ...Object.values(expires), ...boons.map(b => b.expires),
+      stacks.Focus === caps.Focus && ready > time ? ready : Infinity];
+    const earliest = Math.min(...candidates);
+    // The event queues already use this tolerance for simultaneous events.
+    // Advance to the common boundary before checking expiry or measurement.
+    const next = Math.max(...[...candidates,warmup].filter(at => Math.abs(at - earliest) <= 1e-8));
     if (!(next > time)) throw new Error("은총 사건 시간이 진행되지 않습니다.");
     const weight = Math.max(0, next - Math.max(time, warmup));
     combat?.advance(time, next, snapshot());
@@ -68,7 +73,8 @@ export function simulateTheaCycle({ seconds, warmup = 0, caps = { Focus: 4, Agil
       ready = time + cooldown; casts.push(time);
     }
   }
-  return { seconds, warmup, cooldown, duration, caps, casts, castBonuses, eventTotals: runtime.totals, segments: [...segments.values()],
+  return { seconds, warmup, cooldown, duration, caps, casts, castBonuses, eventTotals: runtime.totals,
+    measuredEventTotals: runtime.measuredTotals, segments: [...segments.values()],
     uptime: 100 * activeTime / seconds, doubleUptime: 100 * doubleTime / seconds };
 }
 
@@ -99,7 +105,7 @@ export function calculateTheaAverage(build, calculateState) {
   const projectileCast = events.some(e => e.castBonus === "projectile");
   const projectileRows = report.fullDps.rows.filter(r => SS14_CARDS_EN.records[r.id]?.tags?.includes("Projectile"));
   if (projectileCast && (projectileRows.length !== 1 || report.fullDps.rows.length !== 1)) blockers.push("투사체 소모 시전의 개별 적중 계산은 현재 투사체 주력 스킬 1개로 구성하세요.");
-  if (projectileCast && report.fullDps.rows.some(r => r.values.burstExtraRate > 0 || r.values.repeatDps > 0 || r.values.heroDps > 0 || r.values.dotDps > 0)) blockers.push("투사체 소모 시전과 추가 발동의 공동 시간표가 필요합니다.");
+  if (projectileCast && report.fullDps.rows.some(r => r.values.burstExtraRate > 0 || r.values.repeatDps > 0 || r.values.heroDps > 0 || r.values.netherDps > 0 || r.values.dotDps > 0)) blockers.push("투사체 소모 시전과 추가 발동의 공동 시간표가 필요합니다.");
   for (const m of mechanics) {
     if (m.kind === "thea-cap") caps[m.blessing] += m.bonus;
     if (m.kind === "thea-cap-intelligence") {
@@ -120,10 +126,14 @@ export function calculateTheaAverage(build, calculateState) {
   let simulation = null; const cache = new Map(); const stateCache = new Map();
   const stateResult = state => {
     const key = JSON.stringify(state);
-    if (!stateCache.has(key)) stateCache.set(key, calculateState(bindTheaState(structuredClone(build), state)).fullDps);
+    if (!stateCache.has(key)) {
+      const current = calculateState(bindTheaState(structuredClone(build), state));
+      stateCache.set(key, { ...current.fullDps, manaScenarios: current.character?.survival?.manaScenarios ?? [] });
+    }
     return stateCache.get(key);
   };
   let projectileDps = 0;
+  const projectileCosts = { mana: 0, life: 0 };
   let sampleError = null;
   if (!blockers.length) {
     const samples = samplesNeeded;
@@ -149,27 +159,53 @@ export function calculateTheaAverage(build, calculateState) {
       if (!after.supported) { blockers.push(...after.blockers); continue; }
       // Applies to this successful consumption cast only, never to every hit
       // in the following four-second recent-consumption window.
-      projectileDps += after.rows[0].values.averageHit / samples / cycle.seconds;
-      sampleDps[runIndex] += after.rows[0].values.averageHit / cycle.seconds;
+      const row = after.rows[0];
+      projectileDps += row.values.averageHit / samples / cycle.seconds;
+      sampleDps[runIndex] += row.values.averageHit / cycle.seconds;
+      for (const [resource, cost] of [["mana", row.manaPerUse], ["life", row.lifePerUse]]) {
+        const value = projectileCosts[resource];
+        projectileCosts[resource] = Number.isFinite(value) && Number.isFinite(cost) ? value + cost / samples / cycle.seconds : null;
+      }
     }
     if (samples > 1 && projectileCast) sampleError = Math.sqrt(sampleDps.reduce((n, value) => n + (value - projectileDps) ** 2, 0) / (samples - 1) / samples);
   }
   const supported = !blockers.length && simulation !== null;
   if (!supported) blockers.push(...report.fullDps.blockers);
+  const timeAverage = read => {
+    if (!supported) return null;
+    let total = 0;
+    for (const segment of simulation.segments) {
+      const value = read(cache.get(segment));
+      if (!Number.isFinite(value)) return null;
+      total += value * segment.seconds / cycle.seconds;
+    }
+    return total;
+  };
   const rows = report.fullDps.rows.map(row => ({ ...row, supported: supported && row.supported, values: { ...row.values } }));
-  const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "dotDps", "minionDps", "dps"];
+  const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "netherDps", "dotDps", "minionDps", "dps"];
   for (const row of rows) for (const key of damageKeys) row.values[key] = supported ? simulation.segments.reduce((total, segment) => {
     const stateRow = cache.get(segment).rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
-    const value = stateRow?.values[key] ?? (key === "minionDps" ? 0 : NaN);
+    const value = stateRow?.values[key] ?? (stateRow && (key === "minionDps" || key === "netherDps") ? 0 : NaN);
     return total + value * segment.seconds / cycle.seconds;
   }, 0) : null;
+  for (const row of rows) {
+    const stateRow = state => state.rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
+    row.manualManaPerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.mana
+      : timeAverage(state => stateRow(state)?.manualManaPerSecond);
+    row.manualLifePerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.life
+      : timeAverage(state => stateRow(state)?.manualLifePerSecond);
+  }
   if (supported && projectileCast) for (const key of ["manualDps", "dps"]) rows[0].values[key] = projectileDps;
   const dps = supported ? projectileCast ? projectileDps : simulation.segments.reduce((n, segment) => n + cache.get(segment).dps * segment.seconds / cycle.seconds, 0) : null;
   report.theaAverage = { supported, ...simulation, uptime: supported ? simulation.uptime : null, doubleUptime: supported ? simulation.doubleUptime : null,
     blockers: [...new Set(blockers)], dps, standardError: supported ? sampleError : null, receipt: theaRulePin() };
-  // Keep the fixed-snapshot details separate; only the headline and damage
-  // columns are integrated across time.
+  const recovery = (report.character?.survival?.manaScenarios ?? []).map(scenario => ({
+    ...scenario, value: timeAverage(state => state.manaScenarios.find(row => row.id === scenario.id)?.value),
+  }));
+  // The character panel retains start-of-combat stats, while the resource
+  // balance uses the same measurement window as average DPS.
   report.fullDps = { ...report.fullDps, supported, rows, dps, blockers: [...new Set(blockers)], scope: "ss14-thea-cycle-full-dps",
+    manualResources: manualResourceBalance(rows, recovery, build.ss14Inputs.dps?.skills),
     receipts: [...report.fullDps.receipts, SS14_THEA_RULES.pages.en],
     limitation: "축복·은총 없이 시작해 2초 간격의 기본 수급과 입력한 추가 발동을 합산합니다. 같은 시각에는 만료, 기본 수급, 소모, 추가 획득, 은총 순서로 처리합니다. 입력한 전투 조건과 발동 간격은 일정하게 유지합니다. 투사체 확률 소모는 입력한 시전 간격의 개별 적중을 반복 계산하고, 그 외에는 상태별 최종 DPS를 시간 평균합니다. 아래 속성·크리티컬 상세는 전투 시작 상태입니다." };
   report.fullDpsSupported = supported; report.summary.dps = dps;

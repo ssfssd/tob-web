@@ -1,5 +1,18 @@
 import { recognizeScreenshotCraftRows } from './screenshotCraftRecognition.js';
 
+let tesseractPromise;
+export async function loadTesseract() {
+  if (window.Tesseract) return window.Tesseract;
+  tesseractPromise ??= new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload=()=>window.Tesseract?resolve(window.Tesseract):reject(new Error('tesseract unavailable'));
+    script.onerror=()=>reject(new Error('tesseract load failed'));
+    document.head.appendChild(script);
+  }).catch(error=>{tesseractPromise=undefined;throw error;});
+  return tesseractPromise;
+}
+
 export function getScreenshotOcrSize(width, height, requestedScale) {
   const scale = Math.min(requestedScale, 3200 / Math.max(width, height), Math.sqrt(6_000_000 / (width * height)));
   return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
@@ -212,6 +225,13 @@ export function normalizeScreenshotRegion(region) {
   const width = Math.min(1 - x, region.width);
   const height = Math.min(1 - y, region.height);
   return width >= 0.02 && height >= 0.02 ? { x, y, width, height } : null;
+}
+
+export function screenshotRegionFromPoints(start, end) {
+  const clamp=value=>Math.max(0,Math.min(1,value));
+  const [a,b]=[start,end].map(({x,y})=>({x:clamp(x),y:clamp(y)}));
+  return normalizeScreenshotRegion({x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),
+    width:Math.abs(a.x-b.x),height:Math.abs(a.y-b.y)});
 }
 
 export async function cropScreenshotFile(file, region) {

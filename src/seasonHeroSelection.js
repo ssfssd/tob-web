@@ -46,10 +46,12 @@ export function seasonHeroTraitOptions(heroId, data = SS14_COMPONENTS) {
   const page = data.pages[`https://tlidb.com/en/${path}`];
   const ko = data.pages[`https://tlidb.com/ko/${path}`];
   if (!seasonHeroOptions(data).some(row => row.id === heroId)) return [];
-  return page.parsed.traits.map(trait => ({ key: trait.key, level: trait.requiredLevel,
-    name: safeKo(ko?.parsed.traits.find(t => t.key === trait.key)?.name),
-    description: safeKo(ko?.parsed.traits.find(t => t.key === trait.key)?.description), iconUrl: trait.iconUrl,
-    sourceUrl: page.sourceUrl, sourcePageSha256: page.sourcePageSha256 }));
+  return page.parsed.traits.map(trait => {
+    const localized=ko?.parsed.traits.find(t=>t.key===trait.key);
+    return {key:trait.key, level:trait.requiredLevel, name:safeKo(localized?.name),
+      description:safeKo(localized?.description), sourceDescription:localized?.description, iconUrl:trait.iconUrl,
+      sourceUrl:page.sourceUrl, sourcePageSha256:page.sourcePageSha256};
+  });
 }
 export function seasonTheaOptions(data = SS14_COMPONENTS) { return seasonHeroTraitOptions(THEA_SS14_ID, data); }
 export function validSeasonHeroSelection(inputs) {

@@ -5,6 +5,7 @@ import { evaluateTlidbSkillDamage } from "./tlidbSkillDamageRuntime.js";
 import { SS14_DPS_RULES } from "./data/ss14DpsRules.generated.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { inspectSeasonUtilitySkill } from "./seasonUtilitySkills.js";
+import { inspectSeasonMinionLevel, seasonMinionProfile } from './seasonMinions.js';
 
 export function seasonActionRateCap(season) {
   if (season !== 'SS14') return undefined;
@@ -34,32 +35,46 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
   if (!locale || locale.sourceRecordKey !== item?.tlidbText?.en?.sourceRecordKey) {
     return { ...result, blockers: ["동일 항목의 해당 시즌 계산 원문을 확보하지 못했습니다."] };
   }
+  const minion = season === "SS14" && seasonMinionProfile(itemId, preview);
+  if (minion) {
+    const minionLevel = inspectSeasonMinionLevel(minion, level);
+    if (!minionLevel) return { ...result, levelUnavailable: true, blockers:["선택한 소환 스킬 레벨의 SS14 원문을 확인하세요."] };
+    const mana = /^Mana Cost\n(\d+(?:\.\d+)?)$/mu.exec(locale.detail);
+    const castTime = /^Cast Speed\n(\d+(?:\.\d+)?) s$/mu.exec(locale.detail);
+    return { ...result, minionLevel, progressionReceipt:minionLevel.receipt, scope:'summon-skill',
+      values:{ ...(mana ? {manaCost:Number(mana[1])} : {}), ...(castTime ? {castTime:Number(castTime[1])} : {}) } };
+  }
   const utility = season === "SS14" && inspectSeasonUtilitySkill({ id: itemId, tlidbText: { en: locale } }, level);
   if (utility) return { ...result, ...utility, scope: "utility-skill-without-direct-hit-damage" };
   const parsed = parseSeasonSkillMechanics({ id: itemId, categoryId: "skills", tlidbText: { en: locale } }, { season, level });
   result.mechanics = parsed.mechanics;
   result.progressionReceipt = parsed.progressionReceipt ?? null;
   result.scope = "unmodified-skill-at-selected-level";
-  if (parsed.blockers.some(b => b.reason === 'ss14-level-row-unavailable')) return { ...result, blockers: ['선택 레벨의 수치가 없어 확인된 20레벨 카드만 계산합니다.'], evidenceBlockers: parsed.blockers };
-  if (!parsed.effects.length || parsed.blockers.length) return { ...result,
-    blockers: ["원문에 아직 계산하지 못하는 효과 또는 수치가 있습니다."], evidenceBlockers: parsed.blockers };
+  if (parsed.blockers.some(b => b.reason === 'ss14-level-row-unavailable')) return { ...result, levelUnavailable: true, blockers: ['선택 레벨의 수치가 없어 확인된 20레벨 카드만 계산합니다.'], evidenceBlockers: parsed.blockers };
   for (const [key, stat] of [["manaCost", "mana-cost"], ["castTime", "cast-time"], ["cooldown", "cooldown"]]) {
+    if(parsed.blockers.length&&(season!=='SS14'||key!=='manaCost'))continue;
     const effects = parsed.effects.filter((effect) => effect.stat === stat);
     if (effects.length === 1 && Number.isFinite(effects[0].value) && !effects[0].condition
       && (key !== "manaCost" || effects[0].unit === "mana")) result.values[key] = effects[0].value;
   }
-  const evaluation = evaluateTlidbSkillDamage({ effects: parsed.effects, level,
+  if (!parsed.effects.length || parsed.blockers.length) return { ...result,
+    blockers: ["원문에 아직 계산하지 못하는 효과 또는 수치가 있습니다."], evidenceBlockers: parsed.blockers };
+  const { weaponHands, ...context } = damageContext;
+  const evaluate = weaponDamage => evaluateTlidbSkillDamage({ effects: parsed.effects, level,
     context: { addedDamage: 0, criticalStrikeRating: 0, criticalStrikeDamage: 100,
-      enemyArmor: 0, enemyResistances: {}, damageTags: [], target: "self", ...damageContext,
-      actionRateCap: seasonActionRateCap(season) } });
-  result.damageCapabilities = { hit: evaluation.complete && evaluation.hit?.average > 0,
-    dot: evaluation.complete && evaluation.dot?.dps > 0 };
-  if (evaluation.complete && Number.isFinite(evaluation.totalDps)) {
-    result.values.baseDps = evaluation.totalDps;
-    if (Number.isFinite(evaluation.hit?.average)) result.values.averageHit = evaluation.hit.average;
+      enemyArmor: 0, enemyResistances: {}, damageTags: [], target: "self", ...context, weaponDamage,
+      ...(parsed.mechanics.some(m => m.kind === "wilting-beam-reaping") ? { reapingEventsPerSecond: 0 } : {}),
+      actionRateCap: seasonActionRateCap(season), damageConversion: season === 'SS14' ? 'ss14' : undefined } });
+  const evaluations = weaponHands ? weaponHands.map(hand=>evaluate(hand.weaponDamage)) : [evaluate(context.weaponDamage)];
+  result.damageCapabilities = { hit: evaluations.every(e=>e.complete) && evaluations.some(e=>e.hit?.average > 0),
+    dot: evaluations.every(e=>e.complete) && evaluations.some(e=>e.dot?.dps > 0) };
+  const average = read => evaluations.reduce((sum,e)=>sum+read(e),0)/evaluations.length;
+  if (evaluations.every(e=>e.complete && Number.isFinite(e.totalDps))) {
+    result.values.baseDps = average(e=>e.totalDps);
+    if (evaluations.every(e=>Number.isFinite(e.hit?.average))) result.values.averageHit = average(e=>e.hit.average);
   } else {
     result.blockers.push("스킬 자체 대미지 계산 미지원: 무기·조건·추가 효과 입력이 필요하거나 해석이 미완료입니다.");
-    result.evidenceBlockers = evaluation.excluded.filter((entry) => entry.affectsCompletion);
+    result.evidenceBlockers = evaluations.flatMap(e=>e.excluded.filter(entry=>entry.affectsCompletion));
   }
   return result;
 }

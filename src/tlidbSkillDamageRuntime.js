@@ -95,15 +95,30 @@ function component(kind, pools, tags = [], origin = "base") {
 
 function poolValueAtStage(entry, type, value, stage, bound = null) {
   if (stage === "base") return value;
+  const paths = entry.conversionPaths?.[type];
+  if (paths && bound) return paths.reduce((total, path) => {
+    let increase = 0;
+    let more = 1;
+    for (const modifier of entry.conversionModifiers) {
+      if (modifier.bound && modifier.bound !== bound || !modifier.types.some(t => path.types.includes(t))) continue;
+      if (modifier.operation === 'add') increase += modifier.value;
+      else more *= 1 + modifier.value / 100;
+    }
+    return total + poolValueWithBonuses(entry, type, path[bound], stage, bound, increase, more);
+  }, 0);
+  return poolValueWithBonuses(entry, type, value, stage, bound, entry.typeIncrease[type] ?? 0, entry.typeMore[type] ?? 1);
+}
+
+function poolValueWithBonuses(entry, type, value, stage, bound, typeIncrease, typeMore) {
   const increased = value * (1 + (
     entry.increase
-    + (entry.typeIncrease[type] ?? 0)
+    + typeIncrease
     + (bound ? entry.boundIncrease[bound] : 0)
   ) / 100);
   if (stage === "increase") return increased;
   const additional = increased
     * entry.more
-    * (entry.typeMore[type] ?? 1)
+    * typeMore
     * (bound ? entry.boundMore[bound] : 1);
   if (stage === "additional") return additional;
   return additional * (1 + (
@@ -132,6 +147,18 @@ function componentsAverageAtStage(entries, stage, origin = null) {
     if (origin && entry.origin !== origin) return total;
     return total + componentAverageAtStage(entry, stage);
   }, 0));
+}
+
+function hitStagesByType(entries) {
+  const result = {};
+  for (const entry of entries) for (const [type, range] of Object.entries(entry.pools)) {
+    const row = result[type] ??= { base: 0, added: 0, increase: 0, additional: 0, taken: 0 };
+    if (entry.origin === 'base' || entry.origin === 'added') row[entry.origin] += (range.min + range.max) / 2;
+    for (const stage of ['increase', 'additional', 'taken']) {
+      row[stage] += (poolValueAtStage(entry,type,range.min,stage,'min') + poolValueAtStage(entry,type,range.max,stage,'max')) / 2;
+    }
+  }
+  return result;
 }
 
 function componentRangeAfterEnemyMitigation(entry, {
@@ -284,7 +311,7 @@ function conversionKind(stat) {
 }
 
 function gainedAsExtraKind(stat) {
-  const match = stat.match(/^skill-(physical|fire|cold|lightning|erosion|non-erosion)-damage-as-(physical|fire|cold|lightning|erosion)$/u);
+  const match = stat.match(/^(?:supported-)?skill-(physical|fire|cold|lightning|erosion|non-erosion)-damage-as-(physical|fire|cold|lightning|erosion)$/u);
   return match ? { sourceType: match[1], targetType: match[2] } : null;
 }
 
@@ -329,7 +356,7 @@ function modifierTarget(effect, context) {
   return null;
 }
 
-function targetComponents(target, components) {
+function targetComponents(target, components, damageTaken = false) {
   if (!target || target.unsupportedTarget) return [];
   if (target.kind === "all") return components.map((entry) => ({
     entry,
@@ -345,16 +372,76 @@ function targetComponents(target, components) {
   if (target.tags) return components
     .filter(({ tags }) => target.tags.every((tag) => tags.has(tag)))
     .map((entry) => ({ entry, types: null }));
-  if (target.type) return components
-    .filter(({ pools }) => Object.hasOwn(pools, target.type))
-    .map((entry) => ({ entry, types: [target.type], ...(target.bound ? {bound:target.bound} : {}) }));
-  if (target.types) {
+  if (target.type || target.types) {
     return components.flatMap((entry) => {
-      const types = target.types.filter((type) => Object.hasOwn(entry.pools, type));
-      return types.length ? [{ entry, types }] : [];
+      const types = (target.types ?? [target.type]).filter(type => Object.hasOwn(entry.pools, type)
+        || !damageTaken && entry.conversionPaths && Object.values(entry.conversionPaths).some(paths => paths.some(path => path.types.includes(type))));
+      return types.length ? [{ entry, types, bound: target.bound }] : [];
     });
   }
   return [];
+}
+
+const conversionOrder = ['physical', 'lightning', 'cold', 'fire', 'erosion'];
+
+export function routeSeasonDamagePaths(paths, groups, onConversion) {
+  for (const sourceType of conversionOrder) {
+    const group = groups.get(sourceType);
+    const source = paths[sourceType];
+    if (!group || !source?.some(({min,max})=>min!==0||max!==0)) continue;
+    const total = group.reduce((sum, edge) => sum + edge.value, 0);
+    for (const edge of group) {
+      const { targetType, value } = edge;
+      const ratio = value / Math.max(100, total);
+      onConversion(edge, ratio);
+      if (!value) continue;
+      (paths[targetType] ??= []).push(...source.map(path => ({ ...path, min: path.min * ratio, max: path.max * ratio,
+        types: [...path.types, targetType] })));
+    }
+    const remainder = Math.max(0, 1 - total / 100);
+    if (remainder) paths[sourceType] = source.map(path => ({ ...path, min: path.min * remainder, max: path.max * remainder }));
+    else delete paths[sourceType];
+  }
+  return paths;
+}
+
+function applySeasonConversions(entries, conversions, apply, exclude) {
+  const groups = new Map();
+  const used = new Set();
+  for (const { effect, index, targetType } of conversions) {
+    const sourceType = damageTypeFromText(effect.sourceDependency);
+    if (!conversionOrder.includes(sourceType) || conversionOrder.indexOf(sourceType) >= conversionOrder.indexOf(targetType)) {
+      exclude(index, 'conversion', 'conversion-direction-unsupported', true);
+    } else if (!Number.isFinite(effect.value) || effect.value < 0 || effect.value > 100) {
+      exclude(index, 'conversion', 'conversion-percent-out-of-range', true);
+    } else {
+      const group = groups.get(sourceType) ?? [];
+      group.push({ targetType, index, value: effect.value, optionalSource: effect.optionalConversionSource });
+      groups.set(sourceType, group);
+    }
+  }
+  for (const entry of entries) {
+    const paths = Object.fromEntries(Object.entries(entry.pools).map(([type, values]) => [type, [{ ...values, types: [type] }]]));
+    let converted = false;
+    routeSeasonDamagePaths(paths, groups, ({ index, targetType, value }) => {
+      converted = true;
+      used.add(index);
+      if (value) entry.tags.add(targetType);
+    });
+    if (!converted) continue;
+    entry.conversionPaths = paths;
+    entry.conversionModifiers = [];
+    entry.pools = Object.fromEntries(Object.entries(paths).map(([type, rows]) => [type, {
+      min: rows.reduce((sum, row) => sum + row.min, 0), max: rows.reduce((sum, row) => sum + row.max, 0),
+    }]));
+  }
+  for (const [sourceType, group] of groups) {
+    const total=group.reduce((sum,edge)=>sum+edge.value,0);
+    for(const {index,targetType,value,optionalSource} of group) {
+      if (used.has(index)) apply(index, 'conversion', { resolvedValue: value, effectivePercent:value/Math.max(100,total)*100, sourceType, targetType });
+      else exclude(index, 'conversion', optionalSource ? 'gear-conversion-source-absent' : 'ss14-hit-conversion-source-absent');
+    }
+  }
 }
 
 function speedKind(stat) {
@@ -718,6 +805,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
   }
 
   const allComponents = [...hitComponents, ...dotComponents];
+  const seasonalConversion = context.damageConversion === 'ss14';
   const gainedAsExtraEffects = resolved
     .map((effect, index) => ({ effect, index, kind: gainedAsExtraKind(effect?.stat ?? "") }))
     .filter(({ effect, index, kind }) => effect && kind && !traced[index]);
@@ -728,7 +816,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
     }
     let gained = false;
     const ratio = effect.value / 100;
-    for (const entry of allComponents) {
+    for (const entry of seasonalConversion || effect.stat.startsWith('supported-skill-') ? hitComponents : allComponents) {
       const sourceTypes = sourceType === "non-erosion"
         ? DAMAGE_TYPES.filter((type) => type !== "erosion")
         : [sourceType];
@@ -738,6 +826,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
         min: sum.min + pool.min,
         max: sum.max + pool.max,
       }), { min: 0, max: 0 });
+      if (seasonalConversion && source.max <= 0) continue;
       const extra = { min: source.min * ratio, max: source.max * ratio };
       const target = entry.pools[targetType] ?? { min: 0, max: 0 };
       target.min += extra.min;
@@ -747,7 +836,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
       gained = true;
     }
     if (!gained) {
-      exclude(index, "gained-as-extra", "gained-as-extra-source-damage-unavailable");
+      exclude(index, "gained-as-extra", seasonalConversion ? "ss14-hit-gain-source-absent" : "gained-as-extra-source-damage-unavailable");
     } else {
       apply(index, "gained-as-extra", { resolvedValue: effect.value, sourceType, targetType });
     }
@@ -756,7 +845,8 @@ export function evaluateTlidbSkillDamage(input = {}) {
   const conversions = resolved
     .map((effect, index) => ({ effect, index, targetType: conversionKind(effect?.stat ?? "") }))
     .filter(({ effect, index, targetType }) => effect && targetType && !traced[index]);
-  for (const { effect, index, targetType } of conversions) {
+  if (seasonalConversion) applySeasonConversions(hitComponents, conversions, apply, exclude);
+  else for (const { effect, index, targetType } of conversions) {
     const sourceType = damageTypeFromText(effect.sourceDependency);
     if (!sourceType || !DAMAGE_TYPE_SET.has(sourceType)) {
       exclude(index, "conversion", "conversion-source-type-unavailable", true);
@@ -838,7 +928,8 @@ export function evaluateTlidbSkillDamage(input = {}) {
       exclude(index, "damage-modifier", "damage-modifier-target-unsupported");
       continue;
     }
-    const targets = targetComponents(target, allComponents);
+    const damageTakenModifier = /-damage-taken$/u.test(effect.stat);
+    const targets = targetComponents(target, allComponents, damageTakenModifier);
     if (!targets.length) {
       const affectsCompletion = !(
         effect.nonBlockingWhenDamageTargetUnavailable === true
@@ -859,9 +950,10 @@ export function evaluateTlidbSkillDamage(input = {}) {
       exclude(index, "damage-modifier", "damage-more-value-out-of-range", true);
       continue;
     }
-    const damageTakenModifier = /-damage-taken$/u.test(effect.stat);
     for (const { entry, types, bound } of targets) {
-      if (bound && effect.operation === "add") {
+      if (types && entry.conversionPaths && !damageTakenModifier) {
+        entry.conversionModifiers.push({ types, bound, operation: effect.operation, value: effect.value });
+      } else if (bound && effect.operation === "add") {
         entry.boundIncrease[bound] += effect.value;
       } else if (bound) {
         entry.boundMore[bound] *= 1 + (effect.value / 100);
@@ -1084,15 +1176,21 @@ export function evaluateTlidbSkillDamage(input = {}) {
   const castTimeEffects = resolved
     .map((effect, index) => ({ effect, index }))
     .filter(({ effect, index }) => effect?.stat === "cast-time" && !traced[index]);
+  // A persistent spell can have a cast time without dealing any hit damage.
+  const persistentCadence = context.persistentActionCadence === true && !hitComponents.length && dotComponents.length > 0
+    && castTimeEffects.length === 1 && castTimeEffects[0].effect.value > 0
+    && Array.isArray(context.damageTags) && context.damageTags.includes('spell') && !context.damageTags.includes('attack');
+  const hasCadence = hitComponents.length > 0 || persistentCadence;
   const cadenceKinds = new Set(hitComponents.flatMap(({ tags }) => (
     ["attack", "spell"].filter((tag) => tags.has(tag))
   )));
   let cadenceKind = context.cadenceKind;
   if (!cadenceKind && cadenceKinds.size === 1) cadenceKind = [...cadenceKinds][0];
-  if (hitComponents.length && !["attack", "spell"].includes(cadenceKind)) {
+  if (persistentCadence) cadenceKind = 'spell';
+  if (hasCadence && !["attack", "spell"].includes(cadenceKind)) {
     castTimeEffects.forEach(({ index }) => exclude(index, "cadence", "cadence-kind-unavailable", true));
     synthetic("cadence", "cadence-kind-unavailable");
-  } else if (hitComponents.length) {
+  } else if (hasCadence) {
     const contextTime = finiteNumber(cadenceKind === "attack" ? context.attackTime : context.castTime);
     const tooltipTime = castTimeEffects.length === 1 ? castTimeEffects[0].effect.value : null;
     const baseTime = contextTime ?? tooltipTime;
@@ -1484,6 +1582,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
     if (["damage-lucky", "reaping-repeat-chance"].includes(stat)) continue;
     const nonDamage = stat === "mana-cost"
       || stat === "mana-cost-multiplier"
+      || stat === 'supported-skill-mana-cost-to-life'
       || stat === "sealed-mana"
       || /duration$/u.test(stat)
       || /(?:skill-area|chance|quantity|stacks)$/u.test(stat)
@@ -1895,14 +1994,16 @@ export function evaluateTlidbSkillDamage(input = {}) {
   const complete = !incomplete;
   const totalDps = complete ? rounded(hitDps + dotAverage + baseReapingDps) : null;
   const expectedTotalDps = complete ? rounded(expectedHitDps + dotAverage + reapingDps) : null;
+  const hitRate = hitComponents.length ? rounded(safeRate) : 0;
   return {
     level,
     complete,
+    ...(persistentCadence ? { actionRate: rounded(safeRate) } : {}),
     hit: {
       min: hitMin,
       max: hitMax,
       average: hitAverage,
-      rate: rounded(safeRate),
+      rate: hitRate,
       projectileHits: rounded(projectileHits),
       dpsMin,
       dpsMax,
@@ -1922,13 +2023,14 @@ export function evaluateTlidbSkillDamage(input = {}) {
     expectedTotalDps,
     spellBurst,
     damageStages: {
+      ...(input.includeHitStagesByType ? { byType: hitStagesByType(hitComponents) } : {}),
       baseHitAverage,
       addedHitAverage,
       hitAfterIncrease,
       hitAfterAdditional,
       hitAfterTaken,
       hitAfterMitigation,
-      hitRate: rounded(safeRate),
+      hitRate,
       projectileHits: rounded(projectileHits),
       hitDps,
       ...(luckyDamage ? { hitAfterLuckyDps } : {}),

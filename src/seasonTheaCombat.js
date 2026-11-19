@@ -1,18 +1,26 @@
 import { SS14_THEA_COMBAT as rules } from "./data/ss14TheaCombat.generated.js";
 import { bindTheaState } from "./seasonTheaState.js";
-import { theaCombatInputBlockers } from "./seasonTheaCombatInputs.js";
 import { SS14_EXTENSION_NATIVE } from "./data/ss14ExtensionNative.generated.js";
 import { createOmenAccumulator } from "./seasonOmen.js";
-import { netherSum, netherMore } from './seasonNetherRemaining.js';
+import { combatNumbedEnabled, hasTheaNativeDot, theaCombatInputBlockers, theaCombatInputValues, usesTheaDotTrigger } from "./seasonTheaCombatInputs.js";
+import { netherSum, netherMore, SEASON_SKILL_AILMENT_TAGS } from './seasonNetherRemaining.js';
 import { netherDeterioration } from './seasonNetherDps.js';
+import { manualResourceBalance } from './seasonDps.js';
+import { validSeasonGearEffects } from './seasonGearEffects.js';
+import { isNumbedBaseOverride } from './seasonNetherModifiers.js';
 
 const eps = 1e-8;
-const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "specialDps", "dotDps", "minionDps", "igniteDps", "scorchDps", "dps"];
+const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "netherDps", "specialDps", "omenDps", "playerDeteriorationDps", "dotDps", "minionDps", "minionDeteriorationDps", "igniteDps", "scorchDps", "dps"];
 const sum = a => a.reduce((n, v) => n + v, 0);
+function timelineRandom(seed) {
+  let state = seed >>> 0;
+  return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+}
 function finishCombatRows(combat, seconds) {
   for (const row of combat.rows.values()) {
     row.dotDps += row.igniteDps + row.scorchDps;
-    row.dps = row.manualDps + row.spellBurstDps + row.repeatDps + row.heroDps + row.specialDps + row.dotDps + row.minionDps;
+    row.specialDps = row.omenDps + row.playerDeteriorationDps;
+    row.dps = row.manualDps + row.spellBurstDps + row.repeatDps + row.heroDps + row.netherDps + row.specialDps + row.dotDps + row.minionDps;
     for (const key of damageKeys) row[key] /= seconds;
   }
   return sum([...combat.rows.values()].map(row => row.dps));
@@ -35,11 +43,19 @@ export function createAilmentTimeline() {
 // ailment lifetimes. Damage rolls are sampled only where a nonlinear threshold
 // or highest-Ignite selection needs them; ordinary hit expectation stays exact.
 export function createTheaCombatTimeline(build, report, getReport, { seconds, warmup, seed = 1, newCastFirst = false }) {
-  let randomState = seed >>> 0;
-  const random = () => { randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0; return randomState / 4294967296; };
-  const input = build.ss14Inputs.theaEvents;
+  const random = timelineRandom(seed);
+  const input = theaCombatInputValues(build, report);
   const netherEffects=report.componentProjection.effects;
+  const playerNumbedBase=netherEffects.find(isNumbedBaseOverride)?.value ?? rules.numbed.morePerStack;
   const bonus=stat=>netherSum(netherEffects,stat);
+  const gear=report.components.filter(c=>c.category==='gear').flatMap(c=>c.calculations??[]);
+  const gearEffects=gear.flatMap(e=>e.rawEffects??[]);
+  const gearNumbedModifiers=gear.flatMap(validSeasonGearEffects)
+    .filter(effect=>effect.operation==='add_percent' && effect.unit==='percent' && effect.value>=0);
+  const playerNumbedDuration=input.numbedDuration*(1+netherSum(gearNumbedModifiers,'numbed_duration')/100);
+  const gearNumbedEffect=netherSum(gearNumbedModifiers,'numbed_effect');
+  const gearNumbedStacks=sum(gearEffects.filter(e=>e.stat==='gear_numbed_additional_stacks').map(e=>e.value));
+  const gearNumbedCritical=sum(gearEffects.filter(e=>e.stat==='gear_numbed_critical_bonus').map(e=>e.value));
   const elixirs = (build.skills.elixirs ?? []).flatMap((s, i) => s?.skillId ? [{ i, interval: input[`elixir${i}Interval`], start: input[`elixir${i}Start`], duration: input[`elixir${i}Duration`] }] : []);
   let clock = 0;
   const elixirState = time => Object.fromEntries(elixirs.map(e => [`elixir${e.i}`, Number(time + eps >= e.start && (time - e.start + eps) % e.interval < e.duration)]));
@@ -49,37 +65,78 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         ? e.start + Math.floor((time - e.start + eps) / e.interval) * e.interval + e.duration : Infinity)));
   const enemy = build.ss14Inputs.dps.enemy;
   const config = build.ss14Inputs.dps.skills;
+  const numbedEnabled = combatNumbedEnabled(build, report);
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const has = kind => mechanics.some(m => m.kind === kind);
   const linked = mechanics.filter(m => m.kind === "thea-combat-event").map(e => ({ ...e }));
+  const manaRule = mechanics.find(m => m.kind === 'thea-mana-spend');
+  const manaTrigger = manaRule && { ...manaRule };
+  const maxMana = report.character?.values.mana;
+  let spentMana = 0;
+  let eventMana = 0;
+  const nativeDot = hasTheaNativeDot(report);
+  const dotRate = usesTheaDotTrigger(build, linked, report) ? input.dotTriggerRate ?? 0 : 0;
+  const end = warmup + seconds;
+  const dotWindows = new Map(report.fullDps.rows.filter(row=>row.dotWindows).map(row=>[row.rowIndex,row.dotWindows]));
+  const dotBoundaries = [...new Set([...dotWindows.values()].flat(2))].sort((a,b)=>a-b);
+  const dotInEffect = (row,time) => !dotWindows.has(row.rowIndex)
+    || dotWindows.get(row.rowIndex).some(([start,stop])=>time>=start && time<stop);
   const numbedConsume = { blessing: "Agility", consume: 3, cooldown: 1 };
   const ailments = createAilmentTimeline();
   const omen = createOmenAccumulator();
   const rows = new Map(report.fullDps.rows.map(r => [r.rowIndex, Object.fromEntries(damageKeys.map(k => [k, 0]))]));
+  const costs = new Map(report.fullDps.rows.filter(row => Number.isFinite(row.manualSummonRate)
+    ? row.manualSummonRate === 0 || Number.isFinite(row.manaPerUse) && Number.isFinite(row.lifePerUse)
+    : row.combat && !row.combat.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
+    .map(row => [row.rowIndex, { mana: 0, life: 0 }]));
+  const channelCosts = new Map(report.fullDps.rows.filter(row => row.channelCost)
+    .map(row => [row.rowIndex, { possibleCharges: 0, mana: null, life: null, variable: false }]));
+  const manaRecovery = new Map((report.character?.survival?.manaScenarios ?? []).map(row => [row.id, 0]));
   const queue = [], chains = new Map(), charge = new Map();
-  const moduleBuffs = new Map(), wilts = [], deteriorations = [];
+  const moduleBuffs = new Map(), moduleRandom = new Map(), wilts = [], deteriorations = [];
   const infiltrations = { cold: 0, fire: 0, lightning: 0 };
   let elixirInfiltrationReady = 0;
   const counts = { casts: 0, hits: 0, followupHits: 0, multistrikes: 0, spellBurst: 0, ignites: 0, scorches: 0, numbedInflicted: 0 };
+  const measuredCounts = { ...counts };
+  const inMeasurement = time => time >= warmup && time < end;
+  const count = (time, key, amount = 1) => {
+    counts[key] += amount;
+    if (inMeasurement(time)) measuredCounts[key] += amount;
+  };
   const blockers = new Set();
   let hasProjectileTie = false;
-  let aggressionUntil = 0, affliction = enemy.affliction ?? 0, afflictionUntil = 0, nextDotTrigger = Infinity;
+  let hasFissureTie = false;
+  let aggressionUntil = 0, affliction = enemy.affliction ?? 0, afflictionUntil = 0, gearNumbedUntil=0;
+  // Native DoT uses the observed maintained rate, shared with Ignite ticks.
+  let dotTriggerStart = 0, dotTriggerOccurrence = 1;
+  let nextDotTrigger = nativeDot && dotRate > 0 ? 1 / dotRate : Infinity;
   let currentTenacity = 0, recentAgility = false;
-  let numbedArea = 0, scorchArea = 0, igniteTime = 0, numbedTime = 0;
+  let numbedArea = 0, numbedEffectArea = 0, scorchArea = 0, igniteTime = 0, numbedTime = 0;
+  let playerLightningHits = 0, playerNumbedHits = 0, playerNumbedDamage = 0;
   const activeIgnites = () => ailments.active((input.igniteLimit ?? 1) + Number(has("thea-ignite-limit") && currentTenacity >= 10));
-  const push = e => { if (Number.isFinite(e.at)) queue.push(e); };
+  const push = e => { if (Number.isFinite(e.at) && e.at < end - eps) queue.push(e); };
+  // Compute the nth occurrence from the start, so repeated fractional intervals do not drift.
+  const schedule = (event, rate) => {
+    const occurrence = (event.occurrence ?? 0) + 1;
+    if (rate > 0) push({ ...event, at: occurrence / rate, occurrence });
+  };
   for (const row of report.fullDps.rows) {
     if (row.values.minionDps !== undefined) {
+      schedule({row:row.rowIndex,kind:'summon'},row.manualSummonRate);
       if (row.moduleTimeline) for (let unit = 0; unit < config[row.rowIndex].minionCount; unit++) for (const [action, skill] of row.minionSkills.entries()) {
         const rate = config[row.rowIndex][`moduleRate${action}`];
-        if (!skill.persistent && rate > 0) push({ at: 1 / rate, row: row.rowIndex, kind: "module", action, unit });
+        if (!skill.persistent) schedule({ row: row.rowIndex, kind: "module", action, unit }, rate);
       }
       continue;
     }
     const b = config[row.rowIndex];
-    for(const event of row.nether?.events??[])push({at:1/event.rate,row:row.rowIndex,kind:'nether',index:0,trigger:event});
-    if (b.castRate > 0) push({ at: 1 / b.castRate, row: row.rowIndex, kind: "manual", index: 0 });
-    if (b.repeatHits > 0) push({ at: 1 / b.repeatHits, row: row.rowIndex, kind: "repeat", index: 0 });
+    for(const event of row.nether?.events??[])schedule({row:row.rowIndex,kind:'nether',index:0,trigger:event},event.rate);
+    schedule({ row: row.rowIndex, kind: "manual", index: 0 }, b.castRate);
+    schedule({ row: row.rowIndex, kind: "repeat", index: 0 }, b.repeatHits);
+    for (const [index,at] of (row.fissure?.times ?? []).entries()) {
+      push({ at, row:row.rowIndex, kind:'fissure', followup:true, castNumber:-1-row.rowIndex*100-index,
+        hitMultiplier:row.fissure.hitMultiplier, ailmentWeight:1 });
+    }
     charge.set(row.rowIndex, 0);
   }
   const rowAt = (state, row) => {
@@ -87,16 +144,35 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (!r.supported) r.blockers.forEach(s => blockers.add(s));
     return r.rows.find(r => r.rowIndex === row);
   };
-  const values = () => ({ numbedEffect: ailments.numbedEffect(1 + ((input.numbedEffect ?? 0)+bonus('numbed_effect')) / 100 + (has("thea-numbed-effect") && recentAgility ? .5 : 0)) * rules.numbed.morePerStack,
+  const values = () => ({ numbedStacks: ailments.numbed(), numbedEffect: ailments.numbedEffect(playerNumbedBase *
+    (1 + ((input.numbedEffect ?? 0)+bonus('numbed_effect')+gearNumbedEffect) / 100 + (has("thea-numbed-effect") && recentAgility ? .5 : 0))
+    * (gearNumbedUntil>clock+eps ? 1+gearNumbedCritical/100 : 1)),
     scorched: Number(activeIgnites().some(e => e.scorch)) });
   const weight = (a, b) => Math.max(0, Math.min(b, warmup + seconds) - Math.max(a, warmup));
-  const inflictNumbed = (time, n) => { if (input.numbedEnabled !== 1 || n <= 0) return; n+=bonus('numbed_additional_stacks'); ailments.numb(time, n, input.numbedDuration, input.numbedLimit); counts.numbedInflicted += n; };
+  const inflictNumbed = (time, n) => { if (n <= 0) return; n+=bonus('numbed_additional_stacks')+gearNumbedStacks; ailments.numb(time, n, playerNumbedDuration, input.numbedLimit); count(time, 'numbedInflicted', n); };
   const runTriggers = (key, time, ctx, predicate = () => true) => {
     let consumed = false;
     for (const e of linked.filter(e => e.inputKey === key && predicate(e))) consumed = ctx.runtime.trigger(e, time, ctx.stacks, ctx.caps, ctx.expires) || consumed;
     return consumed;
   };
-  const recordDamage = (row, key, amount, time) => { if (time >= warmup && time < warmup + seconds) rows.get(row)[key] += amount; };
+  const recordDamage = (row, key, amount, time) => { if (inMeasurement(time)) rows.get(row)[key] += amount; };
+  const recordCastCost = (index, row, time, ctx) => {
+    if (manaTrigger) {
+      if (!Number.isFinite(row?.manaPerUse) || row.manaPerUse > 0 && row.combat?.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
+        blockers.add('스킬 시전 비용을 확인하거나 초당 MP 소모율을 입력하세요.');
+      else if (row.manaPerUse > 0) {
+        const currentMax = getReport(ctx.snapshot()).character?.values.mana;
+        if (!(maxMana > 0) || currentMax !== maxMana) blockers.add('전투 중 최대 MP가 달라지는 경우 초당 MP 소모율을 입력하세요.');
+        else eventMana += row.manaPerUse;
+      }
+    }
+    if (!inMeasurement(time)) return;
+    const cost = costs.get(index);
+    if (cost && Number.isFinite(row?.manaPerUse) && Number.isFinite(row?.lifePerUse)) {
+      cost.mana += row.manaPerUse;
+      cost.life += row.lifePerUse;
+    } else costs.delete(index);
+  };
   const omenDamage = (amount, time, currentReport, from = time, cumulative = null) => {
     const condition = currentReport.componentProjection.rows.flatMap(r => r.mechanics ?? []).find(m => m.kind === "ill-omen");
     const result = omen.add(amount, condition);
@@ -107,16 +183,23 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         for (let i = 0; i < 45; i++) { const mid = (lo + hi) / 2; if (cumulative(mid) < result.requiredDamage) lo = mid; else hi = mid; }
         time = from + hi;
       }
-      recordDamage(0, "specialDps", result.damage, time);
+      recordDamage(0, "omenDps", result.damage, time);
     }
   };
   function moduleCast(event, time, ctx) {
     const b = config[event.row], key = `${event.row}:${event.unit}`;
     const rate = b[`moduleRate${event.action}`];
-    push({ ...event, at: time + 1 / rate });
-    if (random() >= b.minionUptime / 100) return;
+    schedule(event, rate);
     let row = rowAt(ctx.snapshot(), event.row), action = row?.minionSkills[event.action];
     if (!row?.supported || !action) return;
+    if (!row.moduleHitEvents) {
+      recordDamage(event.row, 'minionDps', action.perCast * (b.minionUptime / 100) * (b.hitChance / 100), time);
+      return;
+    }
+    // Module rolls cannot advance the player's random sequence.
+    if (!moduleRandom.has(key)) moduleRandom.set(key, timelineRandom(seed ^ Math.imul(event.row * 8 + event.unit + 1, 0x9e3779b1)));
+    const random = moduleRandom.get(key);
+    if (random() >= b.minionUptime / 100) return;
     let castMultiplier = 1;
     if (action.slug === "Blitz_Strike") moduleBuffs.set(key, true);
     if (action.slug === "Burst_Hammer") {
@@ -131,49 +214,71 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         if (wilts.some(w => Math.abs(w.expires - wilts[0].expires) > eps || w.damage !== wilts[0].damage)) blockers.add("라이언 환영이 서로 다른 몰락 중첩을 제거하는 우선순위는 설치 자료에서 확인되지 않았습니다.");
         wilts.shift(); hitMultiplier *= 1.75;
       }
-      // Burst Hammer has its own 64% shotgun falloff after the first hit.
-      const hit = action.slug === "Burst_Hammer" ? action.perCast / (1 + Math.max(0, action.hitCount - 1) * .36) * (h ? .36 : 1)
-        : action.perCast / action.hitCount;
-      recordDamage(event.row, "minionDps", hit * hitMultiplier, time);
       const randomElement = action.randomElemental ? ["fire", "cold", "lightning"][Math.floor(random() * 3)] : null;
-      for (const type of row.infiltrationTypes) if ((action.damageTypes.includes(type) || randomElement === type) && hit > 0) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
-      if (row.elementalProtocol) {
-        const lightning = action.lightningRolls.reduce((sum, pool) => sum + (!pool.random || randomElement === "lightning" ? (pool.min + (pool.max - pool.min) * random()) * (pool.random ? 3 : 1) : 0), 0)
-          * (random() < action.criticalChance ? action.criticalMultiplier : 1) * hitMultiplier;
+      // The static pools include one third of each elemental outcome.
+      const randomDelta = randomElement ? 3 * action.randomHit[randomElement] - sum(Object.values(action.randomHit)) : 0;
+      const hitWeight = h > 0 ? action.additionalHitMultiplier ?? 1 : 1;
+      const hit = (action.perCast / (action.damageHitCount ?? action.hitCount) + randomDelta) * hitWeight;
+      recordDamage(event.row, "minionDps", hit * hitMultiplier, time);
+      for (const type of row.infiltrationTypes) if ((action.damageTypes.includes(type) || action.randomDamageTypes?.[randomElement]?.includes(type)) && hit > 0) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
+      const hadNumbed = ailments.numbed() > 0;
+      if (action.lightningRolls.length && (row.elementalProtocol || numbedEnabled && hadNumbed)) {
+        const lightning = action.lightningRolls.reduce((sum, pool) => sum + (!pool.randomElement || randomElement === pool.randomElement ? (pool.min + (pool.max - pool.min) * random()) * (pool.randomElement ? 3 : 1) : 0), 0)
+          * (random() < action.criticalChance ? action.criticalMultiplier : 1) * hitMultiplier * hitWeight;
         if (lightning > 0) {
-          const extra = ailments.numbed() ? Math.floor(lightning / (input.enemyLifeShield * input.numbedThreshold / 100)) : 0;
-          ailments.numb(time, 1 + extra, input.numbedDuration, input.numbedLimit, 1); counts.numbedInflicted += 1 + extra;
+          const extra = hadNumbed ? Math.floor(lightning / (input.enemyLifeShield * input.numbedThreshold / 100)) : 0;
+          const stacks = Number(row.elementalProtocol) + extra;
+          ailments.numb(time, stacks, input.numbedDuration, input.numbedLimit, rules.numbed.morePerStack);
+          count(time, 'numbedInflicted', stacks);
         }
       }
       if (action.slug === "Sin_of_the_Fallen") {
         if (wilts.length >= 30) { wilts.sort((a,b) => a.expires - b.expires); wilts.shift(); }
         wilts.push({ row: event.row, damage: row.wiltBase, expires: time + row.wiltDuration });
       }
-      if (action.deterioration > 0 && random() < action.deteriorationChance && deteriorations.length < 99) {
-        deteriorations.push({ row: event.row, at: time + action.deteriorationDelay, damage: action.deterioration / action.hitCount * hitMultiplier });
+      const deterioration = action.deterioration;
+      if (deterioration) {
+        const erosion = deterioration.erosionHit.fixed + (randomElement ? 3 * deterioration.erosionHit[randomElement] : 0);
+        if (erosion > 0 && random() < deterioration.chance && deteriorations.length < deterioration.limit)
+          deteriorations.push({ row: event.row, at: time + deterioration.delay, damage: erosion * deterioration.portion * hitWeight * hitMultiplier });
       }
     }
   }
   function resolveHit(event, time, ctx, state, row, hitMultiplier, ailmentWeight) {
-    const b = config[event.row];
-    counts.hits++;
+    count(time, 'hits');
     const hadIgnite = activeIgnites().length > 0, hadNumbed = ailments.numbed() > 0;
-    const averageHit = b.hitChance > 0 ? row.values.averageHit / (b.hitChance / 100) : 0;
-    recordDamage(event.row, event.kind === "burst" ? "spellBurstDps" : event.kind === "repeat" ? "repeatDps" : "manualDps", averageHit * hitMultiplier, time);
+    const hitChance = config[event.row].hitChance;
+    // Observed on-kill hits still land when the ordinary hit chance is zero.
+    const averageHit = hitChance > 0 ? row.values.averageHit / (hitChance / 100) : row.combat.landedHit;
+    const damageKey = event.trigger ? "netherDps" : event.kind === "burst" ? "spellBurstDps"
+      : event.kind === "repeat" || event.kind === "fissure" ? "repeatDps" : "manualDps";
+    recordDamage(event.row, damageKey, averageHit * hitMultiplier, time);
     if (row.combat.tags.includes("Spell") && averageHit > 0 && time + eps >= elixirInfiltrationReady
       && (build.skills.elixirs ?? []).some((s,i) => s?.skillId === "iridescent-butterfly-distillate" && elixirState(time)[`elixir${i}`])) {
       for (const type of Object.keys(infiltrations)) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
       elixirInfiltrationReady = time + 1;
     }
-    const lightning = row.pools.find(p => p.type === "lightning");
-    let actualLightning = 0;
-    if (lightning && input.numbedEnabled === 1) {
+    const lightning = row.pools.filter(p => p.type === "lightning");
+    if (numbedEnabled && inMeasurement(time) && hitMultiplier > 0 && lightning.some(p=>p.max>0)) {
+      playerLightningHits++;
+      const bonus = row.combat.numbedHitBonus * hitMultiplier;
+      if (bonus > 0) {
+        playerNumbedHits++;
+        playerNumbedDamage += bonus;
+      }
+    }
+    let actualLightning = 0, lightningCritical=false;
+    const manualNumbed = input.numbedEnabled === 1;
+    const canStartNumbed = row.numbedOnHit || manualNumbed && (event.row === 0 || has('thea-numbed-on-hit') || has('thea-numbed-consume'));
+    if (lightning.length && numbedEnabled && (canStartNumbed || hadNumbed || gearNumbedCritical>0)) {
+      if (lightning.filter(p => p.min !== p.max).length > 1) blockers.add("한 번의 적중에 포함된 여러 번개 대미지 범위의 굴림 방식은 미확인입니다.");
       const rolls = Array.from({ length: Math.abs(row.combat.luck) + 1 }, random);
       const roll = row.combat.luck >= 0 ? Math.max(...rolls) : Math.min(...rolls);
       const c = row.combat.critical;
-      const crit = random() < c.effectiveCriticalChance / 100 ? c.criticalDamage / 100 * c.criticalOnlyMultiplier : 1;
+      lightningCritical = random() < c.effectiveCriticalChance / 100;
+      const crit = lightningCritical ? c.criticalDamage / 100 * c.criticalOnlyMultiplier : 1;
       const d = random(), dbl = d < c.quadrupleDamageChance / 100 ? 4 : d < c.doubleDamageChance / 100 ? 2 : 1;
-      actualLightning = (lightning.min + (lightning.max - lightning.min) * roll) * row.combat.attributeMultiplier * row.combat.takenMultiplier * crit * dbl * hitMultiplier;
+      actualLightning = sum(lightning.map(p => p.min + (p.max - p.min) * roll)) * row.combat.attributeMultiplier * row.combat.takenMultiplier * crit * dbl * hitMultiplier;
     }
     runTriggers("hitRate", time, ctx, e => (!e.requiresIgnite || hadIgnite) && (!e.requiresNumbed || hadNumbed));
     if (has("thea-aggression")) aggressionUntil = time + rules.aggression.duration;
@@ -182,7 +287,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const chance = input.igniteChance + bonus('damaging_ailment_chance') + (has("thea-ignite-chance") ? 3 * Math.min(18, state.stacks.Tenacity) : 0);
       if (random() < Math.min(1, chance / 100)) {
         const eligible = new Set(["damage", "elemental_damage", "fire_damage", "damage_over_time", "ailment_damage"]);
-        for(const [tag,stat] of [['Slash-Strike','slash_strike'],['Demolisher','demolisher'],['Area','area'],['Projectile','projectile']])if(row.combat.tags.includes(tag))eligible.add(`${stat}_ailment_damage`);
+        for(const [stat,tag] of Object.entries(SEASON_SKILL_AILMENT_TAGS))if(row.combat.tags.includes(tag))eligible.add(stat);
         const modifiers = [...row.combat.effects.filter(e => eligible.has(e.stat)), ...row.combat.igniteSupportEffects];
         const inc = input.igniteIncreased + sum(modifiers.filter(e => e.operation === "add_percent").map(e => e.value));
         const more = modifiers.filter(e => e.operation === "more").reduce((n, e) => n * (1 + e.value / 100), 1);
@@ -191,26 +296,39 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           *netherMore(row.combat.effects,'enemy_dot_damage_taken')*netherMore(row.combat.effects,'enemy_all_damage_taken');
         const scorch = row.combat.elixirScorch || has("thea-scorch") && state.stacks.Tenacity >= 10;
         ailments.ignite({ damage, scorch, expires: time + input.igniteDuration, row: event.row });
-        counts[scorch ? "scorches" : "ignites"]++;
-        if (input.dotTriggerRate > 0 && !Number.isFinite(nextDotTrigger)) nextDotTrigger = time + 1 / input.dotTriggerRate;
+        count(time, scorch ? "scorches" : "ignites");
+        if (dotRate > 0 && !Number.isFinite(nextDotTrigger)) {
+          dotTriggerStart = time;
+          dotTriggerOccurrence = 1;
+          nextDotTrigger = dotTriggerStart + dotTriggerOccurrence / dotRate;
+        }
       }
     }
-    if (event.row === 0 && actualLightning > 0 && input.numbedEnabled === 1) {
-      const extra = has("thea-numbed-consume") ? 1 : 0;
-      if (has("thea-numbed-on-hit") || random() < input.numbedChance / 100) inflictNumbed(time, 1 + extra);
+    if (actualLightning > 0) {
+      const extra = manualNumbed && has("thea-numbed-consume") ? 1 : 0;
+      const baseStacks = row.numbedOnHit || manualNumbed && (has("thea-numbed-on-hit") || event.row === 0 && random() < input.numbedChance / 100) ? 1+extra : 0;
+      if (baseStacks) inflictNumbed(time, baseStacks);
       const thresholdStacks = Math.floor(actualLightning / (input.enemyLifeShield * input.numbedThreshold / 100));
       if (hadNumbed && thresholdStacks > 0) inflictNumbed(time, thresholdStacks + extra);
-      if (has("thea-numbed-consume") && ctx.runtime.trigger(numbedConsume, time, ctx.stacks, ctx.caps, ctx.expires)) inflictNumbed(time, 2 + extra);
+      const consumeStacks=extra && ctx.runtime.trigger(numbedConsume, time, ctx.stacks, ctx.caps, ctx.expires);
+      if (consumeStacks) inflictNumbed(time, 2 + extra);
+      if (gearNumbedStacks>0 && Number(baseStacks>0)+Number(hadNumbed&&thresholdStacks>0)+Number(Boolean(consumeStacks))>1)
+        blockers.add('한 적중에 마취 부여 경로가 겹칠 때 썬더볼트 조종자의 추가 중첩 적용 횟수는 확인되지 않았습니다.');
+      if (gearNumbedCritical>0 && lightningCritical) {
+        if (gearNumbedUntil>time+eps) blockers.add('썬더볼트 조종자의 번개 크리티컬 효과가 겹칠 때 갱신·중첩 규칙은 확인되지 않았습니다.');
+        gearNumbedUntil=time+2;
+      }
     }
     const deterioration=mechanics.find(m=>m.kind==='nether-deterioration');
-    const erosion=row.pools.find(p=>p.type==='erosion');
-    if(deterioration&&erosion&&random()<deterioration.chance/100&&deteriorations.filter(d=>d.player).length<99) {
+    const erosion=row.pools.filter(p=>p.type==='erosion');
+    if(deterioration&&erosion.length&&random()<deterioration.chance/100&&deteriorations.length<99) {
+      if(erosion.filter(p=>p.min!==p.max).length>1)blockers.add('한 번의 적중에 포함된 여러 침식 대미지 범위의 굴림 방식은 미확인입니다.');
       const c=row.combat.critical;
       const crit=random()<c.effectiveCriticalChance/100?c.criticalDamage/100*c.criticalOnlyMultiplier:1;
       const d=random(),dbl=d<c.quadrupleDamageChance/100?4:d<c.doubleDamageChance/100?2:1;
       const rolls=Array.from({length:Math.abs(row.combat.luck)+1},random);
       const roll=row.combat.luck>=0?Math.max(...rolls):Math.min(...rolls);
-      const hit=(erosion.min+(erosion.max-erosion.min)*roll)*row.combat.attributeMultiplier*row.combat.takenMultiplier*crit*dbl*hitMultiplier;
+      const hit=sum(erosion.map(p=>p.min+(p.max-p.min)*roll))*row.combat.attributeMultiplier*row.combat.takenMultiplier*crit*dbl*hitMultiplier;
       deteriorations.push({row:event.row,player:true,at:time+1,damage:netherDeterioration(row.combat.effects,hit,100)});
     }
   }
@@ -219,13 +337,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     Object.assign(state.events, event.castBonuses);
     const row = rowAt(state, event.row);
     if (!row?.supported) return;
-    counts.followupHits++;
+    count(time, 'followupHits');
     resolveHit(event, time, ctx, state, row, event.hitMultiplier, event.ailmentWeight);
   }
   function cast(event, time, ctx) {
     const b = config[event.row];
     let state = ctx.snapshot(), row = rowAt(state, event.row);
     if (!row?.supported) return;
+    if (event.kind === 'manual' || event.kind === 'multi' || event.activationCost)
+      recordCastCost(event.row,event.activationCost ?? row,time,ctx);
     const attack = row.combat.tags.includes("Attack");
     const projectile = row.combat.tags.includes("Projectile");
     let attackBonus = false, projectileBonus = false;
@@ -240,9 +360,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     currentTenacity = ctx.stacks.Tenacity; recentAgility = ctx.runtime.state(time).recentAgility > 0;
     const sequenceMultiplier = 1 + event.index * ((b.multistrikeIncrement ?? 0) + (has("thea-multistrike") ? 16 : 0)) / 100;
     const burstMultiplier = (event.kind === "burst" ? row.combat.burstHitMore : 1)*(event.triggerMultiplier??1);
-    const landed = event.kind === "repeat" || random() < b.hitChance / 100;
-    counts.casts++; if (event.index > 0) counts.multistrikes++;
-    if (event.kind === "burst") counts.spellBurst++;
+    const landed = row.pools.length > 0 && (event.kind === "repeat" || random() < b.hitChance / 100);
+    count(time, 'casts');
+    if (event.index > 0) count(time, 'multistrikes');
+    if (event.kind === "burst") count(time, 'spellBurst');
     if (landed) {
       const castMultiplier = sequenceMultiplier * burstMultiplier;
       resolveHit(event, time, ctx, state, row, castMultiplier, 1);
@@ -252,7 +373,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       for (let i = 1; i < (route?.hits ?? 1); i++) {
         const at = time + route.delaysMs[i] / 1000;
         if (at >= warmup + seconds) break;
-        const followup = { kind: event.kind, followup: true, castNumber: counts.casts, at, row: event.row,
+        const followup = { kind: event.kind, trigger: event.trigger, followup: true, castNumber: counts.casts, at, row: event.row,
           castBonuses: { attackBonus: Number(attackBonus), projectileBonus: Number(projectileBonus), multistrikeChance: b.multistrikeChance ?? 0 },
           hitMultiplier: castMultiplier * route.weights[i], ailmentWeight: route.repeatWeight };
         if (route.delaysMs[i] === 0) followupHit(followup, time, ctx);
@@ -275,19 +396,22 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (event.kind === "multi" && event.index === event.max) runTriggers("multistrikeRate", time, ctx);
   }
   return {
-    blockers, counts, rows,
+    blockers, counts, measuredCounts, rows, costs, channelCosts, manaRecovery, playerNumbedDuration,
     get hasProjectileTie() { return hasProjectileTie; },
-    result() { return { numbedAverage: numbedArea / seconds, scorchUptime: 100 * scorchArea / seconds,
-      igniteUptime: 100 * igniteTime / seconds, numbedUptime: 100 * numbedTime / seconds }; },
+    get hasFissureTie() { return hasFissureTie; },
+    result() { return { numbedAverage: numbedArea / seconds, numbedEffectAverage: numbedEffectArea / seconds, scorchUptime: 100 * scorchArea / seconds,
+      igniteUptime: 100 * igniteTime / seconds, numbedUptime: 100 * numbedTime / seconds,
+      playerLightningHits, playerNumbedHits, playerNumbedHitDps: playerNumbedDamage / seconds }; },
     state(time, stacks, events) { currentTenacity = stacks.Tenacity; recentAgility = events.recentAgility > 0; return { ...values(), ...elixirState(time), ...Object.fromEntries(Object.entries(infiltrations).map(([type,until]) => [`${type}Infiltration`, Number(until > time + eps || events[`${type}Infiltration`])])), attackAggression: Number(aggressionUntil > time + eps) }; },
-    next() { return Math.min(Infinity, ...Object.values(infiltrations).filter(t => t > clock + eps), ...queue.map(e => e.at), ...wilts.map(e => e.expires), ...deteriorations.map(e => e.at), ailments.next(), aggressionUntil || Infinity, afflictionUntil || Infinity, nextDotTrigger, nextElixir(clock)); },
+    next() { return Math.min(Infinity, ...Object.values(infiltrations).filter(t => t > clock + eps), ...queue.map(e => e.at), ...wilts.map(e => e.expires), ...deteriorations.map(e => e.at), ailments.next(), gearNumbedUntil>clock+eps?gearNumbedUntil:Infinity, aggressionUntil || Infinity, afflictionUntil || Infinity, nextDotTrigger, nextElixir(clock), dotBoundaries.find(time=>time>clock) ?? Infinity); },
     expire(time) { clock = time; ailments.expire(time); for (let i = wilts.length - 1; i >= 0; i--) if (wilts[i].expires <= time + eps) wilts.splice(i, 1); if (aggressionUntil <= time + eps) aggressionUntil = 0; if (afflictionUntil <= time + eps) { afflictionUntil = 0; affliction = 0; } },
     advance(from, to, state) {
       currentTenacity = state.stacks.Tenacity; recentAgility = state.events.recentAgility > 0;
-      const r = getReport({ ...state, events: { ...state.events, ...values() } });
+      const ailmentState=values();
+      const r = getReport({ ...state, events: { ...state.events, ...ailmentState } });
       if (!r.fullDps.supported) r.fullDps.blockers.forEach(s => blockers.add(s));
       const delta = to - from, active = activeIgnites();
-      const native = r.fullDps.rows.filter(row => row.combat?.hasDot);
+      const native = r.fullDps.rows.filter(row => row.combat?.hasDot && dotInEffect(row,from));
       const minionDots = row => (row.ailmentDps ?? 0) + (row.minionSkills ?? []).filter(a => a.persistent).reduce((sum,a) => sum + a.dps, 0);
       const dotActive = active.length > 0 || wilts.length > 0 || r.fullDps.rows.some(row => minionDots(row) > 0) || native.some(r => r.combat.dotWithoutAffliction > 0);
       if (dotActive) afflictionUntil = to + rules.affliction.duration;
@@ -297,8 +421,24 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const fireTaken = r.componentProjection.effects.filter(e => e.stat === "fire_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1);
       const lo = Math.max(0, warmup - from), hi = Math.min(delta, warmup + seconds - from), w = Math.max(0, hi - lo);
       if (w) {
+        for (const row of r.fullDps.rows) {
+          const channel = channelCosts.get(row.rowIndex);
+          if (!channel) continue;
+          channel.possibleCharges += (row.channelCost?.max ?? 0) * w;
+          if (!Number.isFinite(row.manaPerUse) || !Number.isFinite(row.lifePerUse)) channel.variable = true;
+          else if (channel.mana === null) Object.assign(channel, {mana: row.manaPerUse, life: row.lifePerUse});
+          else if (channel.mana !== row.manaPerUse || channel.life !== row.lifePerUse) channel.variable = true;
+        }
+        const recovery = r.character?.survival?.manaScenarios ?? [];
+        for (const [id, amount] of manaRecovery) {
+          const rate = recovery.find(row => row.id === id)?.value;
+          manaRecovery.set(id, Number.isFinite(amount) && Number.isFinite(rate) ? amount + rate * w : null);
+        }
         if (active.length) igniteTime += w;
-        if (ailments.numbed() > 0) numbedTime += w;
+        if (ailments.numbed() > 0) {
+          numbedTime += w;
+          numbedEffectArea += ailmentState.numbedEffect * w;
+        }
         numbedArea += ailments.numbed() * w; if (active.some(e => e.scorch)) scorchArea += w;
         const first = r.fullDps.rows.find(r => r.rowIndex === 0);
         const afflictionEffect = first?.combat?.afflictionEffect ?? 1;
@@ -336,16 +476,31 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       for (const row of r.fullDps.rows) if (row.combat?.eligibleBurst && row.combat.maxBurst > 0) charge.set(row.rowIndex, Math.min(1, charge.get(row.rowIndex) + delta * row.combat.burstChargeSpeed / 2));
     },
     apply(time, ctx) {
+      eventMana = 0;
       currentTenacity = ctx.stacks.Tenacity; recentAgility = ctx.runtime.state(time).recentAgility > 0;
       const due = queue.filter(e => e.at <= time + eps); for (const e of due) queue.splice(queue.indexOf(e), 1);
-      for (const event of deteriorations.filter(e => e.at <= time + eps)) { recordDamage(event.row, event.player?'specialDps':"minionDps", event.damage, time); omenDamage(event.damage, time, getReport(ctx.snapshot())); deteriorations.splice(deteriorations.indexOf(event), 1); }
+      for (const event of deteriorations.filter(e => e.at <= time + eps)) {
+        recordDamage(event.row, event.player ? 'playerDeteriorationDps' : 'minionDps', event.damage, time);
+        if (!event.player) recordDamage(event.row, 'minionDeteriorationDps', event.damage, time);
+        omenDamage(event.damage, time, getReport(ctx.snapshot()));
+        deteriorations.splice(deteriorations.indexOf(event), 1);
+      }
       // Keep the order of one projectile's route. The client damage map does
       // not establish priority between projectiles from independent casts.
       const arrivals = due.filter(e => e.followup);
       const actions = due.filter(e => !e.followup);
-      if (arrivals.length && (actions.length || arrivals.some(e => e.castNumber !== arrivals[0].castNumber))) hasProjectileTie = true;
+      if (arrivals.length && (actions.some(e=>e.kind!=='summon') || arrivals.some(e => e.castNumber !== arrivals[0].castNumber))) {
+        if (arrivals.some(e=>e.kind==='fissure')) hasFissureTie = true;
+        else hasProjectileTie = true;
+      }
       if (!newCastFirst) for (const e of arrivals) followupHit(e, time, ctx);
       for (const e of actions) {
+        if (e.kind === 'summon') {
+          const row = rowAt(ctx.snapshot(),e.row);
+          recordCastCost(e.row,row,time,ctx);
+          schedule(e,config[e.row].summonCastRate);
+          continue;
+        }
         if(e.kind==='nether') {
           const row=rowAt(ctx.snapshot(),e.row);
           if(e.trigger.trigger==='burst') {
@@ -353,7 +508,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
             charge.set(e.row,0);runTriggers('burstRate',time,ctx);
           }
           for(let n=0;n<e.trigger.count;n++)cast({...e,kind:e.trigger.trigger==='burst'?'burst':'nether-hit',triggerMultiplier:e.trigger.multiplier},time,ctx);
-          push({...e,at:e.at+1/e.trigger.rate});continue;
+          schedule(e,e.trigger.rate);continue;
         }
         if (e.kind === "module") { moduleCast(e, time, ctx); continue; }
         if (e.kind === "multi" && chains.get(e.row) !== e.token) continue;
@@ -361,18 +516,37 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           const row = rowAt(ctx.snapshot(), e.row);
           if (!row?.nether?.automaticBurst && row?.combat?.eligibleBurst && row.combat.maxBurst > 0 && charge.get(e.row) >= 1 - eps) {
             charge.set(e.row, 0); runTriggers("burstRate", time, ctx);
-            for (let i = 0; i <= row.combat.maxBurst; i++) cast({ ...e, kind: "burst" }, time, ctx);
+            for (let i = 0; i <= row.combat.maxBurst; i++) cast({ ...e, kind: "burst", activationCost: i === 0 ? row : null }, time, ctx);
           } else cast(e, time, ctx);
-          push({ ...e, at: e.at + 1 / config[e.row].castRate });
-        } else { cast(e, time, ctx); if (e.kind === "repeat") push({ ...e, at: e.at + 1 / config[e.row].repeatHits }); }
+          schedule(e,config[e.row].castRate);
+        } else { cast(e, time, ctx); if (e.kind === "repeat") schedule(e,config[e.row].repeatHits); }
       }
       if (newCastFirst) {
         // Stable sort preserves route order for hits of the same projectile.
         for (const e of arrivals.sort((a, b) => b.castNumber - a.castNumber)) followupHit(e, time, ctx);
       }
       if (nextDotTrigger <= time + eps) {
-        if (activeIgnites().length) { runTriggers("hitRate", time, ctx, e => e.requiresIgnite || e.requiresNumbed && ailments.numbed() > 0); nextDotTrigger += 1 / input.dotTriggerRate; }
-        else nextDotTrigger = Infinity;
+        const burning = activeIgnites().some(effect => effect.damage > 0);
+        const numbed = ailments.numbed() > 0;
+        const activeDot = !burning && nativeDot && (!dotWindows.size || getReport(ctx.snapshot()).fullDps.rows
+          .some(row=>row.combat?.dotWithoutAffliction>0 && dotInEffect(row,time)));
+        if (nextDotTrigger < end - eps && (burning || activeDot)) {
+          runTriggers("hitRate", time, ctx, e => (e.requiresIgnite || e.requiresNumbed)
+            && (!e.requiresIgnite || burning) && (!e.requiresNumbed || numbed));
+        }
+        nextDotTrigger = nativeDot || burning ? dotTriggerStart + ++dotTriggerOccurrence / dotRate : Infinity;
+      }
+      if (manaTrigger && eventMana > 0) {
+        const threshold = maxMana * manaTrigger.threshold;
+        spentMana += eventMana;
+        if (spentMana + eps >= threshold) {
+          if (spentMana + eps >= 2 * threshold || (manaTrigger.ready ?? 0) > time + eps) {
+            blockers.add('0.3초 제한에 걸린 MP 소모의 처리 순서가 미확인입니다. 초당 MP 소모율을 입력하세요.');
+          } else {
+            spentMana = Math.max(0, spentMana - threshold);
+            ctx.runtime.trigger(manaTrigger, time, ctx.stacks, ctx.caps, ctx.expires);
+          }
+        }
       }
     },
   };
@@ -381,6 +555,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
 export function calculateTheaCombatAverage(build, report, calculateState, simulate, options, priorBlockers) {
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics, report), ...report.fullDps.blockers];
+  if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(row => row.channelCost && row.manaPerUse > 0))
+    blockers.push('채널링의 MP 차감 시각을 확인할 수 없습니다. 초당 MP 소모율을 입력하세요.');
   if (build.ss14Inputs.theaEvents.numbedEnabled !== 1 && mechanics.some(m => ["thea-numbed-on-hit", "thea-numbed-consume"].includes(m.kind))
     && report.fullDps.rows.some(r => r.pools?.some(p => p.type === "lightning" && p.max > 0))) blockers.push("선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.");
   if (report.componentProjection.rows.some(r => r.elixirState && r.elixirState.scale === "")) blockers.push("영약의 최종 효과 배율을 선택하세요.");
@@ -390,13 +566,15 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   if (!blockers.length) {
     const rates = report.fullDps.rows.reduce((n, r) => {
       const b = build.ss14Inputs.dps.skills[r.rowIndex];
-      const modules = r.moduleTimeline ? (r.minionSkills ?? []).reduce((sum, a, i) => sum + (a.persistent ? 0 : b[`moduleRate${i}`] * (1 + a.hitCount)), 0) * b.minionCount : 0;
+      const modules = r.moduleTimeline ? (r.minionSkills ?? []).reduce((sum, a, i) => sum + (a.persistent ? 0 : b[`moduleRate${i}`] * (1 + (r.moduleHitEvents ? a.hitCount : 0))), 0) * b.minionCount : 0;
       const hits = r.shotgun?.hits ?? 1;
       const nether = (r.nether?.events ?? []).reduce((v, e) => v + e.rate * e.count * (1 + hits), 0);
       const casts = (b.castRate ?? 0) * (1 + (r.combat?.maxBurst ?? 0) + (b.multistrikeChance ?? 0) / 100);
-      return n + modules + nether + (b.castRate ?? 0) + casts * hits + (b.repeatHits ?? 0);
+      const fissures = (r.fissure?.times?.length ?? 0) / (options.seconds + options.warmup);
+      return n + modules + nether + (r.manualSummonRate ?? 0) + (b.castRate ?? 0) + casts * hits + (b.repeatHits ?? 0) + fissures;
     }, 0);
-    if ((rates + options.events.reduce((n, e) => n + e.rate, 0) + (build.ss14Inputs.theaEvents.dotTriggerRate ?? 0)) * (options.seconds + options.warmup) * 128 > 2000000) blockers.push("복합 계산량이 한도를 넘었습니다. 측정 시간을 줄여 주세요.");
+    const dotRate = usesTheaDotTrigger(build, mechanics, report) ? build.ss14Inputs.theaEvents.dotTriggerRate ?? 0 : 0;
+    if ((rates + options.events.reduce((n, e) => n + e.rate, 0) + dotRate) * (options.seconds + options.warmup) * 128 > 2000000) blockers.push("복합 계산량이 한도를 넘었습니다. 측정 시간을 줄여 주세요.");
   }
   const cache = new Map();
   const getReport = state => {
@@ -406,14 +584,16 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   };
   const results = [], simulations = [], alternateTotals = [];
   let anyProjectileTie = false;
+  let anyFissureTie = false;
   let alternateAvailable = true;
   if (!blockers.length) for (let i = 0; i < 128; i++) {
     const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729 });
     const simulation = simulate({ ...options, seed: 127 + i * 104729, combat });
     if (combat.blockers.size) { blockers.push(...combat.blockers); break; }
     const baselineTotal = finishCombatRows(combat, options.seconds);
-    if (combat.hasProjectileTie) {
-      anyProjectileTie = true;
+    if (combat.hasProjectileTie || combat.hasFissureTie) {
+      anyProjectileTie ||= combat.hasProjectileTie;
+      anyFissureTie ||= combat.hasFissureTie;
       const alternate = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, newCastFirst: true });
       simulate({ ...options, seed: 127 + i * 104729, combat: alternate });
       if (alternate.blockers.size) alternateAvailable = false;
@@ -422,23 +602,56 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     results.push(combat); simulations.push(simulation);
   }
   const supported = !blockers.length && results.length === 128;
-  const rows = report.fullDps.rows.map(r => ({ ...r, supported, values: { ...r.values, ...Object.fromEntries(damageKeys.map(key => [key, supported ? sum(results.map(v => v.rows.get(r.rowIndex)[key])) / 128 : null])) } }));
+  const rows = report.fullDps.rows.map(r => {
+    const usages = results.map(v => v.costs.get(r.rowIndex));
+    const canMeasure = supported && usages.every(Boolean);
+    const perSecond = type => canMeasure ? sum(usages.map(usage => usage[type])) / results.length / options.seconds : null;
+    let channelUsage;
+    if (supported && r.channelCost) {
+      const samples = results.map(run => run.channelCosts.get(r.rowIndex));
+      const [first] = samples, {rate} = r.channelCost;
+      const max = sum(samples.map(s => s.possibleCharges)) / results.length / options.seconds;
+      const variable = samples.some(s => s.variable || s.mana !== first.mana || s.life !== first.life);
+      const valid = rate !== null && rate <= max + eps && (rate === 0 || first.mana !== null && !variable);
+      channelUsage = {channelCost: {rate,max,valid,variable,observed: true},
+        manualManaPerSecond: valid ? first.mana * rate : null,
+        manualLifePerSecond: valid ? first.life * rate : null};
+    }
+    return { ...r, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'), ...channelUsage, supported, values: { ...r.values,
+      ...Object.fromEntries(damageKeys.map(key => [key, supported ? sum(results.map(v => v.rows.get(r.rowIndex)[key])) / 128 : null])) } };
+  });
   const dps = supported ? sum(rows.map(r => r.values.dps)) : null;
   const totals = results.map(r => sum([...r.rows.values()].map(r => r.dps)));
   const standardError = supported ? Math.sqrt(sum(totals.map(v => (v - dps) ** 2)) / 127 / 128) : null;
   const uptime = supported ? sum(simulations.map(s => s.uptime)) / 128 : null;
+  const recovery = (report.character?.survival?.manaScenarios ?? []).map(scenario => {
+    const samples = results.map(run => run.manaRecovery.get(scenario.id));
+    const value = supported && samples.every(Number.isFinite) ? sum(samples) / samples.length / options.seconds : null;
+    return { ...scenario, value };
+  });
+  const averageCounts = key => supported ? Object.fromEntries(Object.keys(results[0][key])
+    .map(k => [k, sum(results.map(r => r[key][k])) / results.length])) : null;
+  const averageBlessings = key => supported ? Object.fromEntries(['gained', 'consumed'].map(kind => [kind,
+    Object.fromEntries(Object.keys(options.caps).map(blessing => [blessing, sum(simulations.map(s => s[key][kind][blessing])) / results.length]))])) : null;
+  const ailmentResults = supported ? results.map(r => r.result()) : [];
+  const averageAilment = key => supported ? sum(ailmentResults.map(r => r[key])) / results.length : null;
+  const lightningHits = averageAilment('playerLightningHits');
   report.theaAverage = { supported, ...options, samples: 128, estimated: true, combat: true, dps, standardError, uptime,
-    projectileTie: supported && anyProjectileTie ? { arrivalsFirstDps: dps, newCastFirstDps: alternateAvailable ? sum(alternateTotals) / results.length : null } : null,
+    projectileTie: supported && (anyProjectileTie || anyFissureTie) ? { arrivalsFirstDps: dps, newCastFirstDps: alternateAvailable ? sum(alternateTotals) / results.length : null } : null,
+    ...(anyFissureTie && {fissureTie:true}),
     doubleUptime: supported ? sum(simulations.map(s => s.doubleUptime)) / 128 : null,
-    numbedAverage: supported ? sum(results.map(r => r.result().numbedAverage)) / 128 : null,
-    scorchUptime: supported ? sum(results.map(r => r.result().scorchUptime)) / 128 : null,
-    igniteUptime: supported ? sum(results.map(r => r.result().igniteUptime)) / results.length : null,
-    numbedUptime: supported ? sum(results.map(r => r.result().numbedUptime)) / results.length : null,
-    counts: supported ? Object.fromEntries(Object.keys(results[0].counts).map(k => [k, sum(results.map(r => r.counts[k])) / 128])) : null,
-    extraBlessings: supported ? Object.fromEntries(['gained', 'consumed'].map(kind => [kind,
-      Object.fromEntries(Object.keys(options.caps).map(key => [key, sum(simulations.map(s => s.eventTotals[kind][key])) / 128]))])) : null,
+    numbedAverage: averageAilment('numbedAverage'),
+    numbedEffectAverage: combatNumbedEnabled(build, report) ? averageAilment('numbedEffectAverage') : null,
+    playerNumbedDuration: supported && combatNumbedEnabled(build, report) ? results[0].playerNumbedDuration : null,
+    scorchUptime: averageAilment('scorchUptime'),
+    igniteUptime: averageAilment('igniteUptime'),
+    numbedUptime: averageAilment('numbedUptime'),
+    playerNumbedHits: lightningHits > 0 ? { lightningHits, boostedHits:averageAilment('playerNumbedHits'), bonusDps:averageAilment('playerNumbedHitDps') } : null,
+    counts: averageCounts('counts'), measuredCounts: averageCounts('measuredCounts'),
+    extraBlessings: averageBlessings('eventTotals'), measuredBlessings: averageBlessings('measuredEventTotals'),
     blockers: [...new Set(blockers)], receipt: rules.receiptSha256 };
   report.fullDps = { ...report.fullDps, supported, rows, dps, scope: "ss14-thea-joint-combat", blockers: [...new Set(blockers)],
+    manualResources: manualResourceBalance(rows, recovery, build.ss14Inputs.dps?.skills),
     receipts: [...report.fullDps.receipts, ...Object.values(rules.pages)],
     limitation: "입력한 시전 간격으로 축복 소모·매직 버스트·연속 공격·점화·스코치·마취를 같은 시간표에서 128회 계산합니다. 점화는 높은 대미지 중첩부터 적용하며, 마취는 각 중첩의 만료와 번개 명중 임계값을 계산합니다. 표준오차는 모의 계산 평균의 안정성 지표이며 실전 오차 범위가 아닙니다. 아래 속성·크리티컬 상세는 전투 시작 상태입니다." };
   report.fullDpsSupported = supported; report.summary.dps = dps;

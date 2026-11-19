@@ -2,6 +2,46 @@
 // invents proc frequency, uptime, a missing number, or a target's hit count.
 const number = '[+-]?\\d+(?:\\.\\d+)?';
 const trim = s => s.trim().replace(/\s*[.]$/u, '').trim();
+export const exclusiveResourceStates = [
+  ['self-low-life', 'at Full Life'],
+  ['self-low-energy-shield', 'self-full-energy-shield'],
+];
+
+export const nearbyEnemyGroups = ['nearby-enemy-present', 'nearby-enemy-alone'];
+export const nearbyEnemyCountInput = 'nearby-enemy-count';
+
+export function nearbyEnemyState(group, count) {
+  return Number(group === nearbyEnemyGroups[0] ? count > 0 : count === 1);
+}
+
+export function nearbyEnemyConditionValue(control, count) {
+  return Number(Boolean(nearbyEnemyState(control.conditionGroup, count)) !== !!control.inverted);
+}
+
+export function matchingNearbyEnemyCounts(controls) {
+  return [0,1,2].filter(count=>controls.every(c=>c.value==='' || c.value===nearbyEnemyConditionValue(c,count)));
+}
+
+export function incompatibleNearbyEnemyStates(left, right = left) {
+  const [present, alone] = nearbyEnemyGroups;
+  return !!(left.get(present)?.has(0) && right.get(alone)?.has(1)
+    || right.get(present)?.has(0) && left.get(alone)?.has(1));
+}
+
+export function boundSeasonConditionGroups(projection, bindings) {
+  const groups = new Map();
+  for (const row of projection?.rows ?? []) for (const control of row.conditionControls ?? []) {
+    const {key, conditionGroup, sourcePageSha256, value} = control;
+    const binding = bindings?.[key];
+    if (control.automatic || !sourcePageSha256 || binding?.sourcePageSha256 !== sourcePageSha256
+      || !Number.isFinite(value) || binding.value !== value) continue;
+    const group = conditionGroup ?? key;
+    const values = groups.get(group) ?? new Set();
+    values.add(control.inverted ? 1 - value : value);
+    groups.set(group, values);
+  }
+  return groups;
+}
 const unitNames = new Map([
   ['Strength','힘'],['Dexterity','민첩'],['Intelligence','지혜'],['Max Mana','최대 MP'],
   ['Max Life','최대 HP'],['Armor','아머'],['Evasion','회피'],['Fervor Rating','열의 수치'],

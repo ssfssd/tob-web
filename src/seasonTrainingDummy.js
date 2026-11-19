@@ -19,5 +19,5 @@ export function renderTrainingDummyPicker(enemy) {
     <option value=""${preset ? "" : " selected"} disabled>${custom ? "직접 설정한 방어" : "레벨 선택"}</option>
     ${trainingDummyLevels.map(({ level, armor, resistance }) =>
       `<option value="${level}"${level===preset?.level ? " selected" : ""}>${level}레벨 · 아머 ${armor.toLocaleString('ko-KR')} · 저항 ${resistance}%</option>`).join('')}
-    </select></label><p class="native-stat-note">마을 허수아비의 레벨 효과에 따른 아머와 화염·냉기·번개·부식 저항을 적용합니다. 관통은 계산 시 반영합니다.</p>`;
+    </select></label><details data-role="training-dummy-rule"><summary>허수아비 방어 기준</summary><p>마을 허수아비의 레벨 효과에 따른 아머와 화염·냉기·번개·부식 저항을 적용합니다. 관통은 계산 시 반영합니다.</p></details>`;
 }

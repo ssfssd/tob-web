@@ -1,27 +1,56 @@
-.season-native {height:100dvh;display:flex;flex-direction:column;color:#e7e5ed;background:#10121a url('../assets/ingame-ui/game/common-background.png') center/cover;font-family:inherit}
+.season-native {height:100dvh;display:flex;flex-direction:column;color:#e7e5ed;background:#10121a;font-family:inherit}
 .season-native .planner-header {padding:16px 24px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;background:#171924;border-bottom:1px solid #444150}
 .native-brand {font-size:24px;color:#e2d6ad;white-space:nowrap}.native-brand small {font-size:13px;margin-left:5px}
 .season-native .build-chip {flex:1;min-width:180px}.season-native .build-chip input {width:100%}
 .season-native .quick-category-menu {margin:0;padding:12px 24px;gap:8px;display:flex;flex-wrap:wrap;background:#1b1c29}
-.season-native button[aria-pressed=true] {border-color:#dec683;background:#433b34;color:#fff4d5}
+.season-native button[aria-pressed=true] {border-color:#71717a;background:#303034;color:#fff}
 .native-content {display:grid;grid-template-columns:minmax(0,1fr) 300px;flex:1;min-height:0}
 .native-numeric-stats {font-variant-numeric:tabular-nums}
 .native-numeric-stats h2,.native-numeric-stats h3 {font-size:inherit;margin:.5em 0}
 .native-numeric-stats .native-stat-note {font-size:.8em;margin:.25em 0;color:inherit;opacity:.8}
 .native-stat-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65em;margin:.75em 0}
 .native-stat-cell {min-width:0}.native-stat-cell dt {font-size:.8em;opacity:.8}.native-stat-cell dd {margin:.25em 0;font-weight:700;overflow-wrap:anywhere}
+.native-numeric-stats .native-stat-list {margin:0 0 12px;padding:4px 0;background:#131316}
+.native-stat-list .native-stat-cell {display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;padding:4px 12px;box-sizing:border-box}
+.native-stat-list .native-stat-cell dt {font-size:12px;color:#b4b4be;opacity:1}
+.native-stat-list .native-stat-cell dd {margin:0;color:#eeeef2;font-size:13px;text-align:right}
+.season-native .native-numeric-stats>.native-stat-link {display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;margin-bottom:4px;padding:6px 12px;text-align:left}
+.native-numeric-stats>.native-stat-link strong {min-width:0;overflow-wrap:anywhere}
+.native-defense-overview {display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.native-defense-overview .native-stat-cell {padding-inline:6px;gap:4px}
+.native-defense-overview .native-stat-cell dt,.native-defense-overview .native-stat-cell dd {white-space:nowrap}
+@media(max-width:360px){.native-defense-overview {grid-template-columns:minmax(0,1fr)}}
 .native-numeric-skill {border-top:1px solid currentColor;padding-top:.5em}
 .native-numeric-option summary {display:flex;flex-direction:column;gap:.25em}
 .native-numeric-option ul {padding-left:1em}.native-numeric-option li {margin:.75em 0;font-size:.85em;overflow-wrap:anywhere}
 .native-numeric-option li span,.native-numeric-option li b {display:block}
 .native-numeric-stats [hidden] {display:none!important}
+.upgrade-resource-list {list-style:none;padding:0;font-size:.85em}
+.upgrade-resource-list li {display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid #36363a}
+.upgrade-resource-list b {white-space:nowrap;font-variant-numeric:tabular-nums}
+.season-native .native-result-panel .analysis-roll-toggle {display:flex;flex-direction:row;align-items:center;gap:8px}
+.analysis-roll-toggle input[type=checkbox] {width:16px;min-height:16px}
+.upgrade-combination {display:grid;gap:6px;border-top:1px solid #52515b;padding-top:10px}
+.dock-effect-condition {display:grid;grid-template-columns:minmax(0,1fr) minmax(74px,30%);gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #36363a}
+.dock-effect-condition strong,.dock-effect-condition small {display:block;overflow-wrap:anywhere}
+.dock-effect-condition output {text-align:right;font-size:12px}
+.season-native .dock-effect-condition details,.season-native .dock-effect-condition summary {margin:0;padding:2px 0;font-size:12px}
 .season-native-scroll {overflow:auto;padding:24px;min-width:0}.season-native .planner-section {margin:0;max-width:1100px;min-height:100%}
 .season-native h1 {font-size:21px;margin:0 0 24px}.season-native h2 {font-size:18px}
 .season-native label {display:flex;flex-direction:column;gap:6px;margin:8px 0;min-width:0}.season-native input,.season-native select,.season-native textarea {max-width:100%;width:100%;min-height:38px;background:#11131c;color:#ecebf2;border:1px solid #555162;border-radius:4px;padding:8px}
 .season-native input[type=number] {max-width:180px}.season-native textarea {min-height:140px;resize:vertical}.season-native button {min-height:38px}
 .native-requirements {display:flex;flex-direction:column;gap:6px;margin:14px 0}.native-requirements button{text-align:left}.native-extension-launch{display:flex;align-items:center;gap:14px;margin:24px 0;flex-wrap:wrap}.native-extension-launch span{color:#b7ac91;font-size:13px}
-.season-native button {font:inherit;color:#e3dccc;background:linear-gradient(#36343e,#262530);border:1px solid #62594b;border-radius:3px;padding:8px 14px;cursor:pointer}.season-native button:hover{background:#49424a;border-color:#bc9e6b}.season-native button:focus-visible{outline:2px solid #efcf8d;outline-offset:2px}.season-native .hero-stage-grid{display:flex;flex-direction:column;align-self:center;gap:12px}
+.season-native button {font:inherit;color:#e8e8eb;background:#242426;border:1px solid #414145;border-radius:6px;padding:8px 14px;cursor:pointer}.season-native button:hover{background:#343438;border-color:#73737b}.season-native button:focus-visible{outline:2px solid #c7d9ff;outline-offset:2px}.season-native .hero-stage-grid{display:flex;flex-direction:column;align-self:center;gap:12px}
 .season-native fieldset {border:1px solid #454150;border-radius:4px;padding:14px;margin:14px 0;min-width:0}.season-native legend {color:#d4bd89;padding:0 8px}
+.season-native [data-role="season-dps-input"] > fieldset {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+.season-native [data-role="season-dps-input"] > fieldset > label {display:grid;grid-template-columns:minmax(0,1fr) 110px;align-items:center;gap:10px;margin:0;overflow-wrap:anywhere}
+.season-native [data-role="season-dps-input"] > fieldset > label > input,.season-native [data-role="season-dps-input"] > fieldset > label > select {width:100%;min-width:0}
+.season-native [data-role="season-dps-input"] > fieldset > details {grid-column:1/-1;margin:0}
+.season-native [data-role="season-dps-input"] > fieldset > label:has([data-season-edit="dummy-level"]) {grid-column:1/-1;grid-template-columns:1fr}
+@media(max-width:520px){
+  .season-native [data-role="season-dps-input"] > fieldset {grid-template-columns:minmax(0,1fr)}
+  .season-native [data-role="season-dps-input"] > fieldset > label > input,.season-native [data-role="season-dps-input"] > fieldset > label > select {min-height:44px}
+}
 .season-native details {margin:12px 0}.season-native summary {cursor:pointer;padding:9px 0;color:#d3c3a5}.season-native p {line-height:1.65;white-space:pre-line;overflow-wrap:anywhere}
 .native-dps-dock {padding:24px 20px;border-left:1px solid #49414b;background:#181925;overflow:auto}.native-dps-dock>strong {display:block;font-size:30px;color:#f2d18f;margin-top:10px}.native-dps-dock>small {color:#bab6c8}.native-dps-dock>button {margin:4px}.native-dps-dock [data-role=season-full-dps] {padding:0;border:0}.native-dps-dock table {font-size:12px}
 .season-native .hero-memory-grid {grid-template-columns:minmax(200px,1fr) minmax(250px,1.2fr);gap:24px}.season-native .hero-card {height:420px;min-height:300px}.season-native .hero-card-copy {bottom:70px}.season-native .hero-card-change {top:auto;left:auto;right:12px;bottom:18px;width:auto;height:auto;white-space:nowrap}.season-native .hero-icon {object-fit:contain}

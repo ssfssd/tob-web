@@ -136,7 +136,7 @@ import {
   getScreenshotTalentTargets,
   matchScreenshotCatalogItems,
 } from "./screenshotImportSelection.js";
-import { recognizeScreenshotText, cropScreenshotFile, normalizeScreenshotRegion } from "./screenshotRecognition.js";
+import { loadTesseract, recognizeScreenshotText, cropScreenshotFile, normalizeScreenshotRegion } from "./screenshotRecognition.js";
 import { getScreenshotValueCandidates, applyScreenshotGearValues } from "./screenshotValues.js";
 import { resolveScreenshotCraftCandidate } from "./screenshotCraftValues.js";
 import {
@@ -1172,7 +1172,7 @@ const state = {
   pendingSlot: null,
 };
 
-const seasonPlanner = createSeasonPlanner(localStorage, state.build, { sourceUnavailable: Boolean(getBuildStorageRevision(state.build)?.unreadable) });
+const seasonPlanner = createSeasonPlanner(localStorage, state.build, { sourceUnavailable: Boolean(getBuildStorageRevision(state.build)?.unreadable), recoverDraft:true });
 let currentBuildRevision = getBuildStorageRevision(state.build);
 let noticeTimer = 0;
 let overlayOpenerToken = null;
@@ -11659,20 +11659,6 @@ const SCREENSHOT_MATCH_CATEGORIES = Object.freeze([
   "talents",
   "heroMemory",
 ]);
-const TESSERACT_CDN = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-
-async function loadTesseract() {
-  if (window.Tesseract) return window.Tesseract;
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = TESSERACT_CDN;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("tesseract load failed"));
-    document.head.appendChild(script);
-  });
-  return window.Tesseract;
-}
-
 function screenshotMatchCandidates() {
   return SCREENSHOT_MATCH_CATEGORIES.flatMap((categoryId) => (
     getCatalogItems(categoryId).map((item) => ({

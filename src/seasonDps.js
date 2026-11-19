@@ -3,7 +3,7 @@ import { logReviewRows } from "./seasonLogReview.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { bingRecovery } from "./seasonBingRecovery.js";
-import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_STATS, SEASON_DEFENSIVE_STATS } from "./seasonGearEffects.js";
+import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_STATS, SEASON_GEAR_COST_STATS, SEASON_GEAR_NUMBED_STATS, SEASON_GEAR_NUMBED_MODIFIERS, SEASON_DEFENSIVE_STATS, seasonMinionDamageConversion, seasonOutgoingDamageConversion } from "./seasonGearEffects.js";
 import { SS14_GEAR_EN } from './data/ss14Gear.en.generated.js';
 import { SEASON_BLESSING_CAP_STATS } from './seasonBlessings.js';
 import { SEASON_CURSE_STATS } from './seasonCurseEffects.js';
@@ -12,20 +12,26 @@ import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { seasonDirectDamageStat, seasonDpsSpecialStat } from "./seasonCoupledCalculation.js";
 import { findItemById } from "./catalog.js";
 import { mechanicPage, seasonMechanicPins } from "./seasonMechanicInputs.js";
-import { SEASON_MINION_FIELDS, seasonMinionFieldKeys, seasonMinionProfile, calculateSeasonMinion } from "./seasonMinions.js";
+import { SEASON_MINION_FIELDS, seasonMinionFieldKeys, seasonMinionProfile, seasonSyntheticTroopMapCap, seasonObservedCommandSlot, calculateSeasonMinion } from "./seasonMinions.js";
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { theaState } from "./seasonTheaState.js";
 import { WEAPON_FIELDS, ADDED_FIELDS, seasonDamageContext } from "./seasonWeaponInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
-import { MODULE_FIELDS, seasonModuleProfile, seasonModuleFieldKeys, calculateSeasonModule } from "./seasonModules.js";
-import { checkSeasonSupportHost } from "./seasonSupport.js";
-import { NETHER_CONSUMED_STATS, netherMore, netherAfflictionEffect } from './seasonNetherRemaining.js';
+import { MODULE_FIELDS, seasonModuleProfile, seasonModuleFieldKeys, calculateSeasonModule, isPersistentModuleAction } from "./seasonModules.js";
+import { checkSeasonSupportHost, validLunarEclipseLink, VOLTAGE_TURMOIL_ID, VOLTAGE_AFTERWAVE_ID } from "./seasonSupport.js";
+import { voltageAverageFields, VOLTAGE_AFTERWAVE_CHARGES } from "./seasonSkillMechanics.js";
+import { NETHER_CONSUMED_STATS, SEASON_SKILL_AILMENT_TAGS, netherMore, netherAfflictionEffect } from './seasonNetherRemaining.js';
 import { netherCorePlan } from './seasonNetherDps.js';
+import { FIXED_NUMBED_FIELD, isNumbedBaseOverride } from './seasonNetherModifiers.js';
+import { isObservedTerraGearEffect } from "./seasonGearEffects.js";
 
 const finite = Number.isFinite;
 const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const hash = v => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
 const round = v => finite(v) ? Math.round(v * 1e5) / 1e5 : null;
+const wiltingBeamId = "skills-tlidb-com-cn-wilting-beam";
+const voltageAverageKey = (build,index) => build?.skills?.active?.[index]?.supports?.[4]?.supportId===VOLTAGE_TURMOIL_ID
+  ? 'voltageTurmoilAverage' : 'voltageAverage';
 export const SEASON_DPS_ENEMY_FIELDS = {
   armor: { label: "적 아머", min: 0, max: 10000000 },
   fire: { label: "적 유효 화염 저항 (%)", min: -200, max: 90 },
@@ -33,6 +39,7 @@ export const SEASON_DPS_ENEMY_FIELDS = {
   lightning: { label: "적 유효 번개 저항 (%)", min: -200, max: 90 },
   erosion: { label: "적 유효 부식 저항 (%)", min: -200, max: 90 },
   affliction: { label: "적 심화 수치", min: 0, max: 100 },
+  numbedStacks: FIXED_NUMBED_FIELD,
 };
 export const SEASON_DPS_SKILL_FIELDS = {
   ...WEAPON_FIELDS, ...ADDED_FIELDS,
@@ -41,30 +48,84 @@ export const SEASON_DPS_SKILL_FIELDS = {
   useShare: { label: "시전 시간 배분 (%)", min: 0, max: 100 },
   hitChance: { label: "대상 적중률 (%)", min: 0, max: 100 },
   castRate: { label: "복합 계산의 일반 시전 횟수 / 초", min: 0, max: 100 },
+  summonCastRate: { label: "직접 소환 횟수 / 초", min: 0, max: 100 },
   multistrikeChance: { label: "연속 공격 확률 (%)", min: 0, max: 1000 },
   multistrikeIncrement: { label: "계시 보너스 전 연속 공격 대미지 증가량 (%)", min: 0, max: 1000 },
   resourceAttacks: { label: "자원이 허용하는 연속 공격 수 (0은 제한 없음)", min: 0, max: 100, integer: true },
   movementAttacks: { label: "이동·다른 행동 전 연속 공격 수 (0은 중단 없음)", min: 0, max: 100, integer: true },
   repeatHits: { label: "처치 재발동의 대상 적중 횟수 (초당)", min: 0, max: 1000 },
   dotUptime: { label: "지속 대미지 유지율 (%)", min: 0, max: 100 },
+  reapingMode: { label: "수확 계산 방식", min: 0, max: 1, integer: true, defaultValue: 0,
+    choices: [[0, "관측값 입력"], [1, "한 대상 연속 채널링"]] },
+  reapingRate: { label: "대상 수확 성공 횟수 (초당)", min: 0, max: 1000 },
+  channelCostRate: { label: "채널링 비용 차감 횟수 (초당)", min: 0, max: 30 },
+  reapingOverlap: { label: "수확 시 이 지속 대미지 적용 비율 (%)", min: 0, max: 100 },
+  dotWindows: { label: "지속 대미지 적용 구간 (초)", windows: true },
+  dotExclusive: { label: "겹친 시간은 대미지가 적용된 한 칸에만 배정", min: 0, max: 1, integer: true, choices: [[0, "미확인"], [1, "확인"]] },
   additionalChannelStacks: { label: "기본값보다 추가된 최대 집중 중첩", min: 0, max: 100, integer: true },
-  terraCharges: { label: "이번 시전에 소모한 대지 충전", min: 0, max: 1, integer: true },
+  terraCharges: { label: "이번 시전에 소모한 대지 충전", min: 0, max: VOLTAGE_AFTERWAVE_CHARGES, integer: true },
+  afterwaveOverlap: { label: "잔파 고리의 지속 대미지 적용", min:0, max:1, integer:true,
+    choices:[[0,'한 번만 적용'],[1,'동시에 따로 적용']],
+    hint:'기본 또는 추가 고리에서 대미지가 적용된 시간을 지속 대미지 유지율에 입력하세요.' },
+  ...voltageAverageFields,
   euphoria: { label: "해당 스킬의 버프 적용 여부 (0 또는 1)", min: 0, max: 1, integer: true },
   swampMoved: { label: "현재 늪이 이동 보너스를 보유함 (0 또는 1)", min: 0, max: 1, integer: true },
   recentSpellProjectiles: { label: "최근 생성한 주술 투사체 수", min: 0, max: 10000, integer: true },
-  periodicBurstUptime: { label: "간헐적 폭발 현재 상태", min: 0, max: 100, choices: [[0, "미적용"], [100, "적용"]] },
+  periodicBurstUptime: { label: "간헐적 폭발 현재 상태", shared: true, min: 0, max: 100, choices: [[0, "미적용"], [100, "적용"]] },
   incomingHits: { label: "반사를 유발하는 피격 횟수 / 초", min: 0, max: 1000 },
   coreTriggerRate: { label: "코어 전체 주술 발동 횟수 / 초", min: 0, max: 1000 },
   coreUptime: { label: "클락워크 코어 유지율 (%)", min: 0, max: 100 },
   chainActive: { label: "계산 대상에 노예의 사슬 적용", min: 0, max: 1, integer: true, choices: [[0, "미적용"], [1, "적용"]] },
   extraHits: { label: "대지 이동으로 실제 적중한 추가 폭발 (초당)", min: 0, max: 1000 },
+  fissureHits: { label: "균열 후속 적중 횟수 (초당)", min: 0, max: 30 },
+  fissureTimes: { label: "균열 후속 적중 시각 (초)", times: true },
 };
-const validValue = (field, value) => field && typeof value === "number" && finite(value) && value >= field.min && value <= field.max && (!field.integer || Number.isInteger(value)) && (!field.choices || field.choices.some(([v]) => v === value));
+export function seasonDpsSkillFieldDefinition(id,key,terraChargeMaximum=1) {
+  const definition=SEASON_DPS_SKILL_FIELDS[key];
+  if(key==='terraCharges')return {...definition,max:terraChargeMaximum};
+  const rate=/^moduleRate([01])$/u.exec(key);
+  if (rate && isPersistentModuleAction(seasonModuleProfile(id)?.actions[Number(rate[1])]))
+    return {...definition,label:'대상에게 모듈 지속 대미지가 적용되는 비율 (0~1)',max:1};
+  return definition;
+}
+function dotWindowRanges(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 4096) return null;
+  const parts = value.split(',');
+  if (parts.length > 100) return null;
+  const ranges = [];
+  for (const line of parts) {
+    const match = /^\s*(\d+(?:\.\d{1,3})?)\s*-\s*(\d+(?:\.\d{1,3})?)\s*$/u.exec(line);
+    if (!match || +match[1] >= +match[2] || +match[2] > 3600) return null;
+    ranges.push([+match[1], +match[2]]);
+  }
+  return ranges.sort((a,b)=>a[0]-b[0]);
+}
+function fissureTimeList(value) {
+  if (typeof value !== 'string' || value.length > 4096) return null;
+  if (value.trim() === '없음') return [];
+  const entries = value.split(',');
+  if (entries.length > 100 || entries.some(entry => !/^\s*\d+(?:\.\d{1,3})?\s*$/u.test(entry))) return null;
+  const times = entries.map(Number);
+  if (times.some(time => time <= 0 || time >= 3600) || new Set(times).size !== times.length) return null;
+  return times.sort((a,b)=>a-b);
+}
+const timedFissure = build => theaCombatEnabled(build) && build?.ss14Inputs?.theaCycle?.mode === 'automatic';
+const validValue = (field, value) => field && (field.windows ? !!dotWindowRanges(value) : field.times ? !!fissureTimeList(value)
+  : typeof value === "number" && finite(value) && value >= field.min && value <= field.max && (!field.integer || Number.isInteger(value)) && (!field.choices || field.choices.some(([v]) => v === value)));
 export function seasonDpsSkillFieldKeys(entry, id, build) {
-  if (seasonModuleProfile(id)) return seasonModuleFieldKeys(seasonModuleProfile(id), build?.skills?.active?.find(s => s?.skillId === id)?.modularization?.moduleOptionIds, build);
-  if (seasonMinionProfile(id)) return ["useShare", "hitChance", ...seasonMinionFieldKeys(seasonMinionProfile(id))];
-  const keys = ["useShare", "hitChance"];
-  const index = build?.skills?.active?.findIndex(s => s?.skillId === id);
+  const slots = build?.skills?.active;
+  const index = entry?.rowIndex ?? slots?.findIndex(s => s?.skillId === id);
+  const module = seasonModuleProfile(id), minion = seasonMinionProfile(id);
+  if (module || minion) {
+    const owner = seasonObservedCommandSlot(build);
+    const fields = module ? seasonModuleFieldKeys(module, slots?.[index]?.modularization?.moduleOptionIds, build, build?.ss14Inputs?.dps?.skills?.[index])
+      : ["useShare", "hitChance", ...seasonMinionFieldKeys(minion)].filter(key=>key!=="command" || owner<0 || index===owner);
+    if (build?.ss14Inputs?.dps?.skills?.[index]?.useShare > 0) fields.push('summonCastRate');
+    return module && owner>=0 && index===owner ? [...fields,"command"] : fields;
+  }
+  const reapingOnly = entry?.damageCapabilities?.dot && !entry.damageCapabilities.hit
+    && entry.mechanics?.some(m => m.kind === "wilting-beam-reaping");
+  const keys = ["useShare", ...(reapingOnly ? [] : ["hitChance"])];
   if (index === 0) {
     if (build?.gear?.slots?.some(s => s?.itemId === "gear-ss14-on-the-sublime")) keys.push("recentSpellProjectiles");
     if (build?.gear?.slots?.some(s => s?.itemId === "gear-tlidb-com-cn-glorious-journey")) keys.push("incomingHits");
@@ -77,8 +138,27 @@ export function seasonDpsSkillFieldKeys(entry, id, build) {
     if (SS14_CARDS_EN.records[id]?.tags?.includes("Attack")) keys.push("multistrikeChance", "multistrikeIncrement", "resourceAttacks", "movementAttacks");
   }
   if (entry?.mechanics?.some(m => m.kind === "ice-ring-on-kill")) keys.push("repeatHits");
-  if (/Persistent [A-Za-z]+ [Dd]amage/u.test(SS14_CARDS_EN.records[id]?.detail ?? "")) keys.push("dotUptime");
-  keys.push(...(entry?.mechanics ?? []).map(m => m.field).filter(Boolean));
+  if (entry?.damageCapabilities?.dot || /Persistent [A-Za-z]+ [Dd]amage/u.test(SS14_CARDS_EN.records[id]?.detail ?? "")) {
+    keys.push("dotUptime");
+    const bindings = build?.ss14Inputs?.dps?.skills;
+    if (id !== wiltingBeamId && slots?.some((slot, i) => slot?.skillId === wiltingBeamId && bindings?.[i]?.reapingRate > 0))
+      keys.push("reapingOverlap");
+    if (theaCombatEnabled(build) && build?.ss14Inputs?.theaCycle?.mode === "automatic") keys.push("dotWindows");
+    if (build?.ss14Inputs?.theaCycle?.mode !== "automatic" && bindings?.[index]?.dotUptime > 0
+      && slots?.some((slot, i) => i !== index && slot?.skillId === id && bindings[i]?.dotUptime > 0)) keys.push("dotExclusive");
+  }
+  keys.push(...(entry?.mechanics ?? []).map(m => m.kind === 'groundshaker-fissure' && timedFissure(build) ? 'fissureTimes'
+    : m.kind==='voltage-observed-average' ? voltageAverageKey(build,index) : m.field).filter(Boolean));
+  if(slots?.[index]?.supports?.[4]?.supportId===VOLTAGE_AFTERWAVE_ID
+    && build?.ss14Inputs?.dps?.skills?.[index]?.terraCharges>=VOLTAGE_AFTERWAVE_CHARGES) keys.push('afterwaveOverlap');
+  if (reapingOnly) {
+    const rateIndex = keys.indexOf("reapingRate");
+    const continuous = build?.ss14Inputs?.dps?.skills?.[index]?.reapingMode === 1;
+    keys.splice(rateIndex, continuous ? 1 : 0, "reapingMode");
+  }
+  if ((build?.ss14Inputs?.theaCycle?.mode !== "automatic" || theaCombatEnabled(build))
+    && build?.ss14Inputs?.dps?.skills?.[index]?.useShare !== 0
+    && SS14_CARDS_EN.records[id]?.tags?.some(tag=>tag==='Channeled'||tag==='Channel')) keys.push("channelCostRate");
   return [...new Set(keys)];
 }
 export const seasonDpsRulePins = () => Object.fromEntries(Object.values(SS14_DPS_RULES.pages).filter(p => p.locale === "en").map(p => [p.sourceUrl, p.sourcePageSha256]));
@@ -114,8 +194,18 @@ export function editSeasonDpsInput(target, key, value) {
     binding = old?.itemId === skill.skillId && old.sourcePageSha256 === record.sourcePageSha256 ? old
       : { itemId: skill.skillId, sourcePageSha256: record.sourcePageSha256 };
     inputs.dps.skills[slot] = binding;
+    if (field === 'dotUptime' && binding.dotUptime !== (value === '' ? undefined : value)) {
+      // The confirmation applies to the allocation across these slots.
+      const slots = [...target.skills.active, ...target.skills.passive];
+      for (const [row, peer] of Object.entries(inputs.dps.skills)) {
+        if (slots[Number(row)]?.skillId === skill.skillId && peer.itemId === skill.skillId) delete peer.dotExclusive;
+      }
+    }
   }
-  if (value === "") delete binding[field]; else binding[field] = value;
+  if (value === "") delete binding[field];
+  else if (definition.windows) binding[field] = dotWindowRanges(value).map(range=>range.join('-')).join(', ');
+  else if (definition.times) binding[field] = fissureTimeList(value).join(', ') || '없음';
+  else binding[field] = value;
   inputs.dpsRuleReceipts = seasonDpsRulePins();
   inputs.mechanicReceipts = seasonMechanicPins();
 }
@@ -136,6 +226,97 @@ const critical = /^(?:(?:attack|spell|projectile|(?:fire|cold|lightning|erosion|
 const double = /^(?:(?:attack|spell)_)?double_damage_chance$/u;
 const body = (rules, name) => rules.pages[`en/${name}`]?.body ?? "";
 
+export function manualResourceBalance(rows, scenarios, skills) {
+  const active=rows.filter(row=>row.rowIndex<5&&skills?.[row.rowIndex]?.useShare!==0);
+  if(!active.length)return null;
+  const shareTotal=active.reduce((total,row)=>total+(skills?.[row.rowIndex]?.useShare??0),0);
+  const shareOverflow=shareTotal>100+1e-8;
+  const unresolved=active.filter(row=>!finite(row.manualManaPerSecond)||!finite(row.manualLifePerSecond));
+  const sum=key=>round(active.reduce((total,row)=>total+row[key],0));
+  const canSum=!shareOverflow&&!unresolved.length;
+  const mana=canSum?sum('manualManaPerSecond'):null;
+  const channels=active.flatMap(row=>row.channelCost ? [{rowIndex:row.rowIndex,...row.channelCost}] : []);
+  const recovery=scenarios.map(({id,label,value})=>({id,label,value,balance:finite(mana)&&finite(value)?round(value-mana):null}));
+  const observed=recovery.find(row=>row.id==='observed'&&finite(row.balance));
+  const compared=observed?[observed]:recovery;
+  const resolved=compared.length>0&&compared.every(row=>finite(row.balance));
+  const manaStatus=resolved&&mana>0
+    ? (compared.every(row=>row.balance<0)?'deficit':compared.some(row=>row.balance<0)?'mixed':'enough') : null;
+  return {
+    manaPerSecond:mana,
+    lifePerSecond:canSum?sum('manualLifePerSecond'):null,
+    ...(shareOverflow?{shareOverflow:shareTotal}:{}),
+    unresolvedRows:unresolved.map(row=>row.rowIndex),
+    ...(channels.length ? {channels} : {}),
+    recovery,manaStatus,
+  };
+}
+
+function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
+  const base = entry?.values?.manaCost;
+  if (entry?.bindingChanged) return null;
+  const supports=report.components.filter(c=>c.category==='supports').flatMap(c=>c.calculations??[]).filter(c=>c.rowIndex===rowIndex);
+  const slot=build.skills?.active?.[rowIndex];
+  const equipped=(slot?.supports??[]).filter(c=>c?.supportId).length;
+  if (supports.length!==equipped) return null;
+  let costMultiplier=1, noMana=false;
+  const conversions=[];
+  for (const support of supports) {
+    const supportId=slot.supports[support.supportIndex]?.supportId;
+    if(support.supportIndex>=slot.unlockedSupportCount
+      || slot.supports.filter(entry=>entry?.supportId===supportId).length!==1
+      || checkSeasonSupportHost(supportId,SS14_CARDS_EN.records[slot.skillId],entry,rowIndex)!==true) return null;
+    if(support.castCost?.noMana&&validLunarEclipseLink(build,rowIndex,support.supportIndex))noMana=true;
+    if(support.blockers.length){
+      const verified=support.castCost;
+      if(!finite(verified?.multiplier)||verified.multiplier<0)return null;
+      costMultiplier *= verified.multiplier/100;
+      if(verified.convertsToLife)conversions.push(100);
+      continue;
+    }
+    const multipliers=support.effects.filter(e=>e.stat==='mana-cost-multiplier');
+    const [multiplier]=multipliers;
+    if (multipliers.length!==1 || multiplier.operation!=='set' || multiplier.unit!=='percent'
+      || multiplier.condition || multiplier.conditionRequirements || multiplier.per || multiplier.target || !finite(multiplier.value) || multiplier.value<0) return null;
+    costMultiplier *= multiplier.value/100;
+    const conversion=support.effects.find(e=>e.stat==='supported-skill-mana-cost-to-life');
+    if (conversion) {
+      if (conversion.operation!=='set' || conversion.unit!=='percent' || conversion.value!==100 || conversion.condition
+        || conversion.conditionRequirements || conversion.per || conversion.target) return null;
+      conversions.push(conversion.value);
+    }
+  }
+  let increased=0;
+  for(const effect of effects){
+    if(!SEASON_GEAR_COST_STATS.has(effect.stat))continue;
+    if(effect.stat==='attack_skill_mana_cost'&&!tags.includes('Attack')||effect.stat==='spell_mana_cost_to_life_cost'&&!tags.includes('Spell'))continue;
+    if(effect.condition||effect.conditionRequirements||effect.per||effect.target||effect.unit!=='percent'||!finite(effect.value))return {reason:'시전 비용에 적용할 장비 옵션을 확인하세요.'};
+    if(effect.stat==='attack_skill_mana_cost'&&effect.operation==='add_percent')increased+=effect.value;
+    else if(effect.operation==='convert_percent'&&effect.value>=0)conversions.push(effect.value);
+    else return {reason:'시전 비용에 적용할 장비 옵션을 확인하세요.'};
+  }
+  if(noMana) return conversions.some(value=>value>0)?{reason:'월식과 MP 소모 전환을 함께 적용할 때의 HP 비용은 확인되지 않았습니다.'}
+    : {mana:0,life:0};
+  if (!finite(base) || base < 0) return null;
+  const cost=base*costMultiplier*Math.max(0,1+increased/100);
+  // The installed Cost Conversion and Ice Pulse effects write the same
+  // skill-cost field (2010060). Skill_cost permits life cost above 100%.
+  const ratio=conversions.reduce((total,value)=>total+value,0)/100;
+  return { mana:cost*Math.max(0,1-ratio), life:cost*ratio };
+}
+
+function manualCastCostIssues(report, cost, skillName) {
+  if (!cost) return [];
+  if (cost.reason) return [cost.reason];
+  const issues = [];
+  const { life, unreservedMana } = report.character?.values ?? {};
+  if (finite(unreservedMana) && cost.mana > unreservedMana + 1e-8)
+    issues.push(`${skillName} 시전 MP 부족 (필요 ${round(cost.mana)} / 사용 가능 ${round(unreservedMana)})`);
+  if (cost.life > 0 && finite(life) && cost.life > life + 1e-8)
+    issues.push(`${skillName} 시전 HP 부족 (필요 ${round(cost.life)} / 최대 ${round(life)})`);
+  return issues;
+}
+
 function verifyRules(build, rules, blockers) {
   for (const page of Object.values(rules.pages).filter(p => p.locale === "en")) {
     if (page.season !== "SS14" || !hash(page.sourcePageSha256) || build.ss14Inputs?.dpsRuleReceipts?.[page.sourceUrl] !== page.sourcePageSha256)
@@ -147,9 +328,9 @@ function verifyRules(build, rules, blockers) {
     || !body(rules, "Armor_DMG_Mitigation_Penetration").includes("negative value")) blockers.push("SS14 적 방어·관통 공식이 계산 모델과 일치하지 않습니다.");
 }
 
-function coverage(build, report, effects) {
+function coverage(build, report, effects, gearEffects) {
   const blockers = [...(report.componentProjection.globalBlockers ?? [])];
-  if(report.character?.values.reservedManaPercent>100)blockers.push('선택한 패시브의 MP 봉인 합이 100%를 초과합니다.');
+  if(report.character?.values.reservedManaPercent>100)blockers.push('선택한 스킬의 MP 봉인 합이 100%를 초과합니다.');
   const nether=report.componentProjection.rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
   for (const row of report.componentProjection.rows) blockers.push(...row.blockers.map(b => `${row.name}: ${b.reason}`));
   blockers.push(...report.componentProjection.allocation.issues.map(b => b.reason));
@@ -196,10 +377,47 @@ function coverage(build, report, effects) {
       blockers.push("배치된 특수 석판 또는 옵션 없는 석판의 전체 공격 효과를 확인하지 못했습니다.");
   }
   // The legacy selectedSkill field is a UI selection, never a damage modifier.
-  if (build.customAffixes?.trim() || Object.keys(build.calculation ?? {}).some(k => k !== "selectedSkill") || Object.keys(build.conditions ?? {}).length)
-    blockers.push("원본 사용자 옵션·계산 설정·전투 조건의 SS14 전체 연결이 필요합니다.");
+  if (Object.keys(build.calculation ?? {}).some(k => k !== "selectedSkill") || Object.keys(build.conditions ?? {}).length)
+    blockers.push("원본 계산 설정·전투 조건의 SS14 전체 연결이 필요합니다.");
   if (build.hero?.revivalMemory) blockers.push("부활 추억의 전체 공격 효과 연결이 필요합니다.");
+  const gearNumbedModifiers=new Set(gearEffects.filter(effect=>SEASON_GEAR_NUMBED_MODIFIERS.has(effect.stat)));
+  const fixedNumbed=report.componentProjection.fixedNumbed;
+  const legacyNumbed=report.componentProjection.rows.some(row=>row.conditionControls.some(c=>c.conditionGroup==='nether-numbed-stacks'));
+  // The ordinary Numbed debuff affects only lightning. Only waive the
+  // timeline requirement when every damage row has verified non-lightning
+  // pools and there is no independent minion or module damage to resolve.
+  const rows=report.coupledSkills.rows;
+  const noLightning=gearNumbedModifiers.size>0 && rows.length>0 && rows.every(row=>
+    row.supported && row.offenseBasis && !seasonModuleProfile(row.id) && !seasonMinionProfile(row.id)
+    && [row.offenseBasis.pools,row.offenseBasis.dotPools].every(pools=>
+      pools?.every(pool=>pool.type!=='lightning'||pool.max===0)));
   for (const effect of effects) {
+    if (isNumbedBaseOverride(effect)) {
+      const mayDealLightning=rows.some(row=>seasonModuleProfile(row.id)||seasonMinionProfile(row.id)
+        || [row.offenseBasis?.pools,row.offenseBasis?.dotPools].some(pools=>pools?.some(pool=>pool.type==='lightning'&&pool.max>0)));
+      if (mayDealLightning&&!fixedNumbed&&!legacyNumbed&&!theaCombatEnabled(build))
+        blockers.push(`${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
+      continue;
+    }
+    if(SEASON_GEAR_COST_STATS.has(effect.stat))continue; // evaluated against each skill's tags and resource budget
+    if(SEASON_GEAR_NUMBED_STATS.has(effect.stat)) {
+      if(!finite(effect.value)||effect.value<effect.roll?.min||effect.value>effect.roll?.max
+        || effect.stat==='gear_numbed_additional_stacks'&&!Number.isInteger(effect.value))
+        blockers.push(`장비 옵션 수치를 입력하세요: ${effect.sourceText}`);
+      if(!theaCombatEnabled(build)||!theaState(build))blockers.push('썬더볼트 조종자의 마취 효과는 티아1 자동 은총의 복합 발동에서 계산합니다.');
+      continue;
+    }
+    if(gearNumbedModifiers.has(effect)){
+      if(effect.roll&&!finite(effect.value))blockers.push(`장비 옵션 수치를 입력하세요: ${effect.sourceText}`);
+      else if(effect.operation!=='add_percent'||effect.unit!=='percent'||!finite(effect.value)||effect.value<0
+        || effect.condition||effect.conditionRequirements||effect.per||effect.target)
+        blockers.push(`마취 장비 효과의 연산을 확인할 수 없습니다: ${effect.sourceText}`);
+      if(!fixedNumbed&&!noLightning&&!legacyNumbed&&!theaCombatEnabled(build))
+        blockers.push(`${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
+      else if(!noLightning&&theaCombatEnabled(build)&&!theaState(build))
+        blockers.push('장비의 마취 지속·효과 보너스는 티아1 자동 은총의 복합 발동에서 계산합니다.');
+      continue;
+    }
     if(SEASON_BLESSING_CAP_STATS.has(effect.stat))continue; // validated by projectSeasonBlessings
     if(effect.stat==='max_vorax_gear_equipped') {
       const count=(build.gear?.slots??[]).filter(s=>SS14_GEAR_EN.records[s?.itemId]?.detail?.includes('You can only equip 1 Vorax Gear')).length;
@@ -214,6 +432,32 @@ function coverage(build, report, effects) {
       blockers.push(effect.roll && !finite(effect.value)
         ? `장비 옵션 수치를 입력하세요: ${effect.sourceText ?? effect.stat}`
         : `조건·대상·수치 미확인: ${effect.sourceText ?? effect.stat}`); continue;
+    }
+    if(isObservedTerraGearEffect(effect))continue;
+    if (Object.hasOwn(SEASON_SKILL_AILMENT_TAGS, effect.stat)) {
+      if (!finite(effect.value) || !['add_percent','more'].includes(effect.operation) || effect.operation === 'more' && effect.value < -100)
+        blockers.push(`스킬 상태 이상 대미지 연산 미지원: ${effect.sourceText ?? effect.stat}`);
+      continue;
+    }
+    if (effect.stat==='demolisher_charge_recovery_speed' && effect.operation==='add_percent' && finite(effect.value)) continue;
+    const minionConversion = seasonMinionDamageConversion(effect);
+    if (effect.stat === 'minion_physical_damage_as_erosion_damage' || effect.stat === 'max_summonable_synthetic_troops') {
+      const cap = effect.stat === 'max_summonable_synthetic_troops';
+      const valid = cap ? effect.operation === 'add' && Number.isInteger(effect.value) && effect.value > 0
+        : effect.operation === 'gain_percent_of_source' && effect.value >= 0;
+      if (!valid) blockers.push(`소환체 옵션 수치를 확인하세요: ${effect.sourceText ?? effect.stat}`);
+      if (report.components.some(row => row.category === 'skills' && !seasonModuleProfile(row.id)
+        && !seasonMinionProfile(row.id) && SS14_CARDS_EN.records[row.id]?.tags?.includes('Summon')))
+        blockers.push('이 소환 스킬의 추가 대미지·소환 상한 계산은 미지원입니다.');
+      continue;
+    }
+    if (seasonOutgoingDamageConversion(effect) || minionConversion) {
+      if (!(finite(effect.value) && effect.value >= 0 && effect.value <= 100))
+        blockers.push(`대미지 전환 수치를 확인하세요: ${effect.sourceText ?? effect.stat}`);
+      if (minionConversion && report.components.some(row => row.category === 'skills' && !seasonModuleProfile(row.id)
+        && !seasonMinionProfile(row.id) && SS14_CARDS_EN.records[row.id]?.tags?.includes('Summon')))
+        blockers.push('소환체의 대미지 유형 전환 계산은 미지원입니다.');
+      continue;
     }
     if (!(nether&&NETHER_CONSUMED_STATS.has(effect.stat)) && !SEASON_CURSE_STATS.has(effect.stat) && !['aura_effect','warcry_effect','sealed_mana_compensation','sealed_mana_percent','energy_shield_regeneration_percent','melee_critical_strike_rating'].includes(effect.stat) && !seasonDirectDamageStat(effect.stat) && !seasonDpsSpecialStat(effect.stat) && !attributes.has(effect.stat)
       && !defensive.has(effect.stat) && !minionOnly.has(effect.stat) && !/^minion_(?:critical_strike_(?:rating|damage)|double_damage_chance|max_life|projectile_speed|movement_speed|skill_area|(?:physical|cold|fire|lightning|erosion)_damage_(?:min|max))$/u.test(effect.stat)
@@ -242,9 +486,13 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const combat = theaCombatEnabled(build);
   const combatState = theaState(build)?.events ?? {};
   const input = build.ss14Inputs?.dps;
-  const effects = [...report.componentProjection.effects, ...report.components.filter(c => c.category === "gear")
-    .flatMap(c => c.calculations ?? []).flatMap(c => c.rawEffects ?? [])];
-  const blockers = coverage(build, report, effects);
+  const gearEffects = report.components.filter(c => c.category === "gear")
+    .flatMap(c => (c.calculations ?? []).flatMap(entry => (entry.rawEffects ?? []).map(effect =>
+      seasonMinionDamageConversion(effect) || effect.stat === 'minion_physical_damage_as_erosion_damage'
+        ? { ...effect, path:`gear.slots.${entry.slotIndex}`, itemId:c.id, receipt:entry.receipt, effectSource:{name:c.name} }
+        : effect)));
+  const effects = [...report.componentProjection.effects, ...gearEffects];
+  const blockers = coverage(build, report, effects, gearEffects);
   blockers.push(...logReviewRows(build).filter(r => !r.confirmed).map(r => `로그에 없는 ${r.label} 구성을 편집한 뒤 확인하세요.`));
   if (build.patchSnapshot?.season !== "SS14") blockers.push("SS14 별도 편집 문서에서 계산하세요.");
   if (!validSeasonDpsInputs(build.ss14Inputs ?? {})) blockers.push("DPS 입력 문서의 형식 또는 범위가 올바르지 않습니다.");
@@ -290,33 +538,103 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const luck = (veryLucky ? 2 : normalLucky ? 1 : 0) - (unlucky ? 1 : 0);
   if ((normalLucky || veryLucky || unlucky) && !body(rules, "Lucky").includes("cancel into Lucky")) blockers.push("SS14 대미지 행운·불운 상쇄 공식 미확인");
   for (const e of special) if (!consumed.has(e)) blockers.push(`계산되지 않은 특수 효과: ${e.sourceText ?? e.stat}`);
-  let totalShare = 0; let burstUsers = 0;
+  let burstUsers = 0;
+  const syntheticTroopMapCap = seasonSyntheticTroopMapCap(report);
+  const commandSlot = seasonObservedCommandSlot(build);
+  let sharedCommand = null;
+  if (commandSlot >= 0) {
+    const slot = commandSlot < 5 ? build.skills.active[commandSlot] : build.skills.passive[commandSlot-5];
+    const record = SS14_CARDS_EN.records[slot?.skillId], binding = input?.skills?.[commandSlot];
+    const receipt = mechanicPage(build,"Synthetic_Troop");
+    const verified = receipt?.body.includes("Every point of Command grants Synthetic Troop Minions +3%% additional damage");
+    const bound = binding?.itemId===record?.itemId && binding?.sourcePageSha256===record?.sourcePageSha256
+      && validValue(SEASON_MINION_FIELDS.command,binding?.command);
+    if (!verified) blockers.push("스마트 웨폰 통솔의 SS14 원문 미확인");
+    if (!bound) blockers.push("스마트 웨폰에 적용할 현재 통솔 수치를 입력하세요.");
+    sharedCommand = {rowIndex:commandSlot,value:bound && verified ? binding.command : NaN,receipt};
+  }
+  const castCostVerified = body(rules,'Character_Build').includes("Skills cannot be cast when they cost more than the character's current Mana");
+  const beams = report.coupledSkills.rows.filter(row => row.id === wiltingBeamId);
+  const reaper = beams.length === 1 ? beams[0] : null;
+  const reapBinding = reaper ? input?.skills?.[reaper.rowIndex] : null;
+  const reapBasis = reaper?.offenseBasis;
+  const reap = reapBasis?.reaping;
+  const channelPage = beams.length ? mechanicPage(build, "Channeled") : null;
+  const channelRate = channelPage?.body.includes("gain 1 channeled stack whenever you use a skill")
+    && channelPage.body.includes("When the current number of channeled stacks is 0")
+    && reap?.baseChannelStacks > 0 && reapBasis.rate > 0 ? reapBasis.rate / reap.baseChannelStacks : null;
+  const continuousReap = reapBinding?.reapingMode === 1;
+  const channelReapReady = channelRate > 0 && reap.effectiveRecoverySeconds > 0
+    && channelRate * reap.effectiveRecoverySeconds <= 1 + 1e-8;
+  const reapRate = continuousReap ? (channelReapReady ? channelRate : 0) : reapBinding?.reapingRate;
+  const reapDuration = reap?.effectiveDurationSeconds;
+  const reapOverlapTotals = new Map();
   const rows = report.coupledSkills.rows.map(direct => {
     const reasons = [...direct.blockers];
     const record = SS14_CARDS_EN.records[direct.id];
     const entry = report.components.filter(c => c.category === "skills").flatMap(c => c.calculations ?? []).find(c => c.rowIndex === direct.rowIndex);
     const offense = report.offense.rows.find(r => r.rowIndex === direct.rowIndex);
     const b = input?.skills?.[direct.rowIndex];
+    const skillName=SS14_CARDS.records[direct.id]?.name??'선택 스킬';
     if (b && ["Min", "Max"].some(s => b[`addedLightning${s}`] !== undefined)
       && !(finite(b.addedLightningMin) && finite(b.addedLightningMax) && b.addedLightningMin <= b.addedLightningMax)) reasons.push("추가 번개 대미지의 최소·최대 값을 모두 확인하세요.");
     const basis = direct.offenseBasis;
+    const alternating = Boolean(basis?.weaponHands);
+    if (alternating && combat) reasons.push('쌍수 교대 공격은 복합 발동의 무기별 적중 순서까지 계산하지 못합니다.');
     const module = seasonModuleProfile(direct.id);
-    if (module) {
-      totalShare += b?.useShare ?? 0;
-      return calculateSeasonModule(build, report, { ...entry, rowIndex: direct.rowIndex, level: entry?.level ?? build.skills.active[direct.rowIndex].level }, module, effects, validValue, SEASON_DPS_ENEMY_FIELDS);
-    }
     const minion = seasonMinionProfile(direct.id);
-    if (minion) {
-      totalShare += b?.useShare ?? 0;
-      const result = calculateSeasonMinion(build, report, entry, minion, effects, validValue, SEASON_DPS_ENEMY_FIELDS);
-      if (!validValue(SEASON_DPS_SKILL_FIELDS.useShare, b?.useShare)) { result.supported = false; result.values.dps = null; result.blockers.push("소환 스킬 시전 시간 배분을 입력하세요."); }
+    if (direct.numbedSupport && (module || minion)) blockers.push("소환체에 연결한 마취 보조의 발동 계산은 미지원입니다.");
+    if (module || minion) {
+      const result = module
+        ? calculateSeasonModule(build, report, { ...entry, rowIndex: direct.rowIndex, level: entry?.level ?? build.skills.active[direct.rowIndex].level }, module, effects, validValue, SEASON_DPS_ENEMY_FIELDS, syntheticTroopMapCap, sharedCommand)
+        : calculateSeasonMinion(build, report, entry, minion, effects, validValue, SEASON_DPS_ENEMY_FIELDS, syntheticTroopMapCap, sharedCommand);
+      if (!validValue(SEASON_DPS_SKILL_FIELDS.useShare, b?.useShare)) result.blockers.push("소환 스킬 시전 시간 배분을 입력하세요.");
+      if (direct.rowIndex < 5) {
+        const cost = castCostVerified ? manualSkillCost(build, report, entry, direct.rowIndex, record?.tags ?? [], effects) : null;
+        result.manaPerUse = round(cost?.mana);
+        result.lifePerUse = round(cost?.life);
+        const observedRate = validValue(SEASON_DPS_SKILL_FIELDS.summonCastRate,b?.summonCastRate) ? b.summonCastRate : null;
+        result.manualSummonRate = b?.useShare === 0 ? 0 : observedRate;
+        if (b?.useShare > 0 && observedRate !== 0) {
+          if (cost) result.blockers.push(...manualCastCostIssues(report, cost, skillName));
+          else result.blockers.push(`${skillName} 수동 소환의 시전 비용을 확인하세요.`);
+        }
+        const rate = result.manualSummonRate;
+        result.manualManaPerSecond = rate === 0 ? 0 : finite(rate) ? round(cost?.mana * rate) : null;
+        result.manualLifePerSecond = rate === 0 ? 0 : finite(rate) ? round(cost?.life * rate) : null;
+      }
+      if (result.blockers.length) {
+        result.supported = false;
+        result.values.dps = result.values.minionDps = null;
+      }
       return result;
     }
     if (!b || b.itemId !== direct.id || b.sourcePageSha256 !== record?.sourcePageSha256) reasons.push("이 스킬의 SS14 전투 입력을 다시 확인하세요.");
-    for (const key of ["useShare", "hitChance"]) if (!validValue(SEASON_DPS_SKILL_FIELDS[key], b?.[key])) reasons.push(`${SEASON_DPS_SKILL_FIELDS[key].label} 미입력`);
-    totalShare += b?.useShare ?? 0;
-    if (!offense?.supported) reasons.push(...(offense?.blockers ?? ["속성·크리티컬 계산 미지원"]));
+    const observedReaping = entry?.mechanics?.some(m => m.kind === "wilting-beam-reaping");
     const hasHit = Boolean(basis?.pools?.length); const hasDot = Boolean(basis?.dotPools?.length);
+    if (entry?.mechanics?.some(m=>m.kind==='voltage-observed-average')){
+      const key=voltageAverageKey(build,direct.rowIndex), definition=SEASON_DPS_SKILL_FIELDS[key];
+      if (!validValue(definition,b?.[key])) reasons.push(`${definition.label} 미입력`);
+    }
+    if(b?.terraCharges>direct.terraChargeMaximum && entry?.mechanics?.some(m=>m.field==='terraCharges'))
+      reasons.push(`이번 시전에 소모한 대지 충전의 상한은 ${direct.terraChargeMaximum}입니다.`);
+    if(direct.voltageAfterwave&&b?.terraCharges>=VOLTAGE_AFTERWAVE_CHARGES){
+      if(b.afterwaveOverlap===1)reasons.push('잔파 고리의 지속 대미지 적용이 겹칠 때의 배율은 확인되지 않았습니다.');
+      else if(b.afterwaveOverlap!==0)reasons.push('잔파 고리의 지속 대미지 적용 방식을 선택하세요.');
+    }
+    if (direct.voltageJolt && combat) reasons.push('혼비백산의 수확 시점과 마취 부여 순서는 복합 발동에서 확인되지 않았습니다.');
+    else if (direct.voltageJolt && !report.componentProjection.fixedNumbed)
+      reasons.push(`혼비백산의 마취: ${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
+    const dotWindows = combat && hasDot && build.ss14Inputs.theaCycle?.mode === "automatic" ? dotWindowRanges(b?.dotWindows) : null;
+    const dotUptime = dotWindows ? 100 : b?.dotUptime;
+    for (const key of observedReaping && !hasHit ? ["useShare"] : ["useShare", "hitChance"])
+      if (!validValue(SEASON_DPS_SKILL_FIELDS[key], b?.[key])) reasons.push(`${SEASON_DPS_SKILL_FIELDS[key].label} 미입력`);
+    if (!offense?.supported) reasons.push(...(offense?.blockers ?? ["속성·크리티컬 계산 미지원"]));
+    const numbedOnHit = direct.numbedSupport && Boolean(basis?.pools?.some(p => p.type === "lightning" && p.max > 0));
+    if (numbedOnHit && !combat && !report.componentProjection.fixedNumbed)
+      reasons.push(`고압전기의 마취: ${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
+    else if (numbedOnHit && combat && build.ss14Inputs?.theaCycle?.mode !== "automatic")
+      reasons.push("고압전기의 마취는 티아1 자동 은총의 복합 발동에서 계산합니다.");
     if ((direct.supported || !direct.blockers.length)
       && (!hasHit && !hasDot || basis?.projectileHits !== 1 || !finite(basis?.rate) || hasHit && basis.rate <= 0))
       reasons.push("명중·지속 대미지 유형 또는 시전 빈도 분리 미완료");
@@ -324,18 +642,51 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const observedDotExclusion = e => hasDot && (["cast-time", "cooldown"].includes(e.stat) && e.reason === "no-hit-cadence-not-applied"
       || ["damage-over-time-effect-duration", "frost-terra-duration", "swamp-terra-duration", "persistent-cold-duration", "persistent-erosion-duration", "skill-duration", "supported-skill-duration", "effect-stacks", "max-channeled-stacks"].includes(e.stat) && e.reason === "non-offensive-dps-effect"
       || e.stat === "skill-movement-speed" || e.stat === "added-damage-effectiveness" && e.reason === "added-damage-hit-target-unavailable");
-    for (const e of basis?.excluded ?? []) if (!["mana-cost", "mana-cost-multiplier", "skill-area", "supported-skill-area"].includes(e.stat) && !observedDotExclusion(e)
+    for (const e of basis?.excluded ?? []) if (!["mana-cost", "mana-cost-multiplier", "supported-skill-mana-cost-to-life", "skill-area", "supported-skill-area"].includes(e.stat) && !observedDotExclusion(e)
       && !(e.reason === 'cadence-speed-kind-not-selected' && !e.affectsCompletion)
+      && !(['gear-conversion-source-absent','ss14-hit-conversion-source-absent','ss14-hit-gain-source-absent'].includes(e.reason) && !e.affectsCompletion)
+      && !(e.reason==='damage-modifier-target-unavailable' && !e.affectsCompletion
+        && /^supported-skill-(?:physical|lightning|cold|fire|erosion)-damage$/u.test(e.stat))
       && !(e.reason === 'skill-has-no-cooldown' && !e.affectsCompletion)
       && !(e.stat === "cast-time" && e.reason === "context-action-time-used" && finite(seasonDamageContext(build, direct.rowIndex, direct.id).attackSpeed)))
       reasons.push(`스킬·보조의 미적용 효과: ${e.sourceText || e.stat}`);
     if (direct.rowIndex >= 5) reasons.push("패시브 스킬의 전체 효과 연결 미완료");
-    const types = new Set([...(basis?.pools ?? []), ...(basis?.dotPools ?? [])].map(p => p.type));
+    const hitPools = (basis?.pools ?? []).filter(p=>p.max>0);
+    const dotPools = (basis?.dotPools ?? []).filter(p=>p.max>0);
+    const types = new Set([...hitPools,...dotPools].map(p=>p.type));
     for (const key of [...(hasHit ? ["armor"] : []), ...[...types].filter(t => t !== "physical")])
       if (!validValue(SEASON_DPS_ENEMY_FIELDS[key], input?.enemy?.[key])) reasons.push(`${SEASON_DPS_ENEMY_FIELDS[key]?.label ?? key} 미입력`);
     const iceRing = entry?.mechanics?.find(m => m.kind === "ice-ring-on-kill");
     if (iceRing && !validValue(SEASON_DPS_SKILL_FIELDS.repeatHits, b?.repeatHits)) reasons.push("아이스링 처치 재발동의 대상 적중 횟수를 확인하세요. 단일 보스에서 재발동이 없으면 0입니다.");
     if (!iceRing && (b?.repeatHits ?? 0) !== 0) reasons.push("처치 재발동 입력은 아이스링에만 적용할 수 있습니다.");
+    const reaping = basis?.reaping;
+    const automaticReap = b?.reapingMode === 1;
+    const reapingRate = automaticReap ? reapRate : b?.reapingRate;
+    if (observedReaping) {
+      const rules = mechanicPage(build, "Damage_Over_Time_Reaping");
+      if (!rules?.body.includes("then deal an equal amount of True Damage.")
+        || !rules.body.includes("Reaping only applies to Damage Over Time you deal."))
+        reasons.push("SS14 수확 공식 원문을 확인할 수 없습니다.");
+      if (automaticReap) {
+        const mode = SEASON_DPS_SKILL_FIELDS.reapingMode.label;
+        if (report.coupledSkills.rows.length !== 1 || b.useShare !== 100 || b.dotUptime !== 100)
+          reasons.push(`${mode}: 연속 채널링은 부식 광선만 사용하고 시전 배분·지속 대미지 유지율이 모두 100%인 경우에 계산합니다.`);
+        else if (basis && !channelReapReady)
+          reasons.push(`${mode}: 채널링 회차가 수확 쿨타임을 충족하는지 확인할 수 없습니다. 관측값 입력을 선택하세요.`);
+      } else if (!validValue(SEASON_DPS_SKILL_FIELDS.reapingRate, reapingRate))
+        reasons.push(`${SEASON_DPS_SKILL_FIELDS.reapingRate.label} 미입력`);
+      if (reapingRate > 0) {
+        if (reaping && (!(reaping.effectiveRecoverySeconds > 0) || reapingRate * reaping.effectiveRecoverySeconds > 1 + 1e-8))
+          reasons.push(`${SEASON_DPS_SKILL_FIELDS.reapingRate.label} 입력값이 수확 쿨타임 상한을 초과합니다.`);
+        if (!automaticReap && channelRate > 0 && reapingRate > channelRate * b.useShare / 100 + 1e-8)
+          reasons.push(`${SEASON_DPS_SKILL_FIELDS.reapingRate.label} 입력값이 채널링 중첩 상한을 초과합니다.`);
+        if (b?.dotUptime === 0 || b?.useShare === 0)
+          reasons.push("부식 광선이 적용되지 않은 상태에는 수확 성공 횟수를 입력할 수 없습니다.");
+        if (combat || build.ss14Inputs?.theaCycle?.mode === "automatic" || beams.length !== 1
+          || heroMechanics.some(m => m.kind === "nether-core-trigger" || m.kind === "elixir-scorch"))
+          reasons.push("자동 발동이나 여러 부식 광선의 수확 순서를 함께 계산하는 구성은 미지원입니다.");
+      }
+    } else if ((reapingRate ?? 0) !== 0 || automaticReap) reasons.push("수확 성공 횟수 입력은 부식 광선에만 적용할 수 있습니다.");
     const tags = record?.tags ?? [];
     const core = build.skills?.active?.[direct.rowIndex]?.supports?.[1]?.supportId === "supports-ss14-clockwork-core";
     const clockworkHero = heroMechanics.some(m => m.kind === 'clockwork-main-only');
@@ -398,10 +749,11 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       }
     }
     // Unknown correlation among different damage rolls cannot be made uniform.
-    if (luck !== 0 && (basis?.pools ?? []).filter(p => p.min !== p.max).length > 1) reasons.push("대미지 행운의 여러 대미지 범위 합산 분포 미확인");
+    const hitDistributions = basis?.weaponHands?.map(hand=>hand.pools) ?? [basis?.pools ?? []];
+    if (luck !== 0 && hitDistributions.some(pools=>pools.filter(p => p.min !== p.max).length > 1)) reasons.push("대미지 행운의 여러 대미지 범위 합산 분포 미확인");
     const armor = input?.enemy?.armor;
     const reduction = Math.min(.8, armor / (.9 * armor + 30000));
-    const pools = (basis?.pools ?? []).map(p => {
+    const pools = hitPools.map(p => {
       const projectilePen = tags.includes("Projectile") ? effects.filter(e => e.stat === "projectile_armor_penetration").reduce((n, e) => n + e.value, 0) : 0;
       const armorMultiplier = report.beforeDefense ? 1 : 1 - reduction * (p.type === "physical" ? 1 : .6) + (armorPenetration + projectilePen) / 100;
       const fixedResistance = p.type === "erosion" ? effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value : undefined;
@@ -409,21 +761,37 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       const resistanceMultiplier = report.beforeDefense || p.type === "physical" ? 1 : 1 - ((fixedResistance ?? input?.enemy?.[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100;
       const coldTaken = effects.filter(e => e.stat === `enemy_${p.type}_damage_taken` || p.type!=='physical'&&e.stat === `${p.type}_damage_taken`).reduce((n, e) => n * (1 + e.value / 100), 1);
       const numbed = p.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1;
-      return { ...p, multiplier: armorMultiplier * resistanceMultiplier * coldTaken * numbed,
+      return { ...p, armorMultiplier, resistanceMultiplier, receivedMultiplier: coldTaken * numbed,
+        multiplier: armorMultiplier * resistanceMultiplier * coldTaken * numbed,
         min: p.min * armorMultiplier * resistanceMultiplier * coldTaken * numbed, max: p.max * armorMultiplier * resistanceMultiplier * coldTaken * numbed };
     });
     const min = pools.reduce((n, p) => n + p.min, 0); const max = pools.reduce((n, p) => n + p.max, 0);
     const coldCrit=effects.filter(e=>e.stat==='cold_critical_hit_damage');
     if(coldCrit.some(e=>e.operation!=='more'||!finite(e.value)||e.value<0))reasons.push('냉기 크리티컬 적중 추가 배율 미확인');
-    const chance=(offense?.values.effectiveCriticalChance??0)/100, critDamage=(offense?.values.criticalDamage??150)/100*(offense?.values.criticalOnlyMultiplier??1);
-    const coldCritRatio=(1+chance*(critDamage*coldCrit.reduce((n,e)=>n*(1+e.value/100),1)-1))/(1+chance*(critDamage-1));
-    const mean = pools.reduce((n,p)=>n+(p.min+(p.max-p.min)*(luck>=0?(luck+1)/(luck+2):1/3))*(p.type==='cold'?coldCritRatio:1),0);
+    const critDamage=(offense?.values.criticalDamage??150)/100*(offense?.values.criticalOnlyMultiplier??1);
+    const coldMore=coldCrit.reduce((n,e)=>n*(1+e.value/100),1);
+    const coldCritRatio=percent=>{
+      const chance=(percent??0)/100;
+      return (1+chance*(critDamage*coldMore-1))/(1+chance*(critDamage-1));
+    };
+    const meanPool = p => p.min+(p.max-p.min)*(luck>=0?(luck+1)/(luck+2):1/3);
+    const meanHit = (parts,crit) => parts.reduce((n,p)=>n+meanPool(p)*(p.type==='cold'?coldCritRatio(crit?.effectiveCriticalChance):1),0);
+    const mean = meanHit(pools,offense?.values);
     const criticalMultiplier = offense?.values.hitMultiplier ?? offense?.values.expectedDps / offense?.values.attributedDps;
     const taken = tags.includes("Spell") ? effects.filter(e => e.stat === "spell_damage_taken") : [];
     if (taken.some(e => e.operation !== "more" || !finite(e.value) || e.value < -100)) reasons.push("받는 주술 대미지 연산 미확인");
     const takenMultiplier = taken.reduce((n, e) => n * (1 + e.value / 100), 1)*netherMore(effects,'enemy_hit_damage_taken')*netherMore(effects,'enemy_all_damage_taken');
-    const landedHit = mean * offense?.values.attributeMultiplier * criticalMultiplier * takenMultiplier;
-    const hit = landedHit * b?.hitChance / 100;
+    const attributeAndTaken = offense?.values.attributeMultiplier * takenMultiplier;
+    const weaponHands = offense?.values.weaponHands?.map(hand=>{
+      const handPools=pools.filter(p=>p.weaponSlot===hand.slotIndex);
+      const multiplier=hand.hitMultiplier*attributeAndTaken;
+      return {...hand,landedHit:meanHit(handPools,hand)*multiplier,
+        landedLightning:meanHit(handPools.filter(p=>p.type==='lightning'),hand)*multiplier,
+        conversionTrace:basis.weaponHands[hand.slotIndex].conversionTrace};
+    });
+    const landedHit = weaponHands ? weaponHands.reduce((sum,hand)=>sum+hand.landedHit,0)/2
+      : mean * offense?.values.attributeMultiplier * criticalMultiplier * takenMultiplier;
+    const hit = observedReaping && !hasHit ? 0 : landedHit * b?.hitChance / 100;
     const autoNetherBurst=direct.rowIndex===0&&heroMechanics.some(m=>m.kind==='nether-core-trigger'&&m.trigger==='burst'&&m.rate>0);
     if(autoNetherBurst){burstActivationRate=0;burstExtraRate=0;}
     const manualDps = hit * shotgun.multiplier * Math.max(0, manualRate - burstActivationRate);
@@ -431,56 +799,215 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const burstDps = hit * shotgun.multiplier * (burstActivationRate + burstExtraRate) * burstHitMore;
     const repeatDps = landedHit * (iceRing ? b?.repeatHits : 0);
     const heroDps = hit * shotgun.multiplier * heroRate * burstHitMore;
-    let dotDps = 0;
+    let dotDps = 0, lightningDotDps=0;
+    const fixedNumbedBonus = report.componentProjection.fixedNumbed?.bonus ?? 0;
+    let dotBreakdown;
+    let reapingDps = 0;
+    if (hasDot || entry?.damageCapabilities?.dot) {
+      if (!validValue(SEASON_DPS_SKILL_FIELDS.dotUptime, dotUptime)) reasons.push(`${SEASON_DPS_SKILL_FIELDS.dotUptime.label} 미입력`);
+      if (!validValue(SEASON_DPS_ENEMY_FIELDS.affliction, input?.enemy?.affliction)) reasons.push(`${SEASON_DPS_ENEMY_FIELDS.affliction.label} 미입력`);
+    }
     if (hasDot) {
       const form = mechanicPage(build, "Damage_Form"); const afflictionPage = mechanicPage(build, "Amplified_Damage_Over_Time");
       if (!form?.body.includes("The following mechanics will not affect Damage Over Time: Accuracy and Evasion, Armor, Critical Strike")
         || !afflictionPage?.body.includes("Each point of Affliction increases Damage Over Time")) reasons.push("SS14 지속 대미지·심화 공식 근거가 없거나 변경되었습니다.");
-      if (!validValue(SEASON_DPS_SKILL_FIELDS.dotUptime, b?.dotUptime) || !validValue(SEASON_DPS_ENEMY_FIELDS.affliction, input?.enemy?.affliction)) reasons.push("지속 대미지 유지율과 적 심화 수치를 입력하세요.");
       const afflictionEffects = effects.filter(e => e.stat === "affliction_effect");
       if (afflictionEffects.some(e => !['add_percent','more'].includes(e.operation) || !finite(e.value))) reasons.push("심화 효과의 연산 미지원");
       const afflictionMultiplier = 1 + input?.enemy?.affliction / 100 * netherAfflictionEffect(effects);
-      dotDps = basis.dotPools.reduce((n, p) => {
+      const activeDotDps = dotPools.reduce((n, p) => {
         const fixed = p.type === "erosion" ? effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value : undefined;
         const spellPen = tags.includes("Spell") && ["fire", "cold", "lightning"].includes(p.type) ? simple("spell_elemental_penetration", "add_percent") : 0;
         const taken = effects.filter(e => e.stat === `enemy_${p.type}_damage_taken` || p.type!=='physical'&&e.stat === `${p.type}_damage_taken`).reduce((n,e) => n * (1 + e.value / 100), 1);
-        return n + (p.min + p.max) / 2 * taken * (report.beforeDefense || p.type === "physical" ? 1 : 1 - ((fixed ?? input.enemy[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100)
+        const part=(p.min + p.max) / 2 * taken * (report.beforeDefense || p.type === "physical" ? 1 : 1 - ((fixed ?? input.enemy[p.type]) - (combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - penetration[p.type] - spellPen) / 100)
           * (p.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1);
+        if(p.type==='lightning')lightningDotDps+=part;
+        return n+part;
       }, 0)
-        * offense?.values.attributeMultiplier * afflictionMultiplier * b?.dotUptime / 100*netherMore(effects,'enemy_dot_damage_taken')*netherMore(effects,'enemy_all_damage_taken');
+        * offense?.values.attributeMultiplier * afflictionMultiplier;
+      const receivedMore = netherMore(effects,'enemy_dot_damage_taken') * netherMore(effects,'enemy_all_damage_taken');
+      dotDps = activeDotDps * dotUptime / 100 * receivedMore;
+      lightningDotDps *= offense?.values.attributeMultiplier * afflictionMultiplier * dotUptime/100 * receivedMore;
+      dotBreakdown = { active: round(activeDotDps * receivedMore), uptime: dotUptime };
+      if (reapRate > 0 && finite(reapDuration) && b?.dotUptime > 0) {
+        const overlap = observedReaping ? 100 : b.reapingOverlap ?? (b.dotUptime === 100 ? 100 : undefined);
+        const field = SEASON_DPS_SKILL_FIELDS.reapingOverlap;
+        if (!validValue(field, overlap)) reasons.push(`${field.label} 미입력`);
+        else if (b.dotUptime === 100 && overlap !== 100)
+          reasons.push(`${field.label} 입력값은 유지율 100%일 때 100%여야 합니다.`);
+        else {
+          const group = reapOverlapTotals.get(direct.id) ?? { total: 0, rows: [] };
+          group.total += overlap;
+          if (overlap > 0) group.rows.push(direct.rowIndex);
+          reapOverlapTotals.set(direct.id, group);
+          reapingDps = activeDotDps * receivedMore * reapDuration * reapRate * overlap / 100;
+        }
+      }
     }
-    const extraDps = entry?.mechanics?.some(m => m.kind === "swamp-move") ? landedHit * b?.extraHits : 0;
+    const fissure = entry?.mechanics?.find(m => m.kind==='groundshaker-fissure');
+    let fissureResult;
+    if (fissure) {
+      let hits = b?.fissureHits;
+      const recovery = effects.filter(e=>e.stat==='demolisher_charge_recovery_speed' && e.operation==='add_percent').reduce((total,e)=>total+e.value,0);
+      const interval = fissure.interval/(1+recovery/100);
+      const max = Math.min(manualRate,1/interval);
+      let times;
+      if (timedFissure(build)) {
+        const {seconds,warmup} = build.ss14Inputs.theaCycle;
+        const label = SEASON_DPS_SKILL_FIELDS.fissureTimes.label;
+        times = fissureTimeList(b?.fissureTimes) ?? (hits === 0 ? [] : null);
+        if (!times) reasons.push(`${label} 미입력`);
+        else if (times.some(time=>time>=seconds+warmup-1e-8)) reasons.push(`${label}은 측정 종료 전이어야 합니다.`);
+        else if (times.some((time,i)=>time*manualRate+1e-8<i+1)) reasons.push(`${label}에 해당하는 일반 시전 횟수가 부족합니다.`);
+        else if (times.length && (b?.multistrikeChance > 0 || report.componentProjection.rows.some(row=>
+          row.mechanics?.some(m=>m.kind==='thea-combat-event' && m.castBonus==='attack'))))
+          reasons.push('균열을 만든 시점의 연속 공격 배율 또는 공격 발동 효과가 필요한 경우에는 균열 후속 적중을 계산할 수 없습니다.');
+        hits = times?.filter(time=>time>=warmup).length / seconds;
+      } else if (!validValue(SEASON_DPS_SKILL_FIELDS.fissureHits,hits)) reasons.push(`${SEASON_DPS_SKILL_FIELDS.fissureHits.label} 미입력`);
+      else if (hits>0 && (combat || build.ss14Inputs?.theaCycle?.mode==='automatic'))
+        reasons.push('자동 은총과 균열 후속 적중을 함께 계산하려면 티아 전투 조건에서 복합 발동을 선택하세요.');
+      else if (!finite(interval) || interval<=0 || hits>max+1e-8)
+        reasons.push(`${SEASON_DPS_SKILL_FIELDS.fissureHits.label} 입력값이 시전·파괴 충전 상한을 초과합니다.`);
+      fissureResult={interval,max,hits,hitMultiplier:fissure.hitMultiplier,...(times&&{times})};
+    }
+    const extraDps = (entry?.mechanics?.some(m => m.kind === "swamp-move") ? landedHit * b?.extraHits : 0)
+      + (fissureResult && !timedFissure(build) ? landedHit*fissureResult.hitMultiplier*fissureResult.hits : 0);
     const nether=netherCorePlan(heroMechanics,{rowIndex:direct.rowIndex,tags,eligibleBurst,maxBurst,burstChargeSpeed:burstSpeed*burstMore,
       hit:hit*shotgun.multiplier*(autoNetherBurst?burstHitMore:1),dotDps,combat,manualRate,cardDetail:record?.detail??''});
     reasons.push(...nether.blockers);
-    const dps = manualDps + burstDps + repeatDps + heroDps + dotDps + extraDps + nether.dps;
+    const cost=core||!castCostVerified ? null : manualSkillCost(build,report,entry,direct.rowIndex,tags,effects);
+    const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0;
+    if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
+    else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
+    const channeled=tags.includes("Channeled")||tags.includes("Channel");
+    const channelCost=channeled && (combat || build.ss14Inputs?.theaCycle?.mode !== "automatic")
+      && cost && !cost.reason && (cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0
+      ? {rate:b?.channelCostRate??null,max:possibleManualRate,
+        valid:validValue(SEASON_DPS_SKILL_FIELDS.channelCostRate,b?.channelCostRate) && b.channelCostRate<=possibleManualRate+1e-8}
+      : null;
+    const resourceRate=channeled ? (channelCost?.valid ? channelCost.rate : null) : manualRate;
+    const zeroCost=cost?.mana===0 && cost.life===0;
+    const rateKnown=cost&&!cost.reason&&(zeroCost||finite(resourceRate));
+    const dps = manualDps + burstDps + repeatDps + heroDps + dotDps + reapingDps + extraDps + nether.dps;
     if (!reasons.length && (!finite(dps) || dps < 0)) reasons.push("전체 DPS를 산출할 입력이 부족하거나 계산 범위를 벗어났습니다.");
-    return { id: direct.id, rowIndex: direct.rowIndex, supported: reasons.length === 0, blockers: [...new Set(reasons)],
+    // These hit paths scale the same landed hit. Isolate the multiplier on
+    // lightning left after conversion without toggling any threshold effects.
+    const lightningShare = weaponHands ? weaponHands.reduce((sum,hand)=>sum+hand.landedLightning,0)/(2*landedHit)
+      : pools.filter(p=>p.type==='lightning').reduce((sum,p)=>sum+meanPool(p),0)/mean;
+    const fixedNumbedHitDps = fixedNumbedBonus > 0 && lightningShare > 0
+      ? (manualDps+burstDps+repeatDps+heroDps+extraDps)
+        * lightningShare * fixedNumbedBonus/(100+fixedNumbedBonus)
+      : 0;
+    return { id: direct.id, rowIndex: direct.rowIndex, supported: reasons.length === 0, blockers: [...new Set(reasons)], numbedOnHit,
       values: { dps: reasons.length ? null : round(dps), averageHit: reasons.length ? null : round(hit),
+        averageLandedHit: reasons.length || !pools.length ? null : round(landedHit),
+        fixedNumbedHitDps: reasons.length ? null : round(fixedNumbedHitDps),
+        fixedNumbedDotDps: reasons.length ? null : round(fixedNumbedBonus>0 ? lightningDotDps*fixedNumbedBonus/(100+fixedNumbedBonus) : 0),
         manualDps: reasons.length ? null : round(manualDps), spellBurstDps: reasons.length ? null : round(burstDps),
-        repeatDps: reasons.length ? null : round(repeatDps + extraDps), heroDps: reasons.length ? null : round(heroDps), dotDps: reasons.length ? null : round(dotDps), netherDps:reasons.length?null:round(nether.dps), manualRate: round(manualRate), burstActivationRate: round(burstActivationRate), burstExtraRate: round(burstExtraRate) },
-      nether, shotgun,
+        repeatDps: reasons.length ? null : round(repeatDps + extraDps), heroDps: reasons.length ? null : round(heroDps), dotDps: reasons.length ? null : round(dotDps), reapingDps: reasons.length ? null : round(reapingDps), netherDps:reasons.length?null:round(nether.dps), manualRate: round(manualRate), burstActivationRate: round(burstActivationRate), burstExtraRate: round(burstExtraRate) },
+      nether, shotgun, takenMultiplier, manaPerUse:round(cost?.mana), lifePerUse:round(cost?.life),
+      ...(dotBreakdown && !reasons.length && {dotBreakdown}),
+      ...(dotWindows && {dotWindows}),
+      ...(fissureResult && {fissure:fissureResult}),
+      ...(observedReaping && reaping && { reaping: {
+        duration: reaping.effectiveDurationSeconds, cooldown: reaping.effectiveRecoverySeconds, rate: reapingRate,
+        ...(reaping.beamCount>1 && {beamCount:reaping.beamCount}),
+      } }),
+      ...(channelCost && {channelCost}),
+      ...(!reasons.length && weaponHands && {weaponHands}),
+      manualManaPerSecond:zeroCost?0:rateKnown?round(cost.mana*resourceRate):null,
+      manualLifePerSecond:zeroCost?0:rateKnown?round(cost.life*resourceRate):null,
       pools, mechanics: entry?.mechanics ?? [],
       combat: combat ? { tags, rate: basis?.rate, increasedAttackSpeed: evaluationAttackSpeed(direct.trace), luck,
         elixirScorch: report.componentProjection.rows.some(r => r.mechanics?.some(m => m.kind === "elixir-scorch")),
-        attributeMultiplier: offense?.values.attributeMultiplier, critical: offense?.values, takenMultiplier, penetration,
+        attributeMultiplier: offense?.values.attributeMultiplier, critical: offense?.values, landedHit, takenMultiplier, penetration,
+        numbedHitBonus: ((combatState.numbedEffect ?? 0) > 0)
+          ? pools.filter(p=>p.type==='lightning').reduce((n,p)=>n+meanPool(p),0) * offense?.values.attributeMultiplier
+            * criticalMultiplier * takenMultiplier * combatState.numbedEffect / (100 + combatState.numbedEffect) : 0,
         burstHitMore, maxBurst, burstChargeSpeed: burstSpeed * burstMore, eligibleBurst, hasDot,
         dotWithoutAffliction: hasDot ? dotDps / (1 + (input.enemy.affliction ?? 0) / 100 * netherAfflictionEffect(effects)) : 0,
         afflictionEffect: netherAfflictionEffect(effects),
         igniteSupportEffects: direct.igniteSupportEffects, effects } : undefined };
   });
-  if (totalShare > 100 + 1e-8) blockers.push("스킬 시전 시간 배분의 합이 100%를 초과합니다. 동시 최대 DPS를 합산하지 않습니다.");
+  const manualResources=manualResourceBalance(rows,report.character?.survival?.manaScenarios??[],input?.skills);
+  const reapingOverlapOverflow = [...reapOverlapTotals.values()].filter(group => group.total > 100 + 1e-8).flatMap(group => group.rows);
+  if (reapingOverlapOverflow.length)
+    blockers.push("같은 지속 스킬의 수확 겹침 비율 합계가 100%를 초과합니다.");
+  if (manualResources?.shareOverflow) blockers.push('스킬 시전 시간 배분의 합이 100%를 초과합니다. 조건에서 각 스킬의 배분을 확인하세요.');
   if (burstUsers > 1) blockers.push("여러 스킬이 공유하는 매직 버스트 충전·발동 순서 미확인");
-  for (const id of new Set(rows.filter(r => seasonMinionProfile(r.id)).map(r => r.id))) {
-    if (rows.filter(r => r.id === id).reduce((n, r) => n + (input?.skills?.[r.rowIndex]?.minionCount ?? 0), 0) > seasonMinionProfile(id).maximum)
+  const persistentGroups = new Map();
+  const dotUptimeOverflow = [], dotExclusiveUnconfirmed = [];
+  const dotWindowIssues = new Map();
+  const addWindowIssue = (reason, indices) => {
+    blockers.push(reason);
+    dotWindowIssues.set(reason,[...new Set([...(dotWindowIssues.get(reason)??[]),...indices])].sort((a,b)=>a-b));
+  };
+  for (const row of rows.filter(r => r.supported && (r.combat?.hasDot ? r.dotWindows || input?.skills?.[r.rowIndex]?.dotUptime > 0 : r.values.dotDps > 0))) {
+    const group = persistentGroups.get(row.id) ?? [];
+    group.push({row, binding:input.skills[row.rowIndex]});
+    persistentGroups.set(row.id, group);
+  }
+  for (const group of persistentGroups.values()) {
+    if (group.length < 2 && !group[0].row.dotWindows) continue;
+    if (build.ss14Inputs?.theaCycle?.mode === "automatic") {
+      if (!combat) {
+        blockers.push("자동 은총에서 동일 지속 스킬의 중첩 구간을 계산하려면 복합 계산을 켜세요.");
+        continue;
+      }
+      const missing = group.filter(({row})=>!row.dotWindows).map(({row})=>row.rowIndex);
+      if (missing.length) {
+        addWindowIssue("동일 지속 스킬의 적용 구간을 각 칸에 입력하세요.",missing);
+        continue;
+      }
+      const end = build.ss14Inputs.theaCycle.warmup + build.ss14Inputs.theaCycle.seconds;
+      const windows = group.flatMap(({row})=>row.dotWindows.map(([start,stop])=>({start,stop,index:row.rowIndex}))).sort((a,b)=>a.start-b.start);
+      const invalid = new Set();
+      let furthest;
+      for (const window of windows) {
+        if (window.stop>end+1e-8) invalid.add(window.index);
+        if (furthest && window.start<furthest.stop) {
+          invalid.add(window.index);
+          invalid.add(furthest.index);
+        }
+        if (!furthest || window.stop>furthest.stop) furthest=window;
+      }
+      if (invalid.size) {
+        const scope=group.length===1?'지속 대미지':'동일 지속 스킬의';
+        addWindowIssue(`${scope} 적용 구간은 겹치지 않게 측정 종료 시각 안에서 입력하세요.`,invalid);
+        continue;
+      }
+    } else if (group.reduce((total, {binding}) => total + binding.dotUptime, 0) > 100 + 1e-8) {
+      dotUptimeOverflow.push(...group.map(({row}) => row.rowIndex));
+      blockers.push("동일 지속 스킬의 중첩 구간을 한 번씩만 센 유지율 합계가 100%를 초과합니다.");
+    } else if (group.some(({binding}) => binding.dotExclusive !== 1)) {
+      dotExclusiveUnconfirmed.push(...group.filter(({binding}) => binding.dotExclusive !== 1).map(({row}) => row.rowIndex));
+      blockers.push("동일 지속 스킬의 중첩 시간을 대미지가 적용된 한 칸에만 배정한 뒤 각 칸에서 확인하세요.");
+    }
+  }
+  for (const id of new Set(rows.filter(r => Number.isInteger(r.minionMaximum)).map(r => r.id))) {
+    const group = rows.filter(r => r.id === id && Number.isInteger(r.minionMaximum));
+    const maximum = Math.max(...group.map(row => row.minionMaximum));
+    if (group.length > 1 && group.reduce((n, r) => n + (input?.skills?.[r.rowIndex]?.minionCount ?? 0), 0) > maximum)
       blockers.push("같은 종류의 소환체가 여러 스킬 칸에서 수량 상한을 초과해 중복 합산됩니다.");
   }
+  const syntheticRows = rows.filter(r=>r.syntheticTroop && Number.isInteger(r.minionMaximum));
+  if (new Set(syntheticRows.map(r=>r.id)).size > 1
+    && syntheticRows.reduce((count,r)=>count+(input?.skills?.[r.rowIndex]?.minionCount??0),0)>syntheticTroopMapCap)
+    blockers.push(`스마트 웨폰 소환체 수 합계가 맵 상한(${syntheticTroopMapCap}기)을 초과했습니다.`);
   blockers.push(...rows.flatMap(r => r.blockers));
   const unique = [...new Set(blockers)];
   const supported = rows.length > 0 && unique.length === 0;
   return { supported, scope: "ss14-fixed-scenario-full-dps", dps: supported ? round(rows.reduce((n, r) => n + r.values.dps, 0)) : null,
-    rows, blockers: unique, heroMechanics, burstRecovery, receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
-      ...["Damage_Form", "Amplified_Damage_Over_Time", "Whimsy", "Whimsy_Signal", "Whimsy_Explosion", "Ingenuity_Overload"].map(slug => mechanicPage(build, slug)).filter(Boolean)],
+    rows, blockers: unique, heroMechanics, burstRecovery, observedCommandRow:sharedCommand?.rowIndex,
+    ...(reapingOverlapOverflow.length && { reapingOverlapOverflow }),
+    ...(dotUptimeOverflow.length && { dotUptimeOverflow }),
+    ...(dotExclusiveUnconfirmed.length && { dotExclusiveUnconfirmed }),
+    ...(dotWindowIssues.size && { dotWindowIssues:Object.fromEntries(dotWindowIssues) }),
+    manualResources,
+    receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
+      ...(sharedCommand?.receipt ? [sharedCommand.receipt] : []),
+      ...(channelPage ? [channelPage] : []),
+      ...["Damage_Form", "Amplified_Damage_Over_Time", "Whimsy", "Whimsy_Signal", "Whimsy_Explosion", "Ingenuity_Overload",
+        ...(rows.some(row => row.mechanics?.some(m => m.kind === "wilting-beam-reaping")) ? ["Damage_Over_Time_Reaping"] : [])].map(slug => mechanicPage(build, slug)).filter(Boolean)],
     limitation: "입력한 적 1명·시전 시간 배분·적중률·현재 효과 상태에서 선택된 공격을 합산합니다. 자원 지속 가능성이나 실전 유지율은 자동 예측하지 않습니다. 적중률·발동 횟수·지속 대미지 유지율은 관측값이며, 미해석 효과가 남으면 전체 DPS를 표시하지 않습니다." };
 }
 

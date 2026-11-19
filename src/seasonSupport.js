@@ -12,6 +12,30 @@ import { boundBlessingStacks } from './seasonBlessings.js';
 import { ICE_LANCES_REBOUND_TEXT } from './seasonIceLancesShotgun.js';
 
 export const CLOCKWORK_CORE_ID = "supports-ss14-clockwork-core";
+export const MANIACAL_ARMY_ID = "supports-tlidb-com-cn-maniacal-army";
+export const VOLTAGE_TURMOIL_ID = 'supports-ss14-current-voltaic-ripple-turmoil-noble';
+export const VOLTAGE_AFTERWAVE_ID = 'supports-ss14-current-voltaic-ripple-afterwave-noble';
+export const LUNAR_ECLIPSE_ID = 'supports-ss14-current-moon-strike-lunar-eclipse-noble';
+const moonStrikeId = 'skills-tlidb-com-cn-moon-strike';
+export function validLunarEclipseLink(build,rowIndex,supportIndex){
+  const slot=build.skills?.active?.[rowIndex];
+  return slot?.skillId===moonStrikeId && supportIndex===4 && slot.unlockedSupportCount===5
+    && slot.supports?.[4]?.supportId===LUNAR_ECLIPSE_ID
+    && slot.supports.filter(row=>row?.supportId===LUNAR_ECLIPSE_ID).length===1;
+}
+const mechanicalModificationCap = "Halve the max number of Synthetic Troop Minions that can be summoned by you, rounding up to at least 1. This effect will take effect once";
+const maniacalArmyCommand = "Whenever a Minion summoned by the supported skill deals damage, gains 15 Command per second for 5 s. Interval: 1 s";
+const wiltingReflectionLine = "Additionally generates a Beam that shoots in the opposite direction when channeling the supported skill";
+const costConversionLine='Replace Mana Cost from the supported skill with Life cost';
+const lunarNoMana='The supported skill no longer costs Mana';
+const lunarSeal='When the supported skill is installed, seal 10 % Max Mana';
+const costClause=/\b(?:mana|life) (?:cost|consumption)|\b(?:costs?|consumes?) (?:mana|life)\b|\b(?:mana|life) (?:consumed|spent)\b/iu;
+const recentDamageTypes = Object.entries({ fire: '화염', cold: '냉기', lightning: '번개', erosion: '부식' });
+const recentPhysicalBonus = /^\+?([\d.]+) % additional Physical Damage for the supported skill for each type of Non-Physical Damage dealt recently$/u;
+const recentTypePenalty = /^-([\d.]+) % additional damage of the corresponding type for the supported skill for each type of Non-Physical Damage dealt recently$/u;
+export const recentDamageMissing = '다중 전환에 사용할 최근 비물리 대미지 유형을 선택하세요.';
+export const recentDamageConflict = '다중 전환을 연결한 보조 칸의 최근 대미지 유형을 같은 값으로 맞추세요.';
+export const isRecentDamageCondition = key => /^recentDamage-(fire|cold|lightning|erosion)$/u.test(key);
 const clockworkSocket = (rowIndex,supportIndex) => rowIndex === 0 && supportIndex === 1;
 export function seasonSupportRequiredSlot(record) {
   const ordinal = record?.detail?.match(/This skill can only be installed in the (first|second|third|fourth|fifth) Support Skill Slot of each (?:Active|Passive) Skill(?:\.|$)/mu)?.[1];
@@ -62,14 +86,14 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
   const base = { rowIndex, supportIndex, level: support?.level, effects: [], blockers: [],
     receipt: record ? { season: "SS14", sourceUrl: record.sourceUrl, sourceRecordKey: record.sourceRecordKey, sourcePageSha256: record.sourcePageSha256 } : null };
   if (!item) return { ...base, blockers: ["SS14 보조 스킬 원문 미확보"] };
-  if (isTarget && (binding?.itemId !== item.id || binding.sourcePageSha256 !== record.sourcePageSha256)) return { ...base, blockers: ["SS14 보조 입력의 원문 근거가 바뀌었거나 연결되지 않았습니다."] };
+  if (isTarget && (binding?.itemId !== item.id || binding.sourcePageSha256 !== record.sourcePageSha256)) return { ...base, bindingChanged:true, blockers: ["SS14 보조 입력의 원문 근거가 바뀌었거나 연결되지 않았습니다."] };
   if (item.id === CLOCKWORK_CORE_ID) {
     if (!clockworkSocket(rowIndex,supportIndex) || support.level !== 20 || record.detail !== SS14_LOG_COMPLETION.records[item.id].en.detail)
       return { ...base, blockers: ['클락워크 코어는 메인 스킬의 두 번째 보조 칸에 20레벨로 연결하세요.'] };
     return { ...base, mechanics: [{ kind: "clockwork-core", sourceText: record.detail }] };
   }
   const resolved = resolveSeasonSkillLevel(item, support.level);
-  if (resolved.blockers.length) return { ...base, blockers: ["선택한 레벨의 SS14 보조 스킬 수치 미확보"], evidenceBlockers: resolved.blockers };
+  if (resolved.blockers.length) return { ...base, levelUnavailable: true, blockers: ["선택한 레벨의 SS14 보조 스킬 수치 미확보"], evidenceBlockers: resolved.blockers };
   let selected = resolved.item;
   if (record.calculationDetail && !resolved.receipt) {
     let detail = record.calculationDetail;
@@ -107,10 +131,26 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
         base.conditionControls.push({ key: `repeatDelayMs-${i}`, label: `첫 적중부터 ${i + 1}번째 적중까지 관측한 시간 (ms)`, min: 0, max: 1800000, integer: true, value: binding?.conditions?.[`repeatDelayMs-${i}`] ?? '' });
     }
   }
+  const verified = record.sourceSeasonEvidence?.actualSeason === 14 && record.sourceSeasonEvidence.verificationComplete;
+  const reflection = verified && record.sourceRecordKey === "Wilting_Beam_Reflection_Magnificent"
+    && selected.tlidbText.en.detail.split("\n").includes(wiltingReflectionLine);
+  if (reflection) base.conditionControls.push({ key:"beamTargetCount", label:"같은 대상에 적용된 부식 광선 수", min:1, max:2,
+    integer:true, value:binding?.conditions?.beamTargetCount??"" });
   const requiredSlot = seasonSupportRequiredSlot(record);
   const requiredRole = record.detail.match(/Support Skill Slot of each (Active|Passive) Skill(?:\.|$)/mu)?.[1];
   if (requiredSlot !== null && ((requiredRole === 'Passive' ? rowIndex < 5 : rowIndex >= 5) || supportIndex !== requiredSlot))
     return { ...base, blockers: [`이 보조는 ${requiredRole === 'Passive' ? '패시브' : '액티브'} 스킬의 ${requiredSlot + 1}번째 보조 칸에만 장착할 수 있습니다.`] };
+  if(verified){
+    const lines=selected.tlidbText.en.detail.split('\n');
+    const heads=lines.flatMap((line,index)=>line==='Mana Cost Multiplier'?[index]:[]);
+    const multiplier=heads.length===1&&lines[heads[0]+1]?.match(/^([\d.]+)%$/u);
+    const adjustments=[...new Set(lines.filter(line=>line!=='Mana Cost Multiplier'&&costClause.test(line)))];
+    const convertsToLife=record.sourceRecordKey==='Cost_Conversion'&&adjustments.length===1&&adjustments[0]===costConversionLine;
+    const noMana=item.id===LUNAR_ECLIPSE_ID&&adjustments.length===1&&adjustments[0]===lunarNoMana;
+    if(multiplier&&(!adjustments.length||convertsToLife||noMana))
+      base.castCost={multiplier:Number(multiplier[1]),convertsToLife,noMana};
+    if(noMana&&lines.includes(lunarSeal))base.sealedManaPercent=10;
+  }
   if (rolled.blockers.length) return { ...base, blockers: rolled.blockers };
   const parsed = parseTlidbSkillTooltipCalculation(rolled.item, { season: "SS14", level: resolved.parserLevel });
   const unresolvedEffects=new Set(parsed.effects.filter(e=>e.condition||e.conditionText||e.conditionRequirements||e.per));
@@ -119,6 +159,31 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
   const mechanics = [];
   const handled = new Set();
   const conditionBlockers = [];
+  if (verified && record.sourceRecordKey === 'Elemental_Conversion') {
+    const lines=parsed.blockers.map(b=>b.sourceText);
+    const physical=lines.find(line=>recentPhysicalBonus.test(line));
+    const penalty=lines.find(line=>recentTypePenalty.test(line));
+    if (physical && penalty) {
+      handled.add(physical);
+      handled.add(penalty);
+      handled.add(physical+'\\n '+penalty);
+      const controls=recentDamageTypes.map(([type,label])=>{
+        const key='recentDamage-'+type, value=binding?.conditions?.[key];
+        return { type, key, label:`최근 ${label} 대미지`, min:0, max:1, integer:true,
+          choices:[[0,'없음'],[1,'있음']], value:[0,1].includes(value)?value:'' };
+      });
+      base.conditionControls.push(...controls);
+      const active=controls.filter(c=>c.value===1);
+      if (controls.some(c=>c.value==='')) conditionBlockers.push(recentDamageMissing);
+      else {
+        mechanics.push({kind:'recent-nonphysical-damage-types', types:active.map(c=>c.type)});
+        if (active.length) parsed.effects.push({stat:'supported-skill-physical-damage', operation:'more', unit:'percent',
+          value:Number(recentPhysicalBonus.exec(physical)[1])*active.length, sourceText:physical, nonBlockingWhenDamageTypeUnavailable:true});
+        for (const {type} of active) parsed.effects.push({stat:`supported-skill-${type}-damage`, operation:'more', unit:'percent',
+          value:-Number(recentTypePenalty.exec(penalty)[1]), sourceText:penalty, nonBlockingWhenDamageTypeUnavailable:true});
+      }
+    }
+  }
   for (const blocker of parsed.blockers) {
     const text = blocker.sourceText;
     if (handled.has(text)) continue;
@@ -139,10 +204,40 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
         mechanics.push({ kind: 'ice-lances-rebound', hits, repeatJumps, delaysMs, sourceUrl: record.sourceUrl, sourceText: text });
       }
       handled.add(text);
+    } else if (reflection && text === wiltingReflectionLine) {
+      const count = binding?.conditions?.beamTargetCount;
+      if (count === 1) mechanics.push({kind:"wilting-extra-beam",value:1,sourceText:text,sourceUrl:record.sourceUrl});
+      else conditionBlockers.push(count === 2
+        ? "같은 대상에 적용된 부식 광선 수가 2개일 때 지속 대미지 중첩은 미지원입니다."
+        : "같은 대상에 적용된 부식 광선 수를 입력하세요.");
+      handled.add(text);
+    } else if (verified && record.sourceRecordKey === "Wilting_Beam_Rapid_Completion_Noble"
+      && (m = text.match(/^For every \+1 Beam the supported skill has, \+([\d.]+) % additional Reaping Recovery Speed for Reaping that is triggered when this skill reaches max channeled stacks$/u))) {
+      parsed.effects.push({stat:"reaping-recovery-speed",operation:"more",unit:"percent",value:Number(m[1]),perWiltingBeam:true,sourceText:text});
+      handled.add(text);
+    } else if (record.sourceRecordKey === "Mechanical_Modification" && record.sourceSeasonEvidence?.actualSeason === 14
+      && record.sourceSeasonEvidence.verificationComplete && text === mechanicalModificationCap) {
+      mechanics.push({kind:"synthetic-troop-map-cap-halved",sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+    } else if (record.sourceRecordKey === "Mechanical_Modification" && text === "+40 % Physique for Minions summoned by the supported skill") {
+      // Size is a separate effect; final hit rates account for target coverage.
+      mechanics.push({kind:"minion-physique",value:40,sourceText:text});
+      handled.add(text);
+    } else if (item.id === MANIACAL_ARMY_ID && record.sourceSeasonEvidence?.actualSeason === 14
+      && record.sourceSeasonEvidence.verificationComplete && text === maniacalArmyCommand) {
+      mechanics.push({kind:"synthetic-troop-observed-command",rate:15,duration:5,interval:1,sourceText:text});
+      handled.add(text);
+    } else if (record.sourceRecordKey === 'Cost_Conversion' && text === costConversionLine) {
+      parsed.effects.push({stat:'supported-skill-mana-cost-to-life',operation:'set',unit:'percent',value:100,sourceText:text});
+      handled.add(text);
     } else if ((m = text.match(/^Adds ([\d.]+) - ([\d.]+) (Physical|Cold|Fire|Lightning|Erosion) Damage to the supported skill$/u)
       ?? text.match(/^Supported skills add ([\d.]+) - ([\d.]+) (physical|cold|fire|lightning|erosion) damage$/u))) {
       for (const [suffix, value] of [["min", Number(m[1])], ["max", Number(m[2])]]) parsed.effects.push({
         stat: `supported-skill-added-${m[3].toLowerCase()}-damage-${suffix}`, operation: "set", value, unit: "damage", sourceText: text });
+      handled.add(text);
+    } else if (record.sourceRecordKey === "High_Voltage" && record.sourceSeasonEvidence?.actualSeason === 14
+      && record.sourceSeasonEvidence.verificationComplete && text === "Inflicts Numbed when the supported skill deals Hit Lightning Damage") {
+      mechanics.push({ kind: "support-numbed-on-hit", sourceText: text, sourceUrl: record.sourceUrl });
       handled.add(text);
     } else if ((m = text.match(/^\+([\d.]+) Jumps for the supported skill$/u))) {
       mechanics.push({ kind: "projectile-jumps", value: Number(m[1]), sourceText: text }); handled.add(text);
@@ -154,8 +249,24 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
       mechanics.push({ kind: "maximum-charges", value: +m[1], sourceText: text }); handled.add(text);
     } else if ((m = text.match(/^Gains the following buff upon casting the supported skill: \+([\d.]+)% Movement Speed$/u))) {
       mechanics.push({ kind: "mobility-movement", value: +m[1], duration: 2, sourceText: text }); handled.add(text);
-    } else if ((m = text.match(/^Gains a stack of buff when using the supported skill every (\d+) s: \+([\d.]+) % Attack and Cast Speed after using a Mobility Skill$/u))) {
-      mechanics.push({ kind: "periodic-burst", value: +m[2], interval: +m[1], duration: 2, sourceText: text }); handled.add(text);
+    } else if (record.sourceRecordKey === 'Periodic_Burst'
+      && (m = text.match(/^Gains a stack of buff when using the supported skill every (\d+) s: \+([\d.]+) % Attack and Cast Speed after using a Mobility Skill$/u))
+      && selected.tlidbText.en.detail.split('\n').includes('The buff lasts 2 s')) {
+      mechanics.push({ kind: "periodic-burst", value: +m[2], interval: +m[1], duration: 2, sourceText: text });
+      handled.add(text);
+      handled.add(`Gains a stack of buff when using the supported skill every ${m[1]} s. The buff lasts 2s`);
+    } else if (verified && item.id===VOLTAGE_TURMOIL_ID
+      && text==='Damage Over Time dealt by the supported skill changes randomly between 30 % and 300 % instead') {
+      mechanics.push({kind:'voltage-turmoil',sourceText:text});
+      handled.add(text);
+    } else if (verified && record.sourceRecordKey==='Voltaic_Ripple_Jolt_Magnificent'
+      && text==='While the supported skill lasts, inflicts 3 stack(s) of Numbed when Reaping') {
+      mechanics.push({kind:'voltage-jolt',stacks:3,sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+    } else if (verified && item.id===VOLTAGE_AFTERWAVE_ID
+      && text==='The supported skill additionally generates an electric ring when Terra Charge stacks are greater than or equal to 3') {
+      mechanics.push({kind:'voltage-afterwave',sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
     } else {
       const model=seasonConditionalExpression(text);
       if(!model)continue;

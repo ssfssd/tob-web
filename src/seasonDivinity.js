@@ -29,6 +29,11 @@ export function seasonSlateEntry(id) {
   return m ? entryByKey.get(entryKey(m[2],m[1])) : null;
 }
 const category = e => ["Micro Talent", "Medium Talent", "Legendary Medium Talent", "Ultimate Nether King Talent Node"].includes(e?.typeLabel) ? e.typeLabel : e?.section === "core" ? "Core Talent" : null;
+export function hasDuplicatePedigreeCore(templateId, selections) {
+  if (templateId !== 'genealogy') return false;
+  const third = seasonSlateEntry(selections.slot_3);
+  return category(third) === 'Core Talent' && third.id === seasonSlateEntry(selections.slot_4)?.id;
+}
 const copyOptions = {
   starfire: ["sparks_copy_up", "sparks_copy_left", "sparks_copy_down", "sparks_copy_right"],
   void_gap: ["copy_left", "copy_right"],
@@ -44,7 +49,7 @@ function allowed(label, entry) {
   const type = category(entry);
   if (label === "Regular Talent") return ["Micro Talent", "Medium Talent", "Legendary Medium Talent"].includes(type);
   if (label === "Micro Talent or Medium Talent") return ["Micro Talent", "Medium Talent"].includes(type);
-  // Core level is not present in this source table. Do not infer it from an ID.
+  if (label === "Medium Talent or Core Talent") return ["Medium Talent", "Core Talent"].includes(type);
   return label === type;
 }
 export function seasonSlateOptions(label) {
@@ -85,6 +90,12 @@ export function seasonSlateTemplates(build, { requireBindings = true } = {}) {
     const slug = templates[slate.slateId]; const page = SS14_MECHANICS.pages[`en/${slug}`];
     const ko = SS14_MECHANICS.pages[`ko/${slug}`]; const bound = !requireBindings || mechanicPage(build, slug);
     const slotTypes = [...page.body.matchAll(/^<([^>]+)>$/gmu)].map(m => m[1]);
+    // Installed config_item_talent_block_gold[1010] has the same core pool (10)
+    // in slots 3 and 4. Keep the historical tier text in the source receipt.
+    if (slate.slateId === 'genealogy') {
+      if (slotTypes[2] === 'Medium Talent or Lv.1 Core Talent') slotTypes[2] = 'Medium Talent or Core Talent';
+      if (slotTypes[3] === 'Lv.2 Core Talent') slotTypes[3] = 'Core Talent';
+    }
     const cap = Number(page.body.match(/Max Active Divinity Slates?: (\d+)/u)?.[1]) || null;
     const blockers = [];
     if (!bound) blockers.push({ reason: "SS14 특수 석판 원문 연결을 확인하세요." });
@@ -97,6 +108,8 @@ export function seasonSlateTemplates(build, { requireBindings = true } = {}) {
     if (Object.keys(slate.slotSelectionsByKey ?? {}).some(key => !permitted.includes(key))) blockers.push({ reason: "특수 석판의 SS14 슬롯과 저장 옵션이 일치하지 않습니다." });
     if (slate.slateId === "void_gap" && ["copy_left", "copy_right"].filter(k => slate.slotSelectionsByKey?.[k]?.valueId === k).length > 1) blockers.push({ reason: "복제 방향을 하나만 선택하세요." });
     const binding = build.ss14Inputs?.slateSelections?.[slate.instanceId];
+    if (hasDuplicatePedigreeCore(slate.slateId,Object.fromEntries(controls.map(c=>[c.slot,c.value]))))
+      blockers.push({reason:'신의 계보에 같은 핵심 재능을 두 번 장착할 수 없습니다.'});
     if (binding && binding.sourcePageSha256 !== page.sourcePageSha256) blockers.push({ reason: "저장 석판 옵션의 SS14 원문이 변경되었습니다." });
     return { slate, board, slug, page, controls, name: safeKo(ko.title), detail: safeKo(ko.body), blockers, cap };
   });
@@ -120,6 +133,7 @@ export function validSeasonSlateSelections(build) {
     const row = seasonSlateTemplates(build, { requireBindings: false }).find(r => r.slate.instanceId === instanceId);
     return row && binding && binding.templateId === row.slate.slateId && /^[a-f0-9]{64}$/u.test(binding.sourcePageSha256)
       && binding.slots && typeof binding.slots === "object" && !Array.isArray(binding.slots)
+      && !hasDuplicatePedigreeCore(binding.templateId,binding.slots)
       && Object.entries(binding.slots).every(([slot, id]) => {
         const control = row.controls.find(c => c.slot === slot);
         return control && (control.type.startsWith('nether:') ? netherTalentOptions(control.type).some(t=>t.id===id) : selectionAllowed(control.type, id));

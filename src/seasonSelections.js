@@ -6,6 +6,7 @@ import { t } from "./i18n.js";
 import { normalizeBuild } from "./engine.js";
 import { SS14_LOG_COMPLETION } from "./data/ss14LogCompletion.generated.js";
 import { SS14_CURRENT_IDENTITIES } from "./seasonCurrentDatabase.js";
+import { SS14_MODULE_CARDS } from "./data/ss14ModuleCards.generated.js";
 
 Object.assign(SS14_GEAR_EN.records, Object.fromEntries(Object.entries(SS14_LOG_COMPLETION.records).filter(([, r]) => r.en.category === "gear").map(([id, r]) => [id, r.en])));
 SS14_GEAR_EN.collected = Object.values(SS14_GEAR_EN.records).filter(r => r.status === 'collected-preview').length;
@@ -40,6 +41,25 @@ export function getSeasonSelectionOptions(category, index) {
   }).filter((row) => row.koreanTextVerified).sort((a, b) => a.name.localeCompare(b.name, "ko"));
   cache.set(key, options);
   return options;
+}
+
+// Two import paths expose the same module card. Keep both IDs valid for saves
+// and logs, but offer the action-bound module when choosing a new skill.
+export function getSeasonPickerOptions(category, index, current) {
+  const options = getSeasonSelectionOptions(category, index);
+  if (category !== "skills") return options;
+  const modules = new Map(options.filter(o => SS14_MODULE_CARDS.actions[o.id])
+    .map(o => [SS14_CARDS.records[o.id].sourceUrl, o]));
+  const aliases = new Map();
+  for (const option of options) {
+    const card = SS14_CARDS.records[option.id];
+    const bound = modules.get(card.sourceUrl);
+    if (!bound || bound.id === option.id || bound.name !== option.name) continue;
+    const original = SS14_CARDS.records[bound.id];
+    if (card.detail === original.detail && card.tags?.join("|") === original.tags?.join("|"))
+      aliases.set(option.id, bound.id);
+  }
+  return options.filter(o => o.id === current || (!aliases.has(o.id) && aliases.get(current) !== o.id));
 }
 
 // These are explicit edits to a separate target document. Never mutate source,

@@ -1,4 +1,3 @@
-import { appendGreedReservation } from "./seasonLawOfGreedReservation.js";
 import { findItemById } from "./catalog.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import "./seasonCurrentDatabase.js";
@@ -12,18 +11,20 @@ import { EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlots, traitSlotCount
 import { parseSeasonHeroMechanics } from "./seasonHeroMechanics.js";
 import { resolveSeasonSlates, seasonSlateEntry } from "./seasonDivinity.js";
 import { netherTalent, netherPage, netherTopology, parseNetherTalent, netherJudgmentScale, netherTalentId, scaleNetherRow, parseNetherBanishment, applyNetherAggression } from './seasonNether.js';
-import { applyNetherModifiers } from './seasonNetherModifiers.js';
+import { applyNetherModifiers, isNumbedBaseOverride, projectFixedNumbed } from './seasonNetherModifiers.js';
 import { netherRule } from './seasonNetherRemaining.js';
 import { revelationReplacement, revelationPage, parseRevelation, theaRulePin } from "./seasonTheaRevelation.js";
 import { parseTheaBlessingSources } from "./seasonTheaBlessingSources.js";
 import { seasonGearConditionRows } from './seasonGearConditionRows.js';
 import { seasonNonCombatEffect } from './seasonNonCombatEffects.js';
-import { seasonConditionalExpression, scaleSeasonConditionalEffects } from './seasonEffectConditions.js';
+import { exclusiveResourceStates, incompatibleNearbyEnemyStates, nearbyEnemyGroups, seasonConditionalExpression, scaleSeasonConditionalEffects } from './seasonEffectConditions.js';
 import { parseTlidbNumericModifierLine } from './tlidbGearTooltipCalculation.js';
-import { normalizeSeasonGearEffects } from './seasonGearEffects.js';
+import { normalizeSeasonGearEffects, seasonMinionDamageConversion, seasonOutgoingDamageConversion } from './seasonGearEffects.js';
 import { applySeasonCurses } from './seasonCurseEffects.js';
+import { seasonEffectLevelBonus, seasonRevelationLevelBonus } from './seasonSkillLevels.js';
 
-export const SEASON_COMPONENT_LABELS = { hero: "히어로 특성", talents: "재능·프리즘·역상", divinity: "신격", pact: "정령", skills: "영약·모듈", gear: "제작 옵션" };
+import { seasonCustomRows, seasonCustomUnitOptions } from './seasonCustomOptions.js';
+export const SEASON_COMPONENT_LABELS = { hero: "히어로 특성", talents: "재능·프리즘·역상", divinity: "신격", pact: "정령", skills: "영약·모듈", gear: "제작 옵션", custom:"사용자 옵션" };
 const stats = { "damage": "damage", "spell damage": "spell_damage", "attack damage": "attack_damage",
   "area damage": "area_damage", "projectile damage": "projectile_damage", "max damage": "max_damage", "min damage": "min_damage",
   "max spell burst": "max_spell_burst", "spell burst charge speed": "spell_burst_charge_speed",
@@ -74,7 +75,8 @@ const receipt = (page, key) => page && ({ season: "SS14", sourceUrl: page.source
   sourcePageSha256: page.sourcePageSha256, sourceRecordKey: key, authorityScope: key?.startsWith('installed-modifier:')?'installed-ss14':'preview-site-deployment' });
 
 export const validSeasonConditionValue = (control, value) => value === "" || Number.isInteger(value)
-  && value >= 0 && value <= (control.kind === "count" ? control.max : 1);
+  && (value >= (control.min ?? 0) || value===0 && control.allowZero)
+  && value <= (control.kind === "count" ? control.max : 1);
 
 function conditionalClause(clean) {
   const allBlessings = clean.match(/^(.*?) while having Tenacity Blessing, Agility Blessing, and Focus Blessing$/u);
@@ -86,8 +88,8 @@ function conditionalClause(clean) {
   if (paralyzed) return { expression: paralyzed[1], kind: "boolean", max: 1, conditionGroup: "enemy-paralyzed" };
   const boolean = clean.match(/^(.*?) (while (?:standing still|channeling|Dual Wielding|holding a Shield|having Fervor|having Bond|(?:Tenacity|Focus) Blessing is active|Blur is active)|when (?:having Attack Aggression|holding a Shield|Pure Heart is active)|(?:when )?(?:not )?at (?:Low|Full) Life|against Low Life enemies)$/u);
   if (boolean) return { expression: boolean[1], kind: "boolean", max: 1,
-    conditionGroup: /^(?:when )?(?:not )?at Low Life$/u.test(boolean[2]) ? "self-low-life" : boolean[2],
-    inverted: boolean[2].includes("not at Low Life") };
+    conditionGroup: /at Low Life$/u.test(boolean[2]) ? "self-low-life" : /at Full Life$/u.test(boolean[2]) ? "at Full Life" : boolean[2],
+    inverted: /not at (?:Low|Full) Life$/u.test(boolean[2]) };
   const stack = clean.match(/^(.*?) per stack of (Tenacity|Focus|Agility) Blessing(?: owned)?$/u);
   if (stack) return { expression: stack[1], kind: "count", max: 4, conditionGroup: `${stack[2]}-blessing` };
   const wilt = clean.match(/^(.*?) per stack of Wilt inflicted, stacking up to (60) times$/u);
@@ -133,6 +135,10 @@ export function parseSeasonComponentLines(text, multiplier = 1, options = {}) {
     const clean = line.replace(/\s*\(Max Active Divinity: \d+\)$/u, "").replace(/^\+(\d+(?:\.\d+)?) to Max Frostbite Rating$/u,'+$1 Max Frostbite Rating')
       .replace(/^Damage Penetrates (\d+(?:\.\d+)?) % Elemental Resistance$/u,'+$1 % Elemental Resistance Penetration')
       .replace(/^You can inflict (\d+) additional Curse$/u,'You can cast $1 additional Curses');
+    if (!conditional && multiplier === 1 && /^Changes the base effect of Numbed to: \+11\s*% additional Lightning Damage taken$/u.test(clean)) {
+      effects.push({stat:'numbed_base_lightning_taken',operation:'set',value:11,unit:'percent',sourceText:line,sourceLineIndex:lineIndex,multiplier});
+      continue;
+    }
     // State is deliberately explicit; missing does not mean false. Only
     // instantaneous Boolean predicates are accepted, never proc/cadence text.
     const conditionalMatch = conditionalClause(clean);
@@ -147,15 +153,27 @@ export function parseSeasonComponentLines(text, multiplier = 1, options = {}) {
     const expression = conditionalMatch?.expression ?? clean;
     const scale = multiplier * (conditionalMatch?.kind === "count" && validState ? state : 1);
     for (const clause of expression.split(/;\s*| and (?=[+-]?\d)/u)) {
+      const conversion = !conditional && !conditionalMatch && clause.match(/^Converts (\d+(?:\.\d+)?)\s*% of (Minion )?(Physical|Lightning|Cold|Fire|Erosion) Damage to (Physical|Lightning|Cold|Fire|Erosion) Damage$/u);
+      if (conversion) {
+        const [, percent, minion, from, to] = conversion;
+        const effect = { stat: `${minion ? 'minion_' : ''}${from.toLowerCase()}_damage_to_${to.toLowerCase()}_damage`,
+          operation: 'convert_percent', value: Number(percent) * multiplier, unit: 'percent', sourceText: line, sourceLineIndex: lineIndex, multiplier };
+        if (effect.value <= 100 && (seasonOutgoingDamageConversion(effect) || seasonMinionDamageConversion(effect))) effects.push(effect);
+        else blockers.push({ sourceText: line, reason: 'SS14 대미지 전환 방향과 비율을 확인하세요.' });
+        continue;
+      }
       const damageLuck = ["Lucky Damage", "Unlucky Damage", "Very Lucky Damage"].includes(clause) ? clause
         : clause === "Your and Minions' damage gains Lucky" ? "Lucky Damage" : null;
       const burstDamage = clause.match(/^([+-]?\d+(?:\.\d+)?)\s*% additional Hit Damage for skills cast by Spell Burst$/u);
-      if (!conditional && (damageLuck || burstDamage)) {
+      const skillAilment = clause.match(/^([+-]?\d+(?:\.\d+)?)\s*% additional Ailment Damage dealt by (Area|Projectile|Slash-Strike|Demolisher) [Ss]kills$/u);
+      const damageBonus = burstDamage ?? skillAilment;
+      if (!conditional && (damageLuck || damageBonus)) {
         if (conditionalMatch && !validState) { blockers.push({ sourceText: line, reason: "SS14 특수 효과의 조건을 직접 확인하세요." }); continue; }
         if (conditionalMatch && state === 0) { inactive.push({ sourceText: line, reason: "입력 조건 미충족" }); continue; }
-        effects.push({ stat: burstDamage ? "spell_burst_hit_damage" : damageLuck.startsWith("Unlucky") ? "damage_unlucky" : damageLuck.startsWith("Very") ? "damage_very_lucky" : "damage_lucky",
-          operation: burstDamage ? "more" : "set", value: burstDamage ? Number(burstDamage[1]) * scale : 1,
-          unit: burstDamage ? "percent" : "boolean", sourceText: line, sourceLineIndex: lineIndex, multiplier });
+        const stat = burstDamage ? "spell_burst_hit_damage" : skillAilment ? `${skillAilment[2].toLowerCase().replace('-', '_')}_ailment_damage`
+          : damageLuck.startsWith("Unlucky") ? "damage_unlucky" : damageLuck.startsWith("Very") ? "damage_very_lucky" : "damage_lucky";
+        effects.push({ stat, operation: damageBonus ? "more" : "set", value: damageBonus ? Number(damageBonus[1]) * scale : 1,
+          unit: damageBonus ? "percent" : "boolean", sourceText: line, sourceLineIndex: lineIndex, multiplier });
         continue;
       }
       if (!conditional && !conditionalMatch && ["Lucky Critical Strike", "Unlucky Critical Strike", "Very Lucky Critical Strike"].includes(clause)) {
@@ -244,7 +262,13 @@ function heroTier(trait, tier, locale) {
   return texts.join("\n");
 }
 
-export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0, gearEffects = [] } = {}) {
+export function projectSeasonCustomOptions(build,data=SS14_COMPONENTS) {
+  return seasonCustomRows(build,data,parseSeasonComponentLines);
+}
+export function seasonUnitOptionLines() {
+  return seasonCustomUnitOptions(SS14_COMPONENTS,parseSeasonComponentLines);
+}
+export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0, gearLevelEffects = [], gearNumbedEffect = 0 } = {}) {
   const rows = seasonGearConditionRows(build);
   const resolvedSlates = resolveSeasonSlates(build);
   const netherTemplate = resolvedSlates.special.find(t=>t.nether);
@@ -277,7 +301,8 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     }
     rows.push({ group, path, itemId: item?.id ?? null, name: safeKo(koText?.name ?? item?.tlidbText?.ko?.name),
       detail: safeKo(koText?.detail), selectionCount: multiplier, receipt: source, control,
-      maxActive: Number(text?.match(/\(Max (?:Active Divinity|Divinity Effect): (\d+)\)/u)?.[1]) || null,
+      maxActive: Number(text?.match(/\(Max (?:Active Divinity|Divinity Effect): (\d+)\)/u)?.[1])
+        || (parsed.effects.some(isNumbedBaseOverride) ? 1 : null),
       ...(nether ? {netherTalentId:nether.id} : {}),
       conditionControls: parsed.conditions ?? [], inactive: parsed.inactive ?? [],
       mechanics: parsed.mechanics ?? [], heroControls: parsed.heroControls ?? [],
@@ -329,6 +354,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
   }
   for (const [index, board] of (build?.talents?.boards ?? []).entries()) {
     const prism = rows.find(r => r.talentTransform?.boardIndex === index)?.talentTransform;
+    const inverse=rows.find(r=>r.inverseTransform?.index===index)?.inverseTransform;
     const transformed = [build.talents.placedPrism, build.talents.placedInverseImage].some((placement) => placement && placement.boardIndex === index)
       || populated(board.placedPrism) || populated(board.placedInverseImage)
       || (board.prismSlots ?? []).some(Boolean) || (board.inverseImageSlots ?? []).some(Boolean)
@@ -342,8 +368,23 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
       const replacement = revelationReplacement(build, index, board.treeSlug, entry?.id);
       add("talents", `talents.boards.${index}.${id}`, item, replacement ? revelationPage() : en, replacement ? `data-id:${replacement.targetId}:regular` : item?.tlidbText?.en?.sourceRecordKey,
         replacement?.detail ?? entry?.detail, replacement ? { name: replacement.name, detail: replacement.koDetail } : koEntry, points,
-        transformed && (!prism || replacement) ? "프리즘·역상과 계시 재능의 결합 변환은 별도 검증이 필요합니다." : !belongs ? "선택 재능과 SS14 패널 소속을 확인하지 못했습니다." : "", null, replacement);
+        transformed && ((!prism&&!inverse) || replacement) ? "프리즘·역상의 배치 또는 계시 재능과의 결합을 확인하세요." : !belongs ? "선택 재능과 SS14 패널 소속을 확인하지 못했습니다." : "", null, replacement);
       if (replacement) rows.at(-1).revelation = { sourceId: replacement.sourceId, targetId: replacement.targetId, receipt: theaRulePin() };
+    }
+    for(const choice of inverse?.selections??[]){
+      const item=findItemById(choice.id),en=pageFor(item,'en',data),ko=pageFor(item,'ko',data),entry=stableEntry(item,en);
+      const direct=entry?.detail?.split('\n').every(line=>/^[+-]\d+(?:\.\d+)?\s*%\s+(?:(?:(?:Spell|Attack|Cold|Fire|Lightning|Physical|Erosion|Elemental|Minion|Projectile) )?Damage|Cast Speed|Attack Speed|Attack and Cast Speed|Critical Strike Rating|Max (?:Life|Mana|Energy Shield)|Strength|Dexterity|Intelligence)$/u.test(line));
+      const replaced=revelationReplacement(build,index,board.treeSlug,entry?.id);
+      add('talents',`talents.boards.${index}.${choice.key}`,item,en,item?.tlidbText?.en?.sourceRecordKey,entry?.detail,stableEntry(item,ko),choice.points,
+        direct&&!replaced?'':'이 거울 재능의 특수 효과 배율은 미확정입니다.');
+      const row=rows.at(-1);
+      row.name='거울 반사 · '+row.name;
+      if(!row.blockers.length){
+        for(const effect of row.effects)effect.value*=choice.scale;
+        const effect=row.effects.length===1?row.effects[0]:null;
+        const simple=row.detail.match(/^(.+) [+-]\d+(?:\.\d+)? %$/u);
+        if(simple&&effect?.unit==='percent')row.appliedDetail=simple[1]+' '+(effect.value>=0?'+':'')+effect.value.toLocaleString('ko-KR',{maximumFractionDigits:4})+'%';
+      }
     }
   }
   const board = build?.divinity?.boards?.find((row) => row.boardId === build.divinity.activeBoardId);
@@ -460,6 +501,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     const active = rows.filter((r) => r.group === "divinity" && (row.netherTalentId ? r.netherTalentId===row.netherTalentId : r.itemId === row.itemId)).reduce((sum, r) => sum + r.selectionCount, 0);
     if (active > row.maxActive) { row.effects = []; row.status = "partial"; row.blockers.push({ reason: "신격 옵션의 SS14 원문 활성 개수 상한을 초과했습니다." }); }
   }
+  rows.push(...projectSeasonCustomOptions(build,data));
   applyNetherAggression(rows);
   const netherElixirBonus=rows.flatMap(r=>r.effects).filter(e=>e.stat==='elixir_effect').reduce((n,e)=>n+e.value,0);
   if(netherElixirBonus){
@@ -467,8 +509,13 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     for(let n=rows.length-1;n>=0;n--)if(rows[n].path.startsWith('skills.elixirs.'))rows.splice(n,1);
     rows.push(...revised);
   }
-  applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation);
-  applySeasonCurses(rows,build);
+  const levelRows = rows.slice();
+  const levelEffects = [...levelRows.flatMap(row => row.effects), ...gearLevelEffects];
+  const levelBonus = (record, index, support = false) => seasonEffectLevelBonus(levelEffects,record,support,index)
+    + (support ? 0 : seasonRevelationLevelBonus(build,levelRows,record));
+  applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation,levelBonus);
+  applySeasonCurses(rows,build,levelBonus);
+  const fixedNumbed=projectFixedNumbed(rows,build,gearNumbedEffect);
   // Imported documents may contain inconsistent answers for one physical state.
   // Keep the document readable but do not calculate either conflicting clause.
   const states = new Map();
@@ -476,20 +523,24 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     const values = states.get(c.conditionGroup) ?? new Set();
     values.add(c.inverted ? 1 - c.value : c.value); states.set(c.conditionGroup, values);
   }
+  const incompatible = new Set(exclusiveResourceStates.filter(pair=>pair.every(key=>states.get(key)?.has(1))).flat());
+  if (incompatibleNearbyEnemyStates(states))
+    for (const key of nearbyEnemyGroups) incompatible.add(key);
   for (const row of rows) {
-    const conflicts = row.conditionControls.filter((c) => states.get(c.conditionGroup)?.size > 1);
+    const conflicts = row.conditionControls.filter((c) => states.get(c.conditionGroup)?.size > 1 || incompatible.has(c.conditionGroup));
     if (!conflicts.length) continue;
     row.effects = row.effects.filter((e) => !conflicts.some((c) => c.sourceLineIndex === e.sourceLineIndex));
     row.blockers.push({ reason: "같은 상태의 조건·중첩 입력이 서로 충돌합니다. 조건을 다시 입력하세요." }); row.status = "partial";
   }
-  appendGreedReservation(rows,build,gearEffects,gearSealCompensation);
   const uniqueBuffs = new Set();
   for (const row of rows) row.effects = row.effects.filter(effect => {
     if (!effect.buffIdentity) return true;
     if (uniqueBuffs.has(effect.buffIdentity)) return false;
     uniqueBuffs.add(effect.buffIdentity); return true;
   });
-  return { rows, effects: rows.flatMap((row) => row.effects), generatedAt: data.generatedAt, allocation,
+  const effects=rows.flatMap(row=>row.effects);
+  if(fixedNumbed?.effect)effects.push(fixedNumbed.effect);
+  return { rows, effects, fixedNumbed, generatedAt: data.generatedAt, allocation,
     counts: { selected: rows.length, mapped: rows.filter((row) => row.status === "mapped").length, effects: rows.reduce((n, row) => n + row.effects.length, 0) },
     limitation: "SS14 미리보기 원문의 수치와 직접 선택한 일부 조건을 연결합니다. 조건 미입력·배치 오류는 제외하며 나머지 특수 효과·전체 경로·출시 후 값은 별도 검증이 필요합니다." };
 }
