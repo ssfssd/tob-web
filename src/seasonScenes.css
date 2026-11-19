@@ -684,6 +684,8 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .skill-contributions :is(th,td):not(:first-child) {white-space:nowrap}
 .skill-contributions .contribution-skill {display:block;border:0;background:none;padding:0;text-align:left;text-decoration:underline;text-underline-offset:3px}
 .skill-contributions th > button + button {display:block;margin-top:4px}
+.skill-contributions .contribution-skill-total {background:#24211c;font-weight:600}
+.skill-contributions [data-role="analysis-damage-composition"] {margin-top:8px}
 .skill-contributions meter {display:block;width:min(56px,100%);height:7px;margin:2px 0 0 auto;accent-color:#d8b66f}
 .skill-contributions .support-impact td {text-align:left}
 .native-result-panel .season-dps-table-scroll {max-width:100%;overflow-x:auto}

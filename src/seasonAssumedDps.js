@@ -192,7 +192,8 @@ export function calculateEditorSeasonBuild(build, options = {}) {
           critical:offense?.values, pools, takenMultiplier, skillLevel:seasonSkillCalculationLevel(scenario,rowIndex),
           hitModifierTrace:direct?.trace?.filter(e=>e.stage==='damage-modifier'&&e.appliesToHit),
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
-        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,...(reaping&&{reaping}),...(fissure&&{fissure}),...(dotBreakdown&&!scenario.theaAverage&&{dotBreakdown})};
+        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,...(reaping&&{reaping}),...(fissure&&{fissure}),
+        ...(dotBreakdown&&(!scenario.theaAverage||estimate.scope==='ss14-thea-joint-combat')&&{dotBreakdown})};
     }),
     uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};
   return report;

@@ -116,6 +116,12 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
         add('skills',row.name+' 오라 설정','component-condition',control.key,{index:row.buffSkill});
     return links;
   }
+  if (reason.startsWith('채널링의 MP 차감 시각') || reason.startsWith('채널링 MP 차감과 다른 행동')) {
+    const times = (dps?.rows ?? []).filter(row=>row.channelCost && row.manaPerUse>0
+      && (reason.startsWith('채널링의 MP 차감 시각') ? !row.channelCost.times && row.channelCost.rate!==0 : row.channelCost.times?.length))
+      .map(row=>({tab:'conditions',label:`스킬 ${row.rowIndex+1} 채널링 차감 시각 입력`,edit:'dps-input',key:`${row.rowIndex}:channelCostTimes`}));
+    return [...times,{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
+  }
   if(reason.includes('초당 MP 소모율을 입력하세요.')) return [{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
   if(/^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간)/u.test(reason)) return [{section:'combat',role:'season-thea-controls',label:'복합 계산 켜기'}];
   if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계')||reason.includes(SEASON_DPS_SKILL_FIELDS.reapingOverlap.label)){

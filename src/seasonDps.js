@@ -80,6 +80,8 @@ export const SEASON_DPS_SKILL_FIELDS = {
   reapingTimes: { label: "대상 수확 성공 시각 (초)", times: true,
     hint: "준비 시간부터 센 시각을 입력하세요. 수확에 성공한 적이 없으면 ‘없음’을 입력하세요." },
   channelCostRate: { label: "채널링 비용 차감 횟수 (초당)", min: 0, max: 30 },
+  channelCostTimes: { label: "채널링 비용 차감 시각 (초)", times: true,
+    hint: "준비 시작을 0초로 두고 실제 차감 시각을 쉼표로 입력하세요. 입력하면 초당 횟수 대신 사용합니다. 차감이 없으면 ‘없음’을 입력하세요." },
   reapingOverlap: { label: "수확 시 이 지속 대미지 적용 비율 (%)", min: 0, max: 100 },
   dotWindows: { label: "지속 대미지 적용 구간 (초)", windows: true,
     hint: "준비 시간부터 센 구간을 0-2, 4-6처럼 입력하세요. 적용 구간이 없으면 ‘없음’을 입력하세요." },
@@ -233,7 +235,10 @@ export function seasonDpsSkillFieldKeys(entry, id, build) {
   }
   if ((build?.ss14Inputs?.theaCycle?.mode !== "automatic" || theaCombatEnabled(build))
     && build?.ss14Inputs?.dps?.skills?.[index]?.useShare !== 0
-    && SS14_CARDS_EN.records[id]?.tags?.some(tag=>tag==='Channeled'||tag==='Channel')) keys.push("channelCostRate");
+    && SS14_CARDS_EN.records[id]?.tags?.some(tag=>tag==='Channeled'||tag==='Channel')) {
+    keys.push("channelCostRate");
+    if (timedFissure(build)) keys.push("channelCostTimes");
+  }
   return [...new Set(keys)];
 }
 export const seasonDpsRulePins = () => Object.fromEntries(Object.values(SS14_DPS_RULES.pages).filter(p => p.locale === "en").map(p => [p.sourceUrl, p.sourcePageSha256]));
@@ -1073,10 +1078,16 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
     else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
     const channeled=tags.includes("Channeled")||tags.includes("Channel");
+    const chargeTimes = channeled && timed ? observedTimeList(b?.channelCostTimes) : null;
+    const cycle = build.ss14Inputs?.theaCycle;
+    const measuredChargeRate = chargeTimes ? chargeTimes.filter(time=>time>=cycle.warmup).length / cycle.seconds : null;
+    if (chargeTimes?.some(time=>time>=cycle.warmup+cycle.seconds-1e-8))
+      reasons.push(`${SEASON_DPS_SKILL_FIELDS.channelCostTimes.label}은 측정 종료 전이어야 합니다.`);
     const channelCost=channeled && (combat || build.ss14Inputs?.theaCycle?.mode !== "automatic")
-      && cost && !cost.reason && (cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0
-      ? {rate:b?.channelCostRate??null,max:possibleManualRate,
-        valid:validValue(SEASON_DPS_SKILL_FIELDS.channelCostRate,b?.channelCostRate) && b.channelCostRate<=possibleManualRate+1e-8}
+      && cost && !cost.reason && (chargeTimes || (cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0)
+      ? {rate:measuredChargeRate??b?.channelCostRate??null,max:possibleManualRate,
+        ...(chargeTimes && {times:chargeTimes}),
+        valid:!!chargeTimes || validValue(SEASON_DPS_SKILL_FIELDS.channelCostRate,b?.channelCostRate) && b.channelCostRate<=possibleManualRate+1e-8}
       : null;
     const resourceRate=channeled ? (channelCost?.valid ? channelCost.rate : null) : manualRate;
     const zeroCost=cost?.mana===0 && cost.life===0;

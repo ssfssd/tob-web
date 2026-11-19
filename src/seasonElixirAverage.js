@@ -30,9 +30,16 @@ export function calculateElixirAverage(build, projection, calculateState) {
 }
 
 const damageFields=['dps','manualDps','spellBurstDps','repeatDps','heroDps','dotDps','reapingDps','netherDps','minionDps','fixedNumbedHitDps','fixedNumbedDotDps','fixedNumbedReapingDps'];
-const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDps'].filter(key=>Object.hasOwn(row.values,key))];
+const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDps','moduleIgniteDps'].filter(key=>Object.hasOwn(row.values,key))];
 const weighted=(states,read)=>states.every(({value})=>Number.isFinite(read(value)))
   ? states.reduce((sum,{value,weight})=>sum+read(value)*weight,0) : null;
+
+function averageMinionDamageByType(samples) {
+  if (!samples.every(({value}) => value?.minionDamageByType || value?.values.minionDps === 0)) return undefined;
+  const types = new Set(samples.flatMap(({value}) => Object.keys(value.minionDamageByType ?? {})));
+  if (!types.size) return undefined;
+  return Object.fromEntries([...types].map(type => [type, weighted(samples, value => value.minionDamageByType?.[type] ?? 0)]));
+}
 
 function averageDotBreakdown(samples, key) {
   const first=samples[0]?.value?.[key];
@@ -86,7 +93,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   const original=report.fullDps;
   const {times,overlap,reason}=observedStates(varying);
   if(reason){
-    report.fullDps={...original,supported:false,dps:null,rows:original.rows.map(row=>({...row,supported:false,dotBreakdown:undefined,permafrostBreakdown:undefined,permafrostHitDps:undefined,
+    report.fullDps={...original,supported:false,dps:null,rows:original.rows.map(row=>({...row,supported:false,dotBreakdown:undefined,permafrostBreakdown:undefined,permafrostHitDps:undefined,minionDamageByType:undefined,
       values:{...row.values,...Object.fromEntries(damageFieldsFor(row).map(key=>[key,null]))}})),manualResources:null,
       blockers:[...new Set([...original.blockers,reason])]};
     return;
@@ -146,6 +153,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
         })},
       }),
       dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
+      minionDamageByType:supported?averageMinionDamageByType(samples):undefined,
       permafrostBreakdown:supported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
       dotDefense:supported?averageDotDefense(samples,'dotDefense'):undefined,
       frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,

@@ -13,9 +13,10 @@ export const combatNumbedEnabled = (build, report) => build.ss14Inputs?.theaEven
   || moduleElementalEnabled(build) || hasNumbedSupport(report);
 export function theaCombatInputValues(build, report) {
   const input = build.ss14Inputs.theaEvents ?? {};
-  if (!hasNumbedSupport(report)) return input;
+  const defaults = input.igniteEnabled !== 1 ? { afflictionRate: 0 } : {};
+  if (!hasNumbedSupport(report)) return { ...defaults, ...input };
   const { duration, maxStacks, thresholdPercent } = SS14_THEA_COMBAT.numbed;
-  return { numbedDuration: duration, numbedLimit: maxStacks, numbedThreshold: thresholdPercent, numbedEffect: 0, ...input };
+  return { ...defaults, numbedDuration: duration, numbedLimit: maxStacks, numbedThreshold: thresholdPercent, numbedEffect: 0, ...input };
 }
 export const hasTheaNativeDot = report => report?.fullDps?.rows.some(row => row.combat?.dotWithoutAffliction > 0 || row.combat?.frostWithoutAffliction > 0) ?? false;
 export function usesTheaDotTrigger(build, mechanics, report) {
@@ -28,7 +29,12 @@ export function usesTheaDotTrigger(build, mechanics, report) {
 export function theaCombatKeys(build, mechanics = [], report) {
   if (!theaCombatEnabled(build)) return [];
   const keys = ["igniteEnabled", "numbedEnabled"];
-  if (build.ss14Inputs.theaEvents.igniteEnabled === 1) keys.push("igniteBaseMin", "igniteBaseMax", "igniteChance", "igniteIncreased", "igniteDuration", "igniteLimit", "afflictionRate");
+  const ignite = build.ss14Inputs.theaEvents.igniteEnabled === 1;
+  if (ignite) keys.push("igniteBaseMin", "igniteBaseMax", "igniteChance", "igniteIncreased", "igniteDuration", "igniteLimit");
+  const hasPersistentDamage = report?.fullDps?.rows.some(row =>
+    row.combat?.hasDot || row.combat?.frostSource || row.elementalProtocol
+    || row.minionSkills?.some(skill => skill.persistent || skill.slug === "Sin_of_the_Fallen"));
+  if (ignite || hasPersistentDamage) keys.push("afflictionRate");
   if (usesTheaDotTrigger(build, mechanics, report)) keys.push("dotTriggerRate");
   if (mechanics.some(m => m.kind === "thea-scorch") || build.skills?.elixirs?.some(s => s?.skillId === "fire-lizard-distillate")) keys.push("scorchResistance");
   if (build.ss14Inputs.theaEvents.numbedEnabled === 1) keys.push("numbedChance");

@@ -430,7 +430,7 @@ function renderMoonStrikeForms(build, entry, row) {
   'selected-skill-moon-strike');
 }
 
-function renderSkillResourceCosts(row, averaged) {
+function renderSkillResourceCosts(row, averaged, timedCombat) {
   if (!row || (!row.channelCost && !['manaPerUse','lifePerUse','manualManaPerSecond','manualLifePerSecond'].some(key=>Number.isFinite(row[key])))) return '';
   const costs = [];
   for (const [label,perUse,perSecond] of [
@@ -441,16 +441,18 @@ function renderSkillResourceCosts(row, averaged) {
     costs.push([averaged?'평균 '+label+'/초':label+'/초',Number.isFinite(perSecond)?number(perSecond):'확인 필요']);
   }
   if (row.channelCost?.valid)
-    costs.push(['관측 차감 횟수',number(row.channelCost.rate)+'회/초']);
+    costs.push([row.channelCost.times?'측정 구간 차감 빈도':'관측 차감 횟수',number(row.channelCost.rate)+'회/초']);
   const channel=row.channelCost;
   const needsRate=channel&&!channel.valid;
   const channelDetails=needsRate
     ? `<p>${channel.variable?'상태마다 차감 비용이 달라 평균 횟수만으로는 초당 소모를 확정할 수 없습니다.'
       : Number.isFinite(channel.max)?`관측한 초당 차감 횟수를 입력하세요. 현재 상한은 ${number(channel.max)}회/초입니다.`:'차감 횟수의 상한을 확인할 수 없습니다.'}</p>`
       +button('차감 횟수 입력','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostRate"`):'';
+  const timesEdit = channel && timedCombat ? button('차감 시각 편집','result-tab',
+    `data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostTimes"`) : '';
   const total = [row.manualManaPerSecond,row.manualLifePerSecond]
     .map((value,i)=>Number.isFinite(value)&&(i===0||value>0) ? number(value)+(i===0?' MP/초':' HP/초') : '').filter(Boolean).join(' · ');
-  return calcGroup('수동 시전 소모',total,calcRows(costs)+channelDetails
+  return calcGroup('수동 시전 소모',total,calcRows(costs)+channelDetails+timesEdit
     +button('전체 MP 수급 보기','result-tab','data-tab="stats" data-focus-role="numeric-mana-summary"'),'selected-skill-resource-cost');
 }
 
@@ -534,14 +536,28 @@ export function renderSkillCalculation(s) {
     [averagedElixir?'활성 중 평균 DPS':'활성 중 DPS',number(frost.active)],['적용 가동률',number(frost.uptime)+'%'],
     ['소모한 지면 에너지 축적',number(frost.charge)+'회'],
   ])+(!averaged?renderDotDefense(displayRow.frostDefense,elapsed):''),'permafrost-dps-breakdown'):'';
-  const dot=displayRow?.supported&&(!averaged||averagedElixir)?displayRow.dotBreakdown:null;
-  const dotDetails=dot?calcGroup('지속 대미지 적용',number(v.dotDps)+' DPS',calcRows([
-    [averagedElixir?'활성 중 평균 DPS':'활성 중 DPS',number(dot.active)],
-    ['적용 가동률',number(dot.uptime)+'%'],['가동률 반영 DPS',number(v.dotDps)],
+  const dot=displayRow?.supported ? displayRow.dotBreakdown : null;
+  const measuredDot=Number.isFinite(dot?.applied);
+  const dotDps=measuredDot?dot.applied:v.dotDps;
+  const dotDetails=dot&&(!averaged||averagedElixir||measuredDot)?calcGroup('지속 대미지 적용',number(dotDps)+' DPS',calcRows([
+    ...(Number.isFinite(dot.active)?[[averagedElixir||measuredDot?'활성 중 평균 DPS':'활성 중 DPS',number(dot.active)]]:[]),
+    [measuredDot?'측정 구간의 가동률':'적용 가동률',number(dot.uptime)+'%'],['가동률 반영 DPS',number(dotDps)],
   ])+(!averaged?renderDotDefense(displayRow.dotDefense,elapsed):''),'skill-dot-breakdown'):'';
-  const costs=renderSkillResourceCosts(index<skills.active.length?displayRow:null,averaged||averagedElixir);
+  const scenario = s.document.targetBuild.ss14Inputs;
+  const costs=renderSkillResourceCosts(index<skills.active.length?displayRow:null,averaged||averagedElixir,
+    scenario?.theaCycle?.mode==='automatic' && scenario.theaEvents?.combatMode===1);
+  const minionTypes = Object.entries(displayRow?.minionDamageByType ?? {})
+    .filter(([type, dps]) => damageTypes[type] && Number.isFinite(dps) && dps > 0);
+  const measuredMinionDamage = (assumed ? report.assumedDps : report.fullDps).scope === 'ss14-thea-joint-combat';
+  let minionDamage = '';
+  if (displayRow?.supported && (!averaged || measuredMinionDamage) && minionTypes.length) {
+    const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
+    const metric = assumed ? '방어 전 DPS' : 'DPS';
+    minionDamage = calcGroup(`소환체 스킬의 유형별 ${averagedElixir || measuredMinionDamage ? '평균 ' : ''}${metric}`, number(sum),
+      calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
+  }
   if(averagedElixir)
-    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
+    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
   const useRate=assumed?displayRow?.useRate:direct?.offenseBasis?.rate;
   const criticalChance=critical?.effectiveCriticalChance;
   const summary=displayRow?.supported?[
@@ -550,14 +566,6 @@ export function renderSkillCalculation(s) {
     ...(Number.isFinite(criticalChance)&&Number.isFinite(v.averageLandedHit)?[[averaged?'시작 시 크리티컬 확률':'크리티컬 확률',number(criticalChance)+'%']]:[]),
   ]:[];
   let steps='';
-  const minionTypes = Object.entries(displayRow?.minionDamageByType ?? {})
-    .filter(([type, dps]) => damageTypes[type] && Number.isFinite(dps) && dps > 0);
-  let minionDamage = '';
-  if (displayRow?.supported && !averaged && minionTypes.length) {
-    const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
-    minionDamage = calcGroup(assumed ? '소환체 스킬의 유형별 방어 전 DPS' : '소환체 스킬의 유형별 DPS', number(sum),
-      calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
-  }
   if (displayRow?.weaponHands) steps+=calcGroup('쌍수 교대 공격','',displayRow.weaponHands.map(hand=>{
     const label=hand.slotIndex===0?'메인 무기':'서브 무기';
     return calcRows([[`${label} 적중당 평균 대미지`,number(hand.landedHit)],
@@ -689,11 +697,32 @@ function skillContributions(s) {
   const reconciled=dps.supported && total>0 && rows.every(r=>r.supported&&Number.isFinite(r.values.dps)&&r.values.dps>=0)
     && Math.abs(rows.reduce((sum,r)=>sum+r.values.dps,0)-total)<Math.max(0.000001,total*1e-8);
   const nameFor=card=>card?.season==='SS14'&&card.koreanTextVerified?esc(card.name):'한국어 이름 미제공';
+  const shareCell=value=>`<td>${number(value/total*100)}%<meter aria-hidden="true" min="0" max="100" value="${Math.min(100,value/total*100)}"></meter></td>`;
+  const bySkill = new Map();
+  if (reconciled) for (const slot of slots) {
+    if (!slot.row) continue;
+    const group = bySkill.get(slot.id) ?? { first:slot.index, count:0, dps:0 };
+    group.count++;
+    group.dps += slot.row.values.dps;
+    bySkill.set(slot.id,group);
+  }
+  if ([...bySkill.values()].some(group=>group.count>1))
+    slots.sort((a,b)=>(bySkill.get(a.id)?.first??a.index)-(bySkill.get(b.id)?.first??b.index));
+  const parts = reconciled ? SEASON_DPS_PARTS.map(([key,label]) => [
+    label, rows.reduce((sum,row) => sum + (row.values[key] ?? 0),0),
+  ]).filter(([,value]) => value>0) : [];
+  const partsTotal = parts.reduce((sum,[,value])=>sum+value,0);
+  const composition = parts.length>1 && Math.abs(partsTotal-total)<Math.max(0.000001,total*1e-8)
+    ? `<details data-role="analysis-damage-composition"><summary>발동 유형별 ${metric==='assumedDps'?'방어 전 ':''}DPS 비중</summary>
+      <table aria-label="발동 유형별 DPS 비중"><thead><tr><th scope="col">유형</th><th scope="col">DPS</th><th scope="col">비중</th></tr></thead>
+      <tbody>${parts.map(([label,value])=>`<tr><th scope="row">${label}</th><td>${number(value)}</td>${shareCell(value)}</tr>`).join('')}</tbody></table></details>` : '';
   return `<section class="skill-contributions" aria-label="스킬별 DPS"><h2>스킬별 DPS</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${slots.map(({index,id,row,hasSupport})=>{
     const label=nameFor(SS14_CARDS.records[id]);
     const slotName=index===0?'주력':index<active.length?'액티브 '+(index+1):'패시브 '+(index-active.length+1);
     const expanded=s.supportImpact?.rowIndex===index;
-    const share=reconciled&&row?100*row.values.dps/total:null;
+    const group=bySkill.get(id);
+    const combined=group?.count>1&&group.first===index
+      ? `<tr class="contribution-skill-total" data-role="analysis-skill-total"><th scope="row">${label} 합계 <small>· ${group.count}칸</small></th><td>${number(group.dps)}</td>${shareCell(group.dps)}</tr>` : '';
     const actions=button(`${label} <small>· ${slotName}</small>`,row?'inspect-contribution-skill':'inspect-skill',`data-index="${index}" class="contribution-skill"`);
     const compare=hasSupport?button('보조 비교','compare-support-impact',`data-index="${index}" data-role="support-impact-${index}" aria-label="${label} ${slotName} 보조 비교" aria-expanded="${expanded}"`):'';
     const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,resources})=>{
@@ -705,8 +734,8 @@ function skillContributions(s) {
       const cost=resources?renderResourceChanges(resources,esc):'';
       return `<li>${edit}<div>${result}</div>${cost?`<section class="support-impact-cost">${cost}</section>`:''}</li>`;
     }).join(''):'';
-    return `<tr><th scope="row">${actions}${compare}</th><td>${row?.supported?number(row.values.dps):row?'보류':'—'}</td>${reconciled?`<td>${share===null?'—':`${number(share)}%<meter aria-label="${label} 비중" min="0" max="100" value="${Math.min(100,share)}"></meter>`}</td>`:''}</tr>${linkRows?`<tr class="support-impact"><td colspan="${reconciled?3:2}"><strong>보조 해제 시 ${metricLabel}</strong><ul>${linkRows}</ul></td></tr>`:''}`;
-  }).join('')}</tbody></table></section>`;
+    return `${combined}<tr><th scope="row">${actions}${compare}</th><td>${row?.supported?number(row.values.dps):row?'보류':'—'}</td>${reconciled?(row?shareCell(row.values.dps):'<td>—</td>'):''}</tr>${linkRows?`<tr class="support-impact"><td colspan="${reconciled?3:2}"><strong>보조 해제 시 ${metricLabel}</strong><ul>${linkRows}</ul></td></tr>`:''}`;
+  }).join('')}</tbody></table>${composition}</section>`;
 }
 export function renderResultAnalysis(s) {
   const result = s.pending.size ? null : s.analysis;

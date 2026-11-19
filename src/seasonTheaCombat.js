@@ -6,7 +6,7 @@ import { combatNumbedEnabled, hasTheaNativeDot, theaCombatInputBlockers, theaCom
 import { netherSum, netherMore, SEASON_SKILL_AILMENT_TAGS } from './seasonNetherRemaining.js';
 import { netherDeterioration } from './seasonNetherDps.js';
 import { manualResourceBalance } from './seasonDps.js';
-import { validSeasonGearEffects } from './seasonGearEffects.js';
+import { isSeasonTargetDamageTaken, validSeasonGearEffects } from './seasonGearEffects.js';
 import { isNumbedBaseOverride } from './seasonNetherModifiers.js';
 
 const eps = 1e-8;
@@ -25,6 +25,9 @@ function finishCombatRows(combat, seconds) {
     row.specialDps = row.omenDps + row.playerDeteriorationDps;
     row.dps = row.manualDps + row.spellBurstDps + row.repeatDps + row.heroDps + row.netherDps + row.specialDps + row.dotDps + row.permafrostDps + row.reapingDps + row.minionDps;
     for (const key of recordedKeys) row[key] /= seconds;
+    if (row.minionDamageByType) {
+      for (const type of Object.keys(row.minionDamageByType)) row.minionDamageByType[type] /= seconds;
+    }
   }
   return sum([...combat.rows.values()].map(row => row.dps));
 }
@@ -110,10 +113,18 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const numbedConsume = { blessing: "Agility", consume: 3, cooldown: 1 };
   const ailments = createAilmentTimeline();
   const omen = createOmenAccumulator();
-  const rows = new Map(report.fullDps.rows.map(r => [r.rowIndex, Object.fromEntries(recordedKeys.map(k => [k, 0]))]));
+  const rows = new Map(report.fullDps.rows.map(r => [r.rowIndex, {
+    ...Object.fromEntries(recordedKeys.map(k => [k, 0])),
+    ...(r.minionSkills && {minionDamageByType:{}}),
+  }]));
+  function accumulateMinionTypes(rowIndex, byType, weight) {
+    const totals = rows.get(rowIndex).minionDamageByType;
+    if (!totals || !byType) return;
+    for (const [type, damage] of Object.entries(byType)) totals[type] = (totals[type] ?? 0) + damage * weight;
+  }
   const costs = new Map(report.fullDps.rows.filter(row => Number.isFinite(row.manualSummonRate)
     ? row.manualSummonRate === 0 || Number.isFinite(row.manaPerUse) && Number.isFinite(row.lifePerUse)
-    : row.combat && !row.combat.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
+    : row.channelCost?.times || row.combat && !row.combat.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
     .map(row => [row.rowIndex, { mana: 0, life: 0 }]));
   const channelCosts = new Map(report.fullDps.rows.filter(row => row.channelCost)
     .map(row => [row.rowIndex, { possibleCharges: 0, mana: null, life: null, variable: false }]));
@@ -144,7 +155,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     const host = snapshot.fullDps.rows.find(row=>row.rowIndex===0)?.combat;
     const reduction = active.some(effect=>effect.scorch) ? input.scorchResistance : 0;
     const resistance = report.beforeDefense ? 1 : 1 - (enemy.fire - reduction - (host?.penetration.fire ?? 0)) / 100;
-    const fireTaken = snapshot.componentProjection.effects.filter(e=>e.stat==="fire_damage_taken")
+    const fireTaken = snapshot.componentProjection.effects.filter(e=>isSeasonTargetDamageTaken(e.stat,"fire"))
       .reduce((n,e)=>n*(1+e.value/100),1);
     return {multiplier:resistance*fireTaken,afflictionEffect:host?.afflictionEffect ?? 1};
   };
@@ -155,6 +166,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (rate > 0) push({ ...event, at: occurrence / rate, occurrence });
   };
   for (const row of report.fullDps.rows) {
+    for (const at of row.channelCost?.times ?? []) push({at,row:row.rowIndex,kind:'channel-charge'});
     if (row.values.minionDps !== undefined) {
       schedule({row:row.rowIndex,kind:'summon'},row.manualSummonRate);
       if (row.moduleTimeline) for (let unit = 0; unit < config[row.rowIndex].minionCount; unit++) for (const [action, skill] of row.minionSkills.entries()) {
@@ -191,21 +203,23 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     return consumed;
   };
   const recordDamage = (row, key, amount, time) => { if (inMeasurement(time)) rows.get(row)[key] += amount; };
-  const recordCastCost = (index, row, time, ctx) => {
+  const recordCastCost = (index, row, time, ctx, channelCharge = false) => {
+    const separatelyObserved = !channelCharge && row?.channelCost?.times;
     if (manaTrigger) {
-      if (!Number.isFinite(row?.manaPerUse) || row.manaPerUse > 0 && row.combat?.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
+      const manaSpent = !channelCharge && (separatelyObserved || row?.channelCost?.rate === 0) ? 0 : row?.manaPerUse;
+      if (!Number.isFinite(manaSpent) || !channelCharge && manaSpent > 0 && row.combat?.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
         blockers.add('스킬 시전 비용을 확인하거나 초당 MP 소모율을 입력하세요.');
       else {
         eventCasts++;
-        leastCastMana = Math.min(leastCastMana, row.manaPerUse);
-        if (row.manaPerUse > 0) {
+        leastCastMana = Math.min(leastCastMana, manaSpent);
+        if (manaSpent > 0) {
           const currentMax = getReport(ctx.snapshot()).character?.values.mana;
           if (!(maxMana > 0) || currentMax !== maxMana) blockers.add('전투 중 최대 MP가 달라지는 경우 초당 MP 소모율을 입력하세요.');
-          else eventMana += row.manaPerUse;
+          else eventMana += manaSpent;
         }
       }
     }
-    if (!inMeasurement(time)) return;
+    if (separatelyObserved || !inMeasurement(time)) return;
     const cost = costs.get(index);
     if (cost && Number.isFinite(row?.manaPerUse) && Number.isFinite(row?.lifePerUse)) {
       cost.mana += row.manaPerUse;
@@ -232,9 +246,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     let row = rowAt(ctx.snapshot(), event.row), action = row?.minionSkills[event.action];
     if (!row?.supported || !action) return;
     if (!row.moduleHitEvents) {
-      const damage = action.perCast * (b.minionUptime / 100) * (b.hitChance / 100);
+      const weight = (b.minionUptime / 100) * (b.hitChance / 100);
+      const damage = action.perCast * weight;
       recordDamage(event.row, 'minionDps', damage, time);
       recordDamage(event.row, 'minionHitDps', damage, time);
+      if (inMeasurement(time)) accumulateMinionTypes(event.row, action.damagePerHitByType, action.weightedHits * weight);
       return;
     }
     // Module rolls cannot advance the player's random sequence.
@@ -262,6 +278,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const hit = (action.perCast / (action.damageHitCount ?? action.hitCount) + randomDelta) * hitWeight;
       recordDamage(event.row, "minionDps", hit * hitMultiplier, time);
       recordDamage(event.row, "minionHitDps", hit * hitMultiplier, time);
+      if (inMeasurement(time)) {
+        const weight = hitWeight * hitMultiplier;
+        const hitScale = action.weightedHits / (action.damageHitCount ?? action.hitCount);
+        accumulateMinionTypes(event.row, action.damagePerHitByType, hitScale * weight);
+        if (randomElement) {
+          for (const [element, byType] of Object.entries(action.randomHitByType))
+            accumulateMinionTypes(event.row, byType, (element === randomElement ? 2 : -1) * weight);
+        }
+      }
       for (const type of row.infiltrationTypes) if ((action.damageTypes.includes(type) || action.randomDamageTypes?.[randomElement]?.includes(type)) && hit > 0) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
       const hadNumbed = ailments.numbed() > 0;
       if (action.lightningRolls.length && (row.elementalProtocol || numbedEnabled && hadNumbed)) {
@@ -514,6 +539,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           totals.minionDps += direct * w + dots / baseAffliction * dotTime;
           totals.moduleIgniteDps += (row.values.moduleIgniteDps ?? 0) / baseAffliction * dotTime;
           if (!row.moduleTimeline) totals.minionHitDps += row.values.minionHitDps * w;
+          if (row.moduleTimeline) {
+            for (const action of row.minionSkills) {
+              if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction);
+            }
+          } else accumulateMinionTypes(row.rowIndex, row.minionDamageByType, w);
         }
         for (const wilt of wilts) {
           const amount = wilt.damage * r.fullDps.rows.find(row => row.rowIndex === wilt.row).wiltTargetBase * (w + integral(lo,hi) / 100);
@@ -584,12 +614,19 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       // not establish priority between projectiles from independent casts.
       const arrivals = due.filter(e => e.followup);
       const actions = due.filter(e => !e.followup && e.kind !== 'reaping');
-      if (arrivals.length && (actions.some(e=>e.kind!=='summon') || arrivals.some(e => e.castNumber !== arrivals[0].castNumber))) {
+      if (arrivals.length && (actions.some(e=>e.kind!=='summon'&&e.kind!=='channel-charge') || arrivals.some(e => e.castNumber !== arrivals[0].castNumber))) {
         if (arrivals.some(e=>e.kind==='fissure')) hasFissureTie = true;
         else hasProjectileTie = true;
       }
       if (!newCastFirst) for (const e of arrivals) followupHit(e, time, ctx);
       for (const e of actions) {
+        if (e.kind === 'channel-charge') {
+          const snapshot = rowAt(ctx.snapshot(),e.row);
+          if (!Number.isFinite(snapshot?.manaPerUse) || !Number.isFinite(snapshot?.lifePerUse))
+            blockers.add('채널링 차감 시각의 MP·HP 비용을 확인할 수 없습니다.');
+          else recordCastCost(e.row,snapshot,time,ctx,true);
+          continue;
+        }
         if (e.kind === 'summon') {
           const row = rowAt(ctx.snapshot(),e.row);
           recordCastCost(e.row,row,time,ctx);
@@ -637,6 +674,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         if (spentMana + eps >= threshold) {
           if (spentMana + eps >= 2 * threshold || (manaTrigger.ready ?? 0) > time + eps) {
             blockers.add('0.3초 제한에 걸린 MP 소모의 처리 순서가 미확인입니다. 초당 MP 소모율을 입력하세요.');
+          } else if (actions.some(e=>e.kind==='channel-charge') && (arrivals.length || reaping || actions.some(e=>e.kind!=='channel-charge'))) {
+            blockers.add('채널링 MP 차감과 다른 행동이 동시에 발생해 축복 적용 순서를 확인할 수 없습니다. 차감 시각 또는 초당 MP 소모율을 확인하세요.');
           } else if (eventCasts > 1 && spentMana - leastCastMana + eps >= threshold) {
             // The largest proper prefix leaves the least expensive cast
             // last. If that prefix crosses the threshold, a later cast
@@ -655,7 +694,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
 export function calculateTheaCombatAverage(build, report, calculateState, simulate, options, priorBlockers) {
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics, report), ...report.fullDps.blockers];
-  if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(row => row.channelCost && row.manaPerUse > 0))
+  if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(row => row.channelCost && !row.channelCost.times && row.channelCost.rate !== 0 && row.manaPerUse > 0))
     blockers.push('채널링의 MP 차감 시각을 확인할 수 없습니다. 초당 MP 소모율을 입력하세요.');
   if (build.ss14Inputs.theaEvents.numbedEnabled !== 1 && mechanics.some(m => ["thea-numbed-on-hit", "thea-numbed-consume"].includes(m.kind))
     && report.fullDps.rows.some(r => r.pools?.some(p => p.type === "lightning" && p.max > 0))) blockers.push("선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.");
@@ -672,7 +711,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       const casts = (b.castRate ?? 0) * (1 + (r.combat?.maxBurst ?? 0) + (b.multistrikeChance ?? 0) / 100);
       const fissures = (r.fissure?.times?.length ?? 0) / (options.seconds + options.warmup);
       const harvests = (r.reaping?.times?.length ?? 0) / (options.seconds + options.warmup);
-      return n + modules + nether + (r.manualSummonRate ?? 0) + (b.castRate ?? 0) + casts * hits + (b.repeatHits ?? 0) + fissures + harvests;
+      const channelCharges = (r.channelCost?.times?.length ?? 0) / (options.seconds + options.warmup);
+      return n + modules + nether + (r.manualSummonRate ?? 0) + (b.castRate ?? 0) + casts * hits + (b.repeatHits ?? 0) + fissures + harvests + channelCharges;
     }, 0);
     const dotRate = usesTheaDotTrigger(build, mechanics, report) ? build.ss14Inputs.theaEvents.dotTriggerRate ?? 0 : 0;
     if ((rates + options.events.reduce((n, e) => n + e.rate, 0) + dotRate) * (options.seconds + options.warmup) * 128 > 2000000) blockers.push("복합 계산량이 한도를 넘었습니다. 측정 시간을 줄여 주세요.");
@@ -709,7 +749,9 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     const canMeasure = supported && usages.every(Boolean);
     const perSecond = type => canMeasure ? sum(usages.map(usage => usage[type])) / results.length / options.seconds : null;
     let channelUsage;
-    if (supported && r.channelCost) {
+    if (supported && r.channelCost?.times) {
+      channelUsage = {channelCost:{...r.channelCost,valid:canMeasure,observed:true}};
+    } else if (supported && r.channelCost) {
       const samples = results.map(run => run.channelCosts.get(r.rowIndex));
       const [first] = samples, {rate} = r.channelCost;
       const max = sum(samples.map(s => s.possibleCharges)) / results.length / options.seconds;
@@ -720,17 +762,28 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
         manualLifePerSecond: valid ? first.life * rate : null};
     }
     const values = { ...r.values, ...Object.fromEntries(recordedKeys.map(key => [key, supported ? sum(results.map(v => v.rows.get(r.rowIndex)[key])) / 128 : null])) };
-    const measuredFrost = r.permafrostBreakdown && r.dotWindows?.reduce((n,[start,stop])=>
+    const activeWindowSeconds = r.dotWindows?.reduce((n,[start,stop])=>
       n+Math.max(0,Math.min(stop,options.warmup+options.seconds)-Math.max(start,options.warmup)),0);
-    const permafrostBreakdown = supported && measuredFrost > 0
-      ? {...r.permafrostBreakdown, uptime:100*measuredFrost/options.seconds, active:values.permafrostDps*options.seconds/measuredFrost}
+    const permafrostBreakdown = supported && r.permafrostBreakdown && activeWindowSeconds > 0
+      ? {...r.permafrostBreakdown, uptime:100*activeWindowSeconds/options.seconds, active:values.permafrostDps*options.seconds/activeWindowSeconds}
       : undefined;
+    const nativeDotDps = supported && r.dotBreakdown && Number.isFinite(activeWindowSeconds)
+      ? Math.max(0,values.dotDps-values.igniteDps-values.scorchDps) : null;
+    const dotBreakdown = nativeDotDps === null ? undefined : {
+      uptime:100*activeWindowSeconds/options.seconds, applied:nativeDotDps,
+      active:activeWindowSeconds>0 ? nativeDotDps*options.seconds/activeWindowSeconds : null,
+    };
     const timedReaping = reapingEvents && (r.combat?.hasDot || Object.hasOwn(r.values,'permafrostDps'))
       ? { events:reapingEvents/results.length,
         applied:sum(results.map(run=>run.reapedNativeRows.get(r.rowIndex)??0))/results.length }
       : null;
-    return { ...r, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
-      ...channelUsage, supported, values, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
+    const typeSamples = supported && r.minionSkills ? results.map(run => run.rows.get(r.rowIndex).minionDamageByType) : [];
+    const types = new Set(typeSamples.flatMap(sample => Object.keys(sample ?? {})));
+    const minionDamageByType = types.size ? Object.fromEntries([...types].map(type => [
+      type, sum(typeSamples.map(sample => sample?.[type] ?? 0)) / results.length,
+    ])) : undefined;
+    return { ...r, minionDamageByType, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+      ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });
   const dps = supported ? sum(rows.map(r => r.values.dps)) : null;
   const totals = results.map(r => sum([...r.rows.values()].map(r => r.dps)));

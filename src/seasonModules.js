@@ -286,9 +286,10 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     if (persistent && frequency > 0 && b?.minionCount > 1 && !valid({...MODULE_FIELDS.moduleDotCount,max:b.minionCount},contributors))
       reasons.push(`${MODULE_FIELDS.moduleDotCount.label}를 확인하세요. 대상에게 겹쳐도 한 효과만 적용되면 1을 입력하세요.`);
     const randomHit = { fire: 0, cold: 0, lightning: 0 };
+    const randomHitByType = { fire: {}, cold: {}, lightning: {} };
     const erosionHit = { fixed: 0, fire: 0, cold: 0, lightning: 0 };
     const lightningRolls = [];
-    const damageByType = {};
+    const damagePerHitByType = {};
     const perHit = pools.reduce((total, pool) => {
       const stats = new Set(["damage", ...action.tags.map(t => t.toLowerCase()).filter(t => !typedDamage.includes(t) && t !== 'elemental').map(t => `${t}_damage`),
         ...pool.types.map(t => `${t}_damage`)]);
@@ -309,8 +310,12 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       const taken = targetEffects.reduce((n, e) => n * (1 + e.value / 100), 1) * (pool.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1)
         *netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,match[1]==='Persistent'?'enemy_dot_damage_taken':'enemy_hit_damage_taken');
       const damage = average * Number(match[3]) / 100 * pool.portion * (1 + inc / 100) * more * armor * res * taken * (match[1] === "Persistent" ? 1 + input.enemy.affliction / 100 : crit);
-      damageByType[pool.type] = (damageByType[pool.type] ?? 0) + damage;
-      if (pool.randomElement) randomHit[pool.randomElement] += damage;
+      damagePerHitByType[pool.type] = (damagePerHitByType[pool.type] ?? 0) + damage;
+      if (pool.randomElement) {
+        randomHit[pool.randomElement] += damage;
+        const outcome = randomHitByType[pool.randomElement];
+        outcome[pool.type] = (outcome[pool.type] ?? 0) + damage;
+      }
       if (pool.type === 'erosion' && !persistent) erosionHit[pool.randomElement ?? 'fixed'] += damage;
       if (pool.type === "lightning") lightningRolls.push({ randomElement: pool.randomElement,
         min: average > 0 ? damage / average / crit * range[0] * (1 + main) * hostMore : 0,
@@ -321,12 +326,13 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const scale = persistent ? frequency === 0 ? 0 : frequency * contributors
       : hitCount * frequency * b?.minionCount * b?.minionUptime / 100 * b?.hitChance / 100;
     const dps = perHit * scale;
-    for (const type of Object.keys(damageByType)) damageByType[type] *= scale;
     const randomDamageTypes = Object.fromEntries(elementalDamage.map(element => [element, pools.filter(p => p.portion > 0 && p.randomElement === element).map(p => p.type)]));
     const canDeteriorate = deteriorationChance > 0 && deterioration && Object.values(erosionHit).some(v => v > 0);
     if (canDeteriorate && action.itemId === 'Gravelshot' && b?.moduleSplitHits > 0)
       reasons.push('분열 전후 적중 순서를 확인해야 악화 대미지를 계산할 수 있습니다.');
-    return { slug: action.itemId, name: actionName, coefficient: Number(match[3]), dps, damageByType,
+    return { slug: action.itemId, name: actionName, coefficient: Number(match[3]), dps,
+      damageByType: Object.fromEntries(Object.entries(damagePerHitByType).map(([type, damage]) => [type, damage * scale])),
+      damagePerHitByType, randomHitByType, weightedHits: hitCount,
       perCast, hitCount: persistent ? 0 : b?.[`moduleHits${n}`], persistent, damageTypes: [...new Set(pools.filter(p => p.portion > 0 && !p.randomElement).map(p => p.type))],
       randomElemental: pools.some(p => p.randomElement), randomDamageTypes, randomHit, lightningRolls,
       ...(shotgun ? { additionalHitMultiplier: 1 - Number(shotgun[1]) / 100, damageHitCount: hitCount } : {}),
