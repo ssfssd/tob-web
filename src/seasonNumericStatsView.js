@@ -13,13 +13,17 @@ function skillCosts(cost, key) {
   return values.map(([label,resource,perUse,perSecond])=>cell(`시전당 ${label}`,perUse,`${key}-${resource}-per-use`)
     +(perSecond!=null?cell(`수동 시전 ${label}`,perSecond,`${key}-${resource}-per-second`,'/초'):'')).join('');
 }
-function manaBalance(budget, measured, assumed, otherBudget, survival, costs, excluded) {
+function manaBalance(budget, measured, assumed, otherBudget, survival, costs, excluded, timedCombat) {
   const observe = '<button type="button" data-ss14-action="requirement" data-section="combat" data-field="character-input" data-field-key="observedManaRecovery">관측 MP 회복 입력</button>';
   const staleObservation = survival?.manaObservationStale;
   const staleNote = staleObservation ? '<p data-role="stale-mana-observation">MP 회복 조건이 바뀌어 새 관측값이 필요합니다.</p>' : '';
   if(!budget)return staleNote ? staleNote+observe : '';
   const net=value=>!Number.isFinite(value)?'확인 필요':`${value<0?'부족':value>0?'여유':'균형'} ${number(Math.abs(value))}`;
   const channels=budget.channels??[];
+  const hasChargeTimes=channels.some(row=>row.observed&&row.valid&&row.times);
+  const hasAverageCharges=channels.some(row=>row.observed&&row.valid&&!row.times);
+  const editChannel=(rowIndex, byTime)=>`<button type="button" data-ss14-action="result-tab" data-tab="conditions"
+    data-field="dps-input" data-field-key="${rowIndex}:${byTime?'channelCostTimes':'channelCostRate'}">스킬 ${rowIndex+1} ${byTime?'차감 시각':'비용 횟수'} 입력</button>`;
   const unknown=budget.unresolvedRows.filter(index=>!channels.some(row=>row.rowIndex===index));
   const observed=budget.recovery.find(row=>row.id==='observed');
   const inputRecovery=assumed && otherBudget?.recovery.find(row=>row.id==='observed');
@@ -41,13 +45,13 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
     ${budget.shareOverflow?`<p>시전 배분 ${number(budget.shareOverflow)}% / 최대 100%</p><button type="button" data-ss14-action="result-tab" data-tab="conditions">시전 배분 확인</button>`:''}
     ${unknown.length?`<p class="native-stat-note">스킬 ${unknown.map(row=>row+1).join('·')}의 비용 또는 시전 횟수를 확인하세요.</p>`:''}
     ${channels.map(({rowIndex,rate,max,valid,variable})=>valid?'':Number.isFinite(rate)&&Number.isFinite(max)&&rate<=max&&variable
-      ? `<p class="native-stat-note">스킬 ${rowIndex+1}의 비용이 전투 중 바뀌어 평균 차감 횟수로는 소모량을 확정할 수 없습니다.</p>`
-      : `<p class="native-stat-note">${rate===null?'채널링 비용 차감 횟수가 비어 있습니다.':Number.isFinite(max)?`채널링 비용 차감은 최대 ${number(max)}회/초입니다.`:'채널링 비용 차감의 상한을 확인할 수 없습니다.'} <button type="button" data-ss14-action="requirement" data-section="combat" data-field="dps-input" data-field-key="${rowIndex}:channelCostRate">스킬 ${rowIndex+1} 비용 횟수 입력</button></p>`).join('')}
+      ? `<p class="native-stat-note">스킬 ${rowIndex+1}의 비용이 전투 중 바뀌어 평균 차감 횟수로는 소모량을 확정할 수 없습니다.${timedCombat?' '+editChannel(rowIndex,true):''}</p>`
+      : `<p class="native-stat-note">${rate===null?'채널링 비용 차감 횟수가 비어 있습니다.':Number.isFinite(max)?`채널링 비용 차감은 최대 ${number(max)}회/초입니다.`:'채널링 비용 차감의 상한을 확인할 수 없습니다.'} ${editChannel(rowIndex,false)}${timedCombat?' '+editChannel(rowIndex,true):''}</p>`).join('')}
     ${inputObserved?table([{...inputObserved,label:'입력 조건 · 관측 자연 회복'}],true):''}
     ${table(basisRows)}
     ${assumptions.length?`<details data-role="mana-formula-alternatives"><summary>공식별 회복값</summary>${table(assumptions)}</details>`:''}
     ${staleNote}${observe}
-    <p class="native-stat-note">${budget.manaStatus==='deficit'?'표시 DPS를 유지하려면 부족한 MP를 보충해야 합니다. ':''}${budget.manaStatus==='mixed'?'회복 공식에 따라 소모 충당 여부가 달라집니다. ':''}${channels.some(row=>row.observed&&row.valid)?'채널링은 입력한 평균 차감 횟수 기준입니다. ':''}자동 발동과 즉시 회복은 제외합니다.</p></section>`;
+    <p class="native-stat-note">${budget.manaStatus==='deficit'?'표시 DPS를 유지하려면 부족한 MP를 보충해야 합니다. ':''}${budget.manaStatus==='mixed'?'회복 공식에 따라 소모 충당 여부가 달라집니다. ':''}${hasChargeTimes?'차감 시각을 입력한 채널링은 측정 구간에 포함된 차감만 집계합니다. ':''}${hasAverageCharges?(hasChargeTimes?'나머지 ':'')+'채널링 소모는 입력한 평균 차감 횟수로 계산합니다. ':''}자동 발동과 즉시 회복은 제외합니다.</p></section>`;
 }
 function manaReservationRows(rows) {
   if (!rows?.length) return '';
@@ -131,7 +135,8 @@ export function renderSeasonNumericStats(report) {
       <dl class="native-stat-list">${cell("최대 MP", mana.mana, "mana")}${cell("봉인 MP", mana.reservedManaPercent, "reserved-mana", "%")}${cell("봉인 MP 보상", mana.sealedManaCompensation, "seal-compensation", "%")}</dl>
       ${manaReservationRows(manaReservations)}
       ${mana.reservedManaPercent===null?`<button type="button" data-ss14-action="result-tab" data-tab="conditions">${manaReservations?.some(row=>Number.isInteger(row.supportIndex))?'봉인 조건 확인':'오라 조건 확인'}</button>`:''}
-      ${manaBalance(budget, averaged, assumed, otherBudget, c.survival, costs, [...new Set(excluded)])}</details>`:''}
+      ${manaBalance(budget, averaged, assumed, otherBudget, c.survival, costs, [...new Set(excluded)],
+        displayedDps.scope==='ss14-thea-joint-combat')}</details>`:''}
     <details data-role="numeric-character"><summary>속성·에너지</summary>
     <dl class="native-stat-list">${Object.entries({ strength: "힘", dexterity: "민첩", intelligence: "지혜" }).map(([key, label]) => cell(label,c.values[key],key)).join("")}
       <div class="native-stat-cell"><dt>스킬 에너지</dt><dd data-stat="skill-energy">${number(report.energy?.used)} / ${number(report.energy?.maximum)}</dd></div>

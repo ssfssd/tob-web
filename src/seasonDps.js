@@ -315,7 +315,7 @@ const double = /^(?:(?:attack|spell)_)?double_damage_chance$/u;
 const body = (rules, name) => rules.pages[`en/${name}`]?.body ?? "";
 
 export function manualResourceBalance(rows, scenarios, skills) {
-  const active=rows.filter(row=>row.rowIndex<5&&skills?.[row.rowIndex]?.useShare!==0);
+  const active=rows.filter(row=>row.rowIndex<5&&(skills?.[row.rowIndex]?.useShare!==0||row.channelCost?.times?.length));
   if(!active.length)return null;
   const shareTotal=active.reduce((total,row)=>total+(skills?.[row.rowIndex]?.useShare??0),0);
   const shareOverflow=shareTotal>100+1e-8;

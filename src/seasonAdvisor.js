@@ -84,13 +84,19 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     if (sameSkill && ((a.hitChance ?? 100) !== (b.hitChance ?? 100)
       || (a.useShare ?? (singleSkill ? 100 : undefined)) !== (b.useShare ?? (singleSkill ? 100 : undefined)))) return false;
     const row = report => report?.fullDps?.rows?.find(r=>r.rowIndex===Number(index));
-    const leftWindows = timed ? row(leftReport)?.dotWindows : undefined;
-    const rightWindows = timed ? row(rightReport)?.dotWindows : undefined;
+    const leftRow = row(leftReport), rightRow = row(rightReport);
+    const leftWindows = timed ? leftRow?.dotWindows : undefined;
+    const rightWindows = timed ? rightRow?.dotWindows : undefined;
+    const chargeSchedule = channel => channel?.times ?? (channel?.rate === 0 ? [] : undefined);
+    const leftCharges = timed ? chargeSchedule(leftRow?.channelCost) : undefined;
+    const rightCharges = timed ? chargeSchedule(rightRow?.channelCost) : undefined;
     if (sameSkill && timed && (stable(leftWindows) !== stable(rightWindows)
-      || stable(row(leftReport)?.fissure?.times) !== stable(row(rightReport)?.fissure?.times))) return false;
+      || stable(leftRow?.fissure?.times) !== stable(rightRow?.fissure?.times)
+      || stable(leftCharges) !== stable(rightCharges))) return false;
     for (const key of Object.keys(a)) {
-      if (['itemId','sourcePageSha256','dotWindows','fissureTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
-      if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime') continue;
+      if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
+      if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime'
+        || sameSkill && leftCharges && rightCharges && key==='channelCostRate') continue;
       if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
     }
   }
