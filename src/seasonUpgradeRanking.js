@@ -120,6 +120,37 @@ function* equipmentPairs(candidates, twoHanded) {
   }
 }
 
+const maxExhaustiveGearCombinations = 256;
+function exactEquipmentCombinations(candidates, twoHanded) {
+  const bySlot=new Map();
+  for (const candidate of candidates) {
+    const slot=candidate.edits[0].slotIndex;
+    if(!bySlot.has(slot))bySlot.set(slot,[]);
+    bySlot.get(slot).push(candidate);
+  }
+  const slots=[...bySlot.keys()].sort((a,b)=>a-b);
+  const combinations=[], edits=[], details=[], items=new Set();
+  function visit(position, mainTwoHanded) {
+    if(position===slots.length) {
+      if(edits.length<2)return true;
+      if(combinations.length===maxExhaustiveGearCombinations)return false;
+      combinations.push({edits:[...edits],details:[...details]});
+      return true;
+    }
+    const slot=slots[position];
+    const choices=slot===1&&mainTwoHanded?[]:bySlot.get(slot);
+    for(const {edits:[edit],detail} of choices) {
+      if(items.has(edit.value.id))continue;
+      items.add(edit.value.id); edits.push(edit); details.push(detail);
+      const nextTwoHanded=slot===0?isTwoHandedWeapon(edit.value.item.itemId):mainTwoHanded;
+      if(!visit(position+1,nextTwoHanded))return false;
+      items.delete(edit.value.id); edits.pop(); details.pop();
+    }
+    return visit(position+1,mainTwoHanded);
+  }
+  return visit(0,twoHanded)?combinations:null;
+}
+
 function wornGearCandidates(document, report) {
   return normalizeBuild(document.targetBuild).gear.slots.flatMap((item,slotIndex)=>{
     if(slotIndex<2||!item?.itemId)return [];
@@ -361,17 +392,22 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     let seed=single && {edits:single.edits,details:[single.detail.replace(/ · 서브 무기 해제$/u,'')],value:single.value};
     const gear=normalizeBuild(document.targetBuild).gear.slots;
     const possible=gearCandidates(document,'all',shelf,group==='legendary','shelf',true);
-    const pairs=()=>equipmentPairs(possible,isTwoHandedWeapon(gear[0]?.itemId));
-    for(const pair of pairs())result.total++;
-    for(const pair of pairs()){
+    const twoHanded=isTwoHandedWeapon(gear[0]?.itemId);
+    const exact=exactEquipmentCombinations(possible,twoHanded);
+    const combinations=()=>exact??equipmentPairs(possible,twoHanded);
+    result.equipmentSearch=exact?'exhaustive':'pairs';
+    for(const combination of combinations())result.total++;
+    for(const combination of combinations()){
       if(!await keepRunning())return null;
       result.checked++;
       let next;
-      try{next=pair.edits.reduce(editSeasonWorkspace,document);}catch(error){block([error.message]);continue;}
+      try{next=combination.edits.reduce(editSeasonWorkspace,document);}catch(error){block([error.message]);continue;}
       const after=calculate(next,metric);
       const check=compareSeasonDpsSnapshots(base,{document:next,report:after},metric);
       if(!check.supported){block(check.reasons);continue;}
-      if(check.value>(seed?.value??baseline.value))seed={...pair,next,after,value:check.value};
+      if(check.value>(seed?.value??baseline.value)
+        || seed&&check.value===seed.value&&combination.edits.length<seed.edits.length)
+        seed={...combination,next,after,value:check.value};
     }
     const combination=seed?[...seed.edits]:[];
     const selectedSlots=new Set(combination.map(edit=>edit.slotIndex));
@@ -384,7 +420,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       return [`${SEASON_GEAR_SLOT_LABELS[edit.slotIndex]} · ${seed.details[index]}${removedOffhand?' · 서브 무기 해제':''}`,
         ...sameGearOptionChanges(edit,document,report,combinedReport)];
     });
-    while(seed&&selectedSlots.size<SEASON_GEAR_SLOT_LABELS.length){
+    while(!exact&&seed&&selectedSlots.size<SEASON_GEAR_SLOT_LABELS.length){
       const available=shelf.filter(item=>!selectedItems.has(item.id));
       const choices=gearCandidates(combined,'all',available,group==='legendary','shelf').filter(({edits:[edit]})=>
         !selectedSlots.has(edit.slotIndex) && !(edit.slotIndex===0 && selectedSlots.has(1) && isTwoHandedWeapon(edit.value.item.itemId)));

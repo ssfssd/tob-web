@@ -2,6 +2,7 @@ import { describeSeasonOptionChange } from './seasonNumericStatsView.js';
 import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
+import { seasonSupportKoreanCard } from './seasonSupport.js';
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
@@ -23,10 +24,21 @@ function comparisonReasons(reasons,esc) {
 }
 
 const skillName=id=>{
-  const card=SS14_CARDS.records[id];
+  const card=SS14_CARDS.records[id]??seasonSupportKoreanCard(id);
   return card?.season==='SS14'&&card.koreanTextVerified ? card.name : '한국어 이름 미제공';
 };
 const slotName=index=>index===0?'주력':index<5?`액티브 ${index+1}`:`패시브 ${index-4}`;
+export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장착 후',role='skill-level-changes'}={}) {
+  if(!rows?.length)return '';
+  const single=rows.length===1?rows[0]:null;
+  const summary=single?` · ${single.from} → ${single.to}${single.toConfirmed?'':' (확인 필요)'}`:'';
+  const value=(base,level,verified)=>`Lv.${level}${verified?'':' (수치 미확인)'}${base!==level?`<small> · 기본 ${base}</small>`:''}`;
+  const content=rows.map(({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed})=>{
+    const socket=Number.isInteger(supportIndex)?` · 보조 ${supportIndex+1}`:'';
+    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${skillName(id)}`)}</th><td>${value(fromBase,from,fromConfirmed)}</td><td>${value(toBase,to,toConfirmed)}</td></tr>`;
+  }).join('');
+  return `<details data-role="${esc(role)}"><summary>스킬 레벨${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
+}
 export function renderSkillDpsChanges(rows,basis,esc,{before='장착 전',after='장착 후'}={}){
   if(!rows.length)return '';
   const skillRows=rows.map(({index,beforeId,afterId,from,to})=>{
@@ -44,14 +56,21 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
     <tbody>${p.skillSpeedChanges.map(({index,id,kind,from,to})=>
       `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))} <small>${kind==='attack'?'공격':'시전'}</small></th><td>${speed(from)}</td><td>${speed(to)}</td></tr>`).join('')}</tbody></table>`:'';
+  const usageValue=({count,seconds},mana,life,showLife)=>`${fmt(count)}회 / ${speed(seconds)}초${Number.isFinite(mana)?`<small> · ${fmt(mana)} MP/초</small>`:''}${showLife&&Number.isFinite(life)?`<small> · ${fmt(life)} HP/초</small>`:''}`;
+  const usage=p.manualUsageChanges?.length?`<table class="slot-dps-table" data-role="manual-usage-preview"><caption>측정 구간 수동 사용</caption>
+    <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
+    <tbody>${p.manualUsageChanges.map(({index,id,from,to,fromMana,toMana,fromLife,toLife})=>{
+      const showLife=fromLife>0||toLife>0;
+      return `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))}</th><td>${usageValue(from,fromMana,fromLife,showLife)}</td><td>${usageValue(to,toMana,toLife,showLife)}</td></tr>`;
+    }).join('')}</tbody></table>`:'';
   const numbed=p.numbedDamageChanges?.length?`<table class="slot-dps-table" data-role="numbed-damage-preview"><caption>${p.dpsBasis==='assumedDps'?'마취 기여 · 방어 전 DPS':'마취 기여 DPS'}</caption>
     <thead><tr><th scope="col">대미지</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.numbedDamageChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
   const uptimeValue=(rate,dps)=>esc(rate)+(Number.isFinite(dps)?`<small> · ${fmt(dps)} DPS</small>`:'');
-  const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>${p.dpsBasis==='assumedDps'?'가동률 변화 · 방어 전 DPS':'가동률 변화'}</caption>
+  const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>가동률 변화 · ${p.dpsBasis==='assumedDps'?'방어 전 DPS 기여':'DPS 기여'}</caption>
     <thead><tr><th scope="col">효과</th>${headers}</tr></thead>
     <tbody>${p.uptimeChanges.map(({name,from,to,fromDps,toDps})=>`<tr><th scope="row">${esc(name)}</th><td>${uptimeValue(from,fromDps)}</td><td>${uptimeValue(to,toDps)}</td></tr>`).join('')}</tbody></table>`:'';
-  return skill+speeds+uptimes+numbed;
+  return skill+speeds+usage+uptimes+numbed;
 }
 
 export function renderResourceChanges(p,esc,{board=false,skill=false}={}){

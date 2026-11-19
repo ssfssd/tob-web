@@ -50,7 +50,7 @@ const supportLabels = {
   "supported-skill-projectile-quantity": "보조 대상 투사체 수", "mana-cost-multiplier": "보조 MP 소모 배율", "supported-skill-mana-cost-to-life": "MP 소모 전환", "buff-duration": "버프 지속 시간",
   "supported-skill-area": "보조 대상 스킬 범위", "supported-skill-projectile-speed": "보조 대상 투사체 속도",
 };
-Object.assign(SEASON_STAT_LABELS,{aura_effect:'오라 효과',sealed_mana_compensation:'MP 봉인 보상',warcry_effect:'함성 효과',elixir_effect:'영약 스킬 효과',
+Object.assign(SEASON_STAT_LABELS,{aura_effect:'오라 효과',sealed_mana_compensation:'MP 봉인 보상',skill_cost:'스킬 소모',warcry_effect:'함성 효과',elixir_effect:'영약 스킬 효과',
   life_regain:'HP 반환',energy_shield_regain:'보호막 반환',minion_projectile_speed:'소환체 투사체 속도',minion_movement_speed:'소환체 이동 속도',minion_skill_area:'소환체 스킬 범위',
   minion_double_damage_chance:'소환체 더블 대미지 확률',armor_damage_mitigation_penetration:'아머 대미지 감면 관통',
   fire_damage_taken:'적이 받는 화염 대미지',affliction_effect:'심화 효과'});

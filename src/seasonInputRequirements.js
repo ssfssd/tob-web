@@ -23,6 +23,9 @@ const routes = [
 ];
 export function inputDestinations(report,reason,dps=report?.fullDps) {
   const links=[];
+  if (/고정 스킬 소모 감소와 소모량 배율|현재 1회 MP·HP 소모를 다시 입력/u.test(reason))
+    return (dps?.rows??[]).filter(row=>row.castCostObservation&&row.blockers?.includes(reason))
+      .map(row=>({section:'combat',tab:'conditions',label:`스킬 ${row.rowIndex+1} 관측 소모 입력`,edit:'dps-input',key:`${row.rowIndex}:observedFinalManaCost`}));
   if(customOptions.pattern.test(reason))return [customOptions];
   if(reason.startsWith('두 영약 동시 활성 시간 비율'))
     return [{section:'combat',label:'영약 동시 활성 비율 입력',edit:'extension-input',key:'elixir:overlap'}];

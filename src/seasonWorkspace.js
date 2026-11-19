@@ -28,7 +28,7 @@ import { seasonMemoryRows, validSeasonMemoryBases, validSeasonMemoryRolls } from
 import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
-import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides } from "./seasonDps.js";
+import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, observedSkillCostFields } from "./seasonDps.js";
 import { trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
@@ -582,7 +582,23 @@ export function editSeasonWorkspace(document, edit) {
       throw new Error('각 칸의 유지율을 입력하고 합계를 100% 이내로 배정하세요.');
     for(const {rowIndex} of group.slots.filter(slot=>slot.uptime>0))editSeasonDpsInput(target,`${rowIndex}:dotExclusive`,1);
   } else if (edit.kind === "dps-input") {
-    editSeasonDpsInput(target, edit.key, edit.value);
+    const [slot,field]=String(edit.key).split(':');
+    if (observedSkillCostFields.includes(field)) {
+      const binding=target.ss14Inputs.dps?.skills?.[slot];
+      const current=calculateSeasonBuild(target,{includeTheaAverage:false,includeAverage:false,includeElixirUptime:false});
+      const basis=current.fullDps.rows.find(row=>row.rowIndex===Number(slot))?.castCostObservation?.basis;
+      if (!basis&&edit.value!=='') throw new Error('현재 스킬에서 관측 소모가 필요한 조합을 확인하세요.');
+      if (binding?.observedSkillCostBasis!==basis&&binding) {
+        for (const key of observedSkillCostFields) delete binding[key];
+        delete binding.observedSkillCostBasis;
+      }
+      editSeasonDpsInput(target,edit.key,edit.value);
+      const next=target.ss14Inputs.dps?.skills?.[slot];
+      if (next&&observedSkillCostFields.some(key=>Object.hasOwn(next,key))) next.observedSkillCostBasis=basis;
+      else if(next) delete next.observedSkillCostBasis;
+    } else {
+      editSeasonDpsInput(target, edit.key, edit.value);
+    }
   } else if (edit.kind === "game-critical-input") {
     const index = Number(edit.key);
     const id = normalizeBuild(target).selections.skills[index];

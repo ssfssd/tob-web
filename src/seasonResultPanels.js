@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, SEASON_DPS_PARTS } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -17,7 +17,7 @@ import { DUAL_WIELD_ATTACK_SOURCE } from './seasonWeaponInputs.js';
 import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { SEASON_STAT_LABELS } from './seasonNumericStats.js';
-import { renderDamageBreakdown, renderResourceChanges } from './seasonEditorTools.js';
+import { renderDamageBreakdown, renderResourceChanges, renderSkillLevelChanges } from './seasonEditorTools.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
@@ -71,7 +71,7 @@ export function renderEditDpsComparison(s, compact = false) {
   if (!comparison || compact && !comparison.changed) return '';
   if (s.pending.size) return '<section data-role="native-edit-comparison" hidden></section>';
   const assumed = preferredSeasonDpsMetric(s.report)==='assumedDps' && comparison.assumed;
-  const {baseline,previous,resources,breakdown,encounterChanges,previousEncounterChanges} = assumed || comparison;
+  const {baseline,previous,resources,breakdown,levelChanges,levelsFromPrevious,encounterChanges,previousEncounterChanges} = assumed || comparison;
   const metricLabel = assumed ? '방어 전 DPS' : 'DPS';
   const comparisonText = value => value.supported ? deltaText(value)
     : value.encounterMatches === false ? '전투 조건 변경' : '비교 보류';
@@ -93,13 +93,15 @@ export function renderEditDpsComparison(s, compact = false) {
   };
   const showPrevious=previous&&!previous.supported&&(JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons)
     || previousEncounterChanges?.length&&JSON.stringify(previousEncounterChanges)!==JSON.stringify(encounterChanges));
-  const damage=breakdown?renderDamageBreakdown(breakdown,esc,{before:breakdown.previous?'직전':'기준',after:'현재'}):'';
+  const labels={before:breakdown?.previous?'직전':'기준',after:'현재'};
+  const damage=breakdown?renderDamageBreakdown(breakdown,esc,labels)+renderDamageRouteChanges(breakdown.damageRoutes,labels):'';
   return `<section class="native-edit-comparison" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">
     <h2>편집 전후 자동 비교</h2>
     ${comparison.changed ? `<p>기준 대비 <strong class="${baseline.supported ? baseline.delta > 0 ? 'is-increase' : baseline.delta < 0 ? 'is-decrease' : '' : ''}">${comparisonText(baseline)}</strong></p>
       ${previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
     <dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
         ${resources?renderResourceChanges(resources,esc,{board:true}):''}
+        ${renderSkillLevelChanges(levelChanges,esc,{before:levelsFromPrevious?'직전':'기준',after:'현재'})}
         ${damage?`<details data-role="edit-damage-breakdown"><summary>${breakdown.previous?'직전 대비':'기준 대비'} 변경 수치</summary>${damage}</details>`:''}
         ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${changedInputs(encounterChanges,'baseline-encounter-changes')}${renderReasons(s,baseline.reasons)}</details>` : ''}
         ${showPrevious ? `<details><summary>직전 변경 비교 보류 이유</summary>${changedInputs(previousEncounterChanges,'previous-encounter-changes')}${renderReasons(s,previous.reasons)}</details>` : ''}
@@ -217,12 +219,19 @@ export function renderResultConditions(s) {
     const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!sharedDots.some(group=>
       group.slots.some(slot=>slot.rowIndex===row.rowIndex&&(key===slot.field||key==='dotExclusive')))
       && !(key==='reapingOverlap'&&sharedReaping.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex))));
-    if (!keys.length) return '';
-    const minionMaximum = s.report.fullDps.rows.find(entry => entry.rowIndex === row.rowIndex)?.minionMaximum;
+    const dpsRow=s.report.fullDps.rows.find(entry=>entry.rowIndex===row.rowIndex);
+    const observation=dpsRow?.castCostObservation;
+    const observedCosts=observation?`<fieldset data-role="observed-skill-cost-${row.rowIndex}"><legend>최종 소모 관측값</legend>
+      <p>${observation.status==='stale'?'소모 조건이 바뀌었습니다. ':''}게임에서 한 번 사용할 때 소모하는 MP와 HP를 입력하세요. 소모하지 않는 자원은 0을 입력하세요.</p>
+      ${observedSkillCostFields.map(key=>renderSeasonDpsField(`${row.rowIndex}:${key}`,SEASON_DPS_SKILL_FIELDS[key],
+        observation.status==='stale'?'':inputs.dps?.skills?.[row.rowIndex]?.[key],'관측 소모')).join('')}</fieldset>`:'';
+    if (!keys.length&&!observedCosts) return '';
+    const minionMaximum = dpsRow?.minionMaximum;
     const sharedCommand = s.report.fullDps.observedCommandRow === row.rowIndex;
     const expanded=shareOverflow&&inputs.dps?.skills?.[row.rowIndex]?.useShare>0;
     return `<details data-role="dock-skill-conditions-${row.rowIndex}"${expanded?' open':''}><summary>${row.rowIndex === 0 ? '주력' : '액티브 ' + (row.rowIndex+1)} · ${esc(component.name)}</summary>
       ${keys.map(key=>renderSeasonDpsField(`${row.rowIndex}:${key}`, seasonDpsSkillFieldDefinition(row.id,key,row.terraChargeMaximum), inputs.dps?.skills?.[row.rowIndex]?.[key], '조건 탭', {minionMaximum,sharedCommand})).join('')}
+      ${observedCosts}
       ${button('스킬 계산 보기','result-tab',`data-tab="calculation" data-index="${row.rowIndex}" data-focus-role="calculation-skill"`)}</details>`;
   }).join('');
   return `<section class="native-result-conditions" aria-label="적용 중인 전투 조건">
@@ -295,6 +304,7 @@ function renderUpgradeRanking(s){
     const empty=equipment&&job.assembled?'한 부위만 바꿔 DPS가 오르는 후보 없음'
       :job.checked===0?'선택한 대상에 비교할 후보 없음':job.checked===job.blocked?'비교 가능한 후보 없음':(job.skillIndex!=null?skillMetricLabel:metricLabel)+'가 오르는 후보 없음';
     content=`<h3>${UPGRADE_GROUPS[group]} Top 20</h3>
+      ${job.equipmentSearch?`<p class="native-stat-note">${job.equipmentSearch==='exhaustive'?'호환되는 보관함 조합을 모두 비교했습니다.':'두 부위 조합을 비교하고, 가장 좋은 조합에서 부위를 하나씩 추가했습니다.'}</p>`:''}
       ${rows?'<ol class="upgrade-ranking">'+rows+'</ol>':`<p>${empty}</p>`}
       ${job.assembled?`<article class="upgrade-combination">${candidate(job.assembled,'assembled','옵션 조합')}</article>`:''}
       ${resources?`<details><summary>자원 1단위당 DPS</summary><ul class="upgrade-resource-list">${resources}</ul></details>`:''}
@@ -402,6 +412,18 @@ export function renderElixirDamageRoutes(routes,index) {
       `selected-skill-elixir-route-${index}-${i}`)).join(''),
     `selected-skill-elixir-damage-routes-${index}`);
 }
+export function renderDamageRouteChanges(rows,{before='장착 전',after='장착 후',role='damage-route-changes'}={}) {
+  if(!rows?.length)return '';
+  const route=(trace,states,index)=>states?renderElixirDamageRoutes(states,index):renderSkillConversion(trace,index);
+  return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,previous,current,previousStates,currentStates})=>{
+    const card=SS14_CARDS.records[id];
+    const name=card?.season==='SS14'&&card.koreanTextVerified?card.name:'한국어 이름 미제공';
+    const empty=' · 적용 없음';
+    return `<section><h4>${esc(name)} · ${index+1}번 칸</h4>
+      <div><b>${esc(before)}</b>${route(previous,previousStates,`${role}-before-${index}`)||empty}</div>
+      <div><b>${esc(after)}</b>${route(current,currentStates,`${role}-after-${index}`)||empty}</div></section>`;
+  }).join(''),role);
+}
 export function renderSkillElixirDps(phases,index) {
   if (!phases?.states.length) return '';
   const rows=phases.states.map(({active,uptime,dps,weightedDps})=>
@@ -459,8 +481,8 @@ function renderMoonStrikeForms(build, entry, row) {
 }
 
 function renderSkillResourceCosts(row, averaged, timedCombat) {
-  if (!row || (!row.channelCost && !['manaPerUse','lifePerUse','manualManaPerSecond','manualLifePerSecond'].some(key=>Number.isFinite(row[key])))) return '';
-  const costs = [];
+  if (!row || (!row.channelCost && !row.measuredManualUses && !['manaPerUse','lifePerUse','manualManaPerSecond','manualLifePerSecond'].some(key=>Number.isFinite(row[key])))) return '';
+  const costs = row.castCostObservation?.status==='applied'?[['소모 기준','게임 관측값']]:[];
   for (const [label,perUse,perSecond] of [
     ['MP',row.manaPerUse,row.manualManaPerSecond], ['HP',row.lifePerUse,row.manualLifePerSecond],
   ]) {

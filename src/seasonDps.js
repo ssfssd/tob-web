@@ -70,6 +70,8 @@ export const SEASON_DPS_SKILL_FIELDS = {
   summonCastRate: { label: "초당 직접 소환 횟수", min: 0, max: 100 },
   moonBaseManaCost: { label: "문 스트라이크 보정 전 MP 소모량", min: 0, max: 1000000,
     hint: "현재 최대 MP에 해당하는 값입니다. 보조·장비의 소모 배율은 계산에서 따로 적용합니다." },
+  observedFinalManaCost: { label: '관측한 1회 MP 소모', min:0, max:1000000 },
+  observedFinalLifeCost: { label: '관측한 1회 HP 소모', min:0, max:1000000 },
   moonRingHitChance: { label: '문링 환형 공격 적중률 (%)', min:0, max:100,
     hint:'비워두면 대상 적중률을 사용합니다.' },
   moonNormalMainShare: { label: '일반 공격의 메인 무기 관측 비중 (%)', min:0, max:100 },
@@ -115,6 +117,9 @@ export const SEASON_DPS_SKILL_FIELDS = {
   fissureHits: { label: "균열 후속 적중 횟수 (초당)", min: 0, max: 30 },
   fissureTimes: { label: "균열 후속 적중 시각 (초)", times: true },
 };
+
+export const observedSkillCostFields=['observedFinalManaCost','observedFinalLifeCost'];
+const validObservedSkillCostBasis=value=>typeof value==='string'&&value.length>0&&value.length<=8192;
 
 const buildSkillInputKeys = new Set([
   'itemId', 'sourcePageSha256', ...Object.keys(WEAPON_FIELDS), ...Object.keys(ADDED_FIELDS),
@@ -285,7 +290,9 @@ export function validSeasonDpsInputs(inputs) {
       || !object(d.enemy) || !object(d.skills) || !Object.entries(d.enemy).every(([k, v]) => validValue(SEASON_DPS_ENEMY_FIELDS[k], v))) return false;
     for (const [key, b] of Object.entries(d.skills)) {
       if (!/^[0-8]$/u.test(key) || !object(b) || typeof b.itemId !== "string" || !hash(b.sourcePageSha256)
-        || !Object.entries(b).every(([k, v]) => ["itemId", "sourcePageSha256"].includes(k) || validValue(SEASON_DPS_SKILL_FIELDS[k], v))) return false;
+        || !Object.entries(b).every(([k, v]) => ["itemId", "sourcePageSha256"].includes(k)
+          || (k==='observedSkillCostBasis' ? validObservedSkillCostBasis(v) : validValue(SEASON_DPS_SKILL_FIELDS[k], v)))
+        || observedSkillCostFields.some(field=>Object.hasOwn(b,field))!==Object.hasOwn(b,'observedSkillCostBasis')) return false;
     }
   }
   return inputs.dpsRuleReceipts === undefined || object(inputs.dpsRuleReceipts)
@@ -380,6 +387,12 @@ function additionalSkillCostFactor(effect) {
     ? 1+effect.value/100 : null;
 }
 
+function isFlatSkillCostReduction(effect) {
+  return effect.stat==='skill_cost' && effect.operation==='add' && effect.unit==='flat'
+    && Number.isInteger(effect.value) && effect.value<=0 && effect.receipt?.season==='SS14'
+    && !effect.condition && !effect.conditionRequirements && !effect.per && !effect.target;
+}
+
 function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
   let base = entry?.values?.manaCost;
   if (entry?.bindingChanged) return null;
@@ -388,7 +401,13 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
   const equipped=(slot?.supports??[]).filter(c=>c?.supportId).length;
   if (supports.length!==equipped) return null;
   const fixedSupportMultiplier=seasonSupportManaMultiplier(effects);
-  let costMultiplier=1, noMana=false;
+  let costMultiplier=1, noMana=false, hasCostMultiplier=false;
+  const factors=[];
+  const applyCostMultiplier=factor=>{
+    costMultiplier*=factor;
+    hasCostMultiplier||=factor!==1;
+    factors.push(factor);
+  };
   const conversions=[];
   for (const support of supports) {
     const supportId=slot.supports[support.supportIndex]?.supportId;
@@ -399,7 +418,7 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
     if(support.blockers.length){
       const verified=support.castCost;
       if(!finite(verified?.multiplier)||verified.multiplier<0)return null;
-      costMultiplier *= (fixedSupportMultiplier ?? verified.multiplier)/100;
+      applyCostMultiplier((fixedSupportMultiplier ?? verified.multiplier)/100);
       if(verified.convertsToLife)conversions.push(100);
       continue;
     }
@@ -407,7 +426,7 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
     const [multiplier]=multipliers;
     if (multipliers.length!==1 || multiplier.operation!=='set' || multiplier.unit!=='percent'
       || multiplier.condition || multiplier.conditionRequirements || multiplier.per || multiplier.target || !finite(multiplier.value) || multiplier.value<0) return null;
-    costMultiplier *= (fixedSupportMultiplier ?? multiplier.value)/100;
+    applyCostMultiplier((fixedSupportMultiplier ?? multiplier.value)/100);
     const conversion=support.effects.find(e=>e.stat==='supported-skill-mana-cost-to-life');
     if (conversion) {
       if (conversion.operation!=='set' || conversion.unit!=='percent' || conversion.value!==100 || conversion.condition
@@ -415,14 +434,15 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
       conversions.push(conversion.value);
     }
   }
-  let increased=0;
+  let increased=0,flatReduction=0;
   for(const effect of effects){
     if(effect.stat==='additional_skill_cost'){
       const factor=additionalSkillCostFactor(effect);
       if(factor===null)return {reason:'스킬 소모 추가 옵션의 적용 조건을 확인하세요.'};
-      costMultiplier*=factor;
+      applyCostMultiplier(factor);
       continue;
     }
+    if(isFlatSkillCostReduction(effect)) flatReduction+=effect.value;
     if(!SEASON_GEAR_COST_STATS.has(effect.stat))continue;
     if(effect.stat==='attack_skill_mana_cost'&&!tags.includes('Attack')||effect.stat==='spell_mana_cost_to_life_cost'&&!tags.includes('Spell'))continue;
     if(effect.condition||effect.conditionRequirements||effect.per||effect.target||effect.unit!=='percent'||!finite(effect.value))return {reason:'시전 비용에 적용할 장비 옵션을 확인하세요.'};
@@ -437,10 +457,21 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
     && binding.sourcePageSha256===entry.receipt?.sourcePageSha256
     && validValue(SEASON_DPS_SKILL_FIELDS.moonBaseManaCost,binding.moonBaseManaCost)) base=binding.moonBaseManaCost;
   if (!finite(base) || base < 0) return null;
-  const cost=base*costMultiplier*Math.max(0,1+increased/100);
   // The installed Cost Conversion and Ice Pulse effects write the same
   // skill-cost field (2010060). Skill_cost permits life cost above 100%.
   const ratio=conversions.reduce((total,value)=>total+value,0)/100;
+  if (base>0 && flatReduction!==0 && (hasCostMultiplier || increased!==0 || ratio>0)) {
+    const basis=JSON.stringify([entry.itemId,entry.level,base,supports.map(s=>[s.supportIndex,slot.supports[s.supportIndex].supportId,s.level]),
+      factors,flatReduction,increased,conversions]);
+    const stale=binding?.observedSkillCostBasis!==undefined&&binding.observedSkillCostBasis!==basis;
+    if(!stale&&binding&&binding.itemId===slot?.skillId&&binding.sourcePageSha256===SS14_CARDS_EN.records[slot?.skillId]?.sourcePageSha256&&binding.observedSkillCostBasis===basis
+      && observedSkillCostFields.every(field=>validValue(SEASON_DPS_SKILL_FIELDS[field],binding[field])))
+      return {mana:binding.observedFinalManaCost,life:binding.observedFinalLifeCost,observation:{basis,status:'applied'}};
+    return {observation:{basis,status:stale?'stale':'missing'},reason:stale
+      ? '스킬 소모에 영향을 주는 구성이 바뀌었습니다. 현재 1회 MP·HP 소모를 다시 입력하세요.'
+      : '고정 스킬 소모 감소와 소모량 배율·HP 전환의 적용 순서가 미확인입니다.'};
+  }
+  const cost=Math.max(0,base+flatReduction)*costMultiplier*Math.max(0,1+increased/100);
   return { mana:cost*Math.max(0,1-ratio), life:cost*ratio };
 }
 
@@ -548,6 +579,7 @@ function coverage(build, report, effects, gearEffects) {
     }
     if(SEASON_GEAR_COST_STATS.has(effect.stat))continue; // evaluated against each skill's tags and resource budget
     if(effect.stat==='additional_skill_cost' && additionalSkillCostFactor(effect)!==null)continue;
+    if(isFlatSkillCostReduction(effect))continue;
     if(SEASON_GEAR_NUMBED_STATS.has(effect.stat)) {
       if(!finite(effect.value)||effect.value<effect.roll?.min||effect.value>effect.roll?.max
         || effect.stat==='gear_numbed_additional_stacks'&&!Number.isInteger(effect.value))
@@ -747,6 +779,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         const cost = castCostVerified ? manualSkillCost(build, report, entry, direct.rowIndex, record?.tags ?? [], effects) : null;
         result.manaPerUse = round(cost?.mana);
         result.lifePerUse = round(cost?.life);
+        if(cost?.observation)result.castCostObservation=cost.observation;
         const observedRate = validValue(SEASON_DPS_SKILL_FIELDS.summonCastRate,b?.summonCastRate) ? b.summonCastRate : null;
         result.manualSummonRate = b?.useShare === 0 ? 0 : observedRate;
         if (b?.useShare > 0 && observedRate !== 0) {
@@ -1168,6 +1201,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         manualDps: reasons.length ? null : round(manualDps), spellBurstDps: reasons.length ? null : round(burstDps),
         repeatDps: reasons.length ? null : round(repeatDps + extraDps), heroDps: reasons.length ? null : round(heroDps), dotDps: reasons.length ? null : round(dotDps), reapingDps: reasons.length ? null : round(reapingDps), netherDps:reasons.length?null:round(nether.dps), manualRate: round(manualRate), burstActivationRate: round(burstActivationRate), burstExtraRate: round(burstExtraRate) },
       nether, shotgun, takenMultiplier, manaPerUse:round(cost?.mana), lifePerUse:round(cost?.life),
+      ...(cost?.observation&&{castCostObservation:cost.observation}),
       fixedNumbedPerCast:reasons.length ? null : round(lightningShare>0 ? hit*lightningShare*fixedNumbedShare : 0),
       ...(finite(permafrostHitDps) && {permafrostHitDps}),
       ...(!reasons.length && frostActive && {permafrostBreakdown:{active:round(frostActiveDps),uptime:frostUptime,charge:frost.charge}}),

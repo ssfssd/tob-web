@@ -27,19 +27,19 @@ import { seasonEffectSources, effectSourceLabel } from "./seasonEffectSources.js
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
-import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, gearFilters, previewSlotEdit } from './seasonGearPicker.js';
+import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels, gearFilters, previewSlotEdit } from './seasonGearPicker.js';
 import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
 import { craftFamilySlots, craftOptions, itemGearKind } from './seasonItemCraft.js';
 import { corrosionCard, corrosionOptions,corrosionBasePool } from './seasonCorrosion.js';
 import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
-import { renderDamageBreakdown, renderResourceChanges, renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
+import { renderDamageBreakdown, renderResourceChanges, renderSkillLevelChanges, renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
 import { renderSlateEditor,slateEditorBoard } from './seasonSlateEditor.js';
 import { regularSlateFamilies } from './seasonDivinity.js';
 import { nativeSlateOptions } from './seasonNativeDivinity.js';
 import { compareSeasonDpsSnapshots, SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
-import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion, renderElixirDamageRoutes, renderSkillElixirDps } from './seasonResultPanels.js';
+import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion, renderElixirDamageRoutes, renderSkillElixirDps, renderDamageRouteChanges } from './seasonResultPanels.js';
 import {renderSeasonSupportMatrix} from './seasonSupportMatrix.js';
 import {isOfflineEdition} from './offlinePresentation.js';
 import {screenshotGroups,seasonScreenshotTargets} from './seasonScreenshotImport.js';
@@ -233,19 +233,8 @@ export function renderSkillCandidateResult(s) {
       +(renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
 }
 function renderGearSkillChanges(preview) {
-  const levels=preview?.skillLevels;
-  const levelValue=(value,confirmed)=>confirmed?`Lv.${value}`:`Lv.${value} (수치 미확인)`;
-  const levelsHtml=levels?.length?`<details data-role="gear-skill-level-changes"><summary>스킬 레벨${levels.length===1?' · '+levels[0].from+' → '+levels[0].to+(levels[0].toConfirmed?'':' (확인 필요)'):''}</summary><ul>${levels.map(row=>{
-    const slot=row.rowIndex===0?'주력':row.rowIndex<5?'액티브 '+(row.rowIndex+1):'패시브 '+(row.rowIndex-4);
-    const socket=Number.isInteger(row.supportIndex)?` · 보조 ${row.supportIndex+1}`:'';
-    return `<li>${esc(title(row.id))} · ${slot}${socket} <b>${levelValue(row.from,row.fromConfirmed)} → ${levelValue(row.to,row.toConfirmed)}</b></li>`;
-  }).join('')}</ul></details>`:'';
-  const rows=preview?.damageRoutes;
-  if(!rows?.length)return levelsHtml;
-  return levelsHtml+`<details data-role="gear-damage-routes"><summary>대미지 전환·추가 획득</summary>${rows.map(({index,id,previous,current,previousStates,currentStates})=>
-    `<section><h4>${esc(title(id))} · ${index+1}번 칸</h4>
-      <div><b>장착 전</b>${(previousStates?renderElixirDamageRoutes(previousStates,'before-'+index):renderSkillConversion(previous,'before-'+index))||' · —'}</div>
-      <div><b>장착 후</b>${(currentStates?renderElixirDamageRoutes(currentStates,'after-'+index):renderSkillConversion(current,'after-'+index))||' · —'}</div></section>`).join('')}</details>`;
+  return renderSkillLevelChanges(preview?.skillLevels,esc,{role:'gear-skill-level-changes'})
+    +renderDamageRouteChanges(preview?.damageRoutes,{role:'gear-damage-routes'});
 }
 function gearEffectLines(card,id,index) {
   if (!card?.koreanTextVerified) return [];
@@ -932,8 +921,11 @@ export function renderBoardComparison(s){
   const result=compareSeasonDpsSnapshots(s,after);
   const basis=result.supported?'fullDps':'assumedDps';
   const comparable=result.supported||compareSeasonDpsSnapshots(s,after,basis).supported;
-  const dpsChanges=comparable?renderDamageBreakdown({...compareSeasonDamageBreakdown(s.report,after.report,basis),dpsBasis:basis},
-    esc,{before:'적용 전',after:'적용 후'}):'';
+  const labels={before:'적용 전',after:'적용 후'};
+  const levels=renderSkillLevelChanges(compareSeasonSkillLevels(s.report,after.report),esc,labels);
+  const breakdown=comparable?compareSeasonDamageBreakdown(s.report,after.report,basis):null;
+  const dpsChanges=breakdown?renderDamageBreakdown({...breakdown,dpsBasis:basis},esc,labels)
+    +renderDamageRouteChanges(breakdown.damageRoutes,labels):'';
   const dpsBasis=comparable?basis:'fullDps';
   const resources=compareSeasonResourceCosts(s.report,after.report,dpsBasis,{allActive:true});
   const beforeRows=boardOptions(s,section),afterRows=boardOptions(after,section);
@@ -950,7 +942,7 @@ export function renderBoardComparison(s){
     return other!==reason&&result.reasons.includes(other)?reason.slice(4):reason;
   }));
   const reasons=uniqueReasons.size?`<details data-role="board-dps-reasons"><summary>전체 DPS 보류 사유</summary><ul>${[...uniqueReasons].map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></details>`:'';
-  return `${changed.length?`<details data-role="board-option-changes" class="board-option-changes"><summary>변경 옵션 ${changed.length}개</summary><ul class="board-option-diff">${changed.join('')}</ul></details>`:''}${dpsChanges}${renderResourceChanges({...resources,dpsBasis},esc,{board:true})}${reasons}`;
+  return `${changed.length?`<details data-role="board-option-changes" class="board-option-changes"><summary>변경 옵션 ${changed.length}개</summary><ul class="board-option-diff">${changed.join('')}</ul></details>`:''}${levels}${dpsChanges}${renderResourceChanges({...resources,dpsBasis},esc,{board:true})}${reasons}`;
 }
 function boardDrawer(s){
   const draft=s.overlay,section=draft.section;

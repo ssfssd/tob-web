@@ -1,5 +1,5 @@
 import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { compareSeasonDamageBreakdown, compareSeasonResourceCosts } from './seasonGearPicker.js';
+import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels } from './seasonGearPicker.js';
 import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
 import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition } from './seasonDps.js';
 
@@ -66,11 +66,12 @@ export function createSeasonEditComparison(document, report) {
         const previousCompared=previous?compareSeasonDpsSnapshots(previous,current,metric):null;
         const resourceBaseline=compared.supported ? baseline : previousCompared?.supported ? previous
           : compared.encounterMatches===true ? baseline : previousCompared?.encounterMatches===true ? previous : null;
-        const resources=changed && resourceBaseline && compareSeasonResourceCosts(resourceBaseline.report,current.report,metric);
+        const resources=changed && resourceBaseline && compareSeasonResourceCosts(resourceBaseline.report,current.report,metric,{allActive:true});
         const breakdown=changed && (compared.supported || previousCompared?.supported)
           && compareSeasonDamageBreakdown(resourceBaseline.report,current.report,metric);
         const fromPrevious=resourceBaseline!==baseline && resourceBaseline===previous;
         return {baseline:compared,previous:previousCompared,
+          ...(changed && {levelChanges:compareSeasonSkillLevels((resourceBaseline??baseline).report,current.report),levelsFromPrevious:fromPrevious}),
           ...(breakdown && {breakdown:{...breakdown,dpsBasis:metric,previous:fromPrevious}}),
           ...(compared.encounterMatches===false && {encounterChanges:encounterInputChanges(baseline,current,metric)}),
           ...(previousCompared?.encounterMatches===false && {previousEncounterChanges:encounterInputChanges(previous,current,metric)}),

@@ -65,15 +65,16 @@ function skillDamageRoutes(report, dps, rowIndex) {
 }
 const elixirDamageRoutes = (dps,index) => dps.rows.find(row=>row.rowIndex===index)?.elixirDamageRoutes;
 
-function gearDamageRouteChanges(before,after,beforeDps,afterDps) {
+function damageRouteChanges(before,after,beforeDps,afterDps) {
   const changes=[];
-  const slots=new Map([...beforeDps.rows,...afterDps.rows].map(row=>[row.rowIndex,row.id]));
+  const equippedBefore=new Map(beforeDps.rows.map(row=>[row.rowIndex,row.id]));
   const routes=(report,dps,index)=>skillDamageRoutes(report,dps,index)
     ?.filter(e=>e.stage==='conversion'||e.stage==='gained-as-extra')
     .map(({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage,gainedBaseDamage})=>({
       stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage,gainedBaseDamage,
     }));
-  for(const [index,id] of slots){
+  for(const {rowIndex:index,id} of afterDps.rows){
+    if(equippedBefore.get(index)!==id)continue;
     const previousStates=elixirDamageRoutes(beforeDps,index),currentStates=elixirDamageRoutes(afterDps,index);
     if(previousStates||currentStates){
       if(previousStates&&currentStates&&JSON.stringify(previousStates)!==JSON.stringify(currentStates))
@@ -86,19 +87,20 @@ function gearDamageRouteChanges(before,after,beforeDps,afterDps) {
   return changes;
 }
 
-function gearSkillLevelChanges(before,after) {
+export function compareSeasonSkillLevels(before,after) {
+  const slots=report=>report.components.filter(({category})=>category==='skills'||category==='supports')
+    .flatMap(({id,calculations})=>(calculations??[]).map(entry=>({id,entry})));
+  const key=({id,entry})=>`${entry.rowIndex}:${entry.supportIndex??''}:${id}`;
+  const previousSlots=new Map(slots(before).map(slot=>[key(slot),slot.entry]));
   const changes=[];
-  for (const {category,id,calculations} of after.components) {
-    if (category!=='skills' && category!=='supports') continue;
-    for (const entry of calculations ?? []) {
-      const {rowIndex,supportIndex}=entry;
-      const previous=seasonSkillSlotCalculation(before,rowIndex,supportIndex);
-      if (!previous) continue;
-      const {level:from,confirmed:fromConfirmed}=seasonSkillLevelState(previous);
-      const {level:to,confirmed:toConfirmed}=seasonSkillLevelState(entry);
-      if (!Number.isInteger(from) || !Number.isInteger(to) || from===to) continue;
-      changes.push({ id, rowIndex, supportIndex, from, to, fromConfirmed, toConfirmed });
-    }
+  for (const slot of slots(after)) {
+    const previous=previousSlots.get(key(slot));
+    if (!previous) continue;
+    const {id,entry}=slot, {rowIndex,supportIndex}=entry;
+    const {base:fromBase,level:from,confirmed:fromConfirmed}=seasonSkillLevelState(previous);
+    const {base:toBase,level:to,confirmed:toConfirmed}=seasonSkillLevelState(entry);
+    if (!Number.isInteger(from)||!Number.isInteger(to)||(from===to&&fromBase===toBase)) continue;
+    changes.push({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed});
   }
   return changes.sort((a,b)=>a.rowIndex-b.rowIndex||(a.supportIndex??-1)-(b.supportIndex??-1));
 }
@@ -150,9 +152,21 @@ function skillSpeedChanges(before, after, metric) {
 }
 
 export function compareSeasonDamageBreakdown(before, after, metric) {
+  const manualUsageChanges=after[metric].rows.flatMap(row=>{
+    const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
+    const from=old?.measuredManualUses, to=row.measuredManualUses;
+    if(!row.supported||!old?.supported||!from||!to||from.seconds!==to.seconds)return [];
+    const fromMana=old.manualManaPerSecond, toMana=row.manualManaPerSecond;
+    const fromLife=old.manualLifePerSecond, toLife=row.manualLifePerSecond;
+    const display=value=>Number.isFinite(value)?value.toFixed(2):null;
+    return display(from.count)!==display(to.count)||display(fromMana)!==display(toMana)||display(fromLife)!==display(toLife)
+      ? [{index:row.rowIndex,id:row.id,from,to,fromMana,toMana,fromLife,toLife}] : [];
+  });
   return {
     skillDpsChanges:skillDpsChanges(before[metric],after[metric]),
+    damageRoutes:damageRouteChanges(before,after,before[metric],after[metric]),
     skillSpeedChanges:skillSpeedChanges(before,after,metric),
+    manualUsageChanges,
     numbedDamageChanges:numbedDamageChanges(before[metric],after[metric]),
     uptimeChanges:compareSeasonUptimeChanges(before,after,metric),
   };
@@ -253,9 +267,10 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
       ...(energyChanged?{energyChange:{before:beforeEnergy,after:afterEnergy}}:{})};
   }
   return {comparison,offhandRemoved,assumedComparison,stats,options,dpsBasis,
-    ...(comparable?compareSeasonDamageBreakdown(report,after,dpsBasis):{skillDpsChanges:[],skillSpeedChanges:[],numbedDamageChanges:[],uptimeChanges:[]}),
+    ...(comparable?compareSeasonDamageBreakdown(report,after,dpsBasis):{skillDpsChanges:[],skillSpeedChanges:[],manualUsageChanges:[],numbedDamageChanges:[],uptimeChanges:[]}),
     ...compareSeasonResourceCosts(report,after,dpsBasis,{allActive:gear,rowIndex:skillEdit?edit.rowIndex:undefined}),
-    ...(gear?{damageRoutes:gearDamageRouteChanges(report,after,beforeDps,afterDps),skillLevels:gearSkillLevelChanges(report,after)}:{}),
+    ...(!comparable&&gear?{damageRoutes:damageRouteChanges(report,after,beforeDps,afterDps)}:{}),
+    ...(!skillEdit?{skillLevels:compareSeasonSkillLevels(report,after)}:{}),
     ...(skill?{skill}:{}),
     ...(includeSnapshot?{candidate}:{})};
 }

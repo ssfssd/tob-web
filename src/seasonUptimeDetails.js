@@ -26,12 +26,16 @@ function damageContribution(report, field) {
 export function compareSeasonUptimeChanges(before, after, metric) {
   const key=metric==='assumedDps'?'assumed':'setting';
   const damage=metric==='assumedDps'?'contribution':'inputContribution';
+  const unit=(row)=>row[key].endsWith('%')?'percent':row.timedReaping&&row[key].endsWith('회')?'count':null;
   const rows=(report)=>new Map((report.assumedDps?.uptimeDetails??[])
-    .filter(row=>row.key&&row[key].endsWith('%')).map(row=>[row.key,row]));
+    .filter(row=>row.key&&unit(row)).map(row=>[row.key,row]));
   const previous=rows(before), current=rows(after);
   return [...current].flatMap(([id,row])=>{
     const old=previous.get(id);
-    return old&&old[key]!==row[key] ? [{name:row.name,from:old[key],to:row[key],fromDps:old[damage],toDps:row[damage]}] : [];
+    if (!old||unit(old)!==unit(row)) return [];
+    const fromDps=old[damage], toDps=row[damage];
+    const contributionChanged=Number.isFinite(fromDps)&&Number.isFinite(toDps)&&count(fromDps)!==count(toDps);
+    return old[key]!==row[key]||contributionChanged ? [{name:row.name,from:old[key],to:row[key],fromDps,toDps}] : [];
   });
 }
 
@@ -66,7 +70,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
       setting:percent(windowed?windowUptime(original?.dotWindows?original:row,saved):saved),
       assumed:percent(windowed?windowUptime(row,assumed):assumed),
-      method:windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':duplicate&&assumed===undefined?'이 칸이 대미지를 준 시간의 비율을 입력하세요. 적용되지 않는 칸은 0%입니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':!permafrost&&assumed===0?'같은 지속 스킬의 중복 슬롯이므로 지정한 0%를 유지합니다.':details[1],
+      method:windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':duplicate&&assumed===undefined?'이 칸이 대미지를 준 시간의 비율을 입력하세요. 적용되지 않는 칸은 0%입니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':duplicate&&assumed===0?'중복 슬롯에 지정한 0%를 유지합니다.':details[1],
       contribution:contribution(estimate,row),
       inputContribution:contribution(report,original),
     };
@@ -87,6 +91,8 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       return entry.values.reapingDps-(timed ? entry.values.igniteReapingDps??0 : 0);
     };
     lines.push({
+      key:`reaping:${row.rowIndex}:${row.id}`,
+      timedReaping:!!timed,
       name:`${name} · ${row.rowIndex+1}번 칸 · 수확 시 지속 대미지 적용`,
       setting:setting(original),
       assumed:setting(row),

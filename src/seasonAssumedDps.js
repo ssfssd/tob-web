@@ -184,7 +184,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,measuredManualUses})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,measuredManualUses,castCostObservation})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
       return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
@@ -195,7 +195,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
           cadenceTrace:direct?.offenseBasis?.cadenceTrace,
           hitModifierTrace:direct?.trace?.filter(e=>e.stage==='damage-modifier'&&e.appliesToHit),
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
-        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(reaping&&{reaping}),...(fissure&&{fissure}),
+        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(castCostObservation&&{castCostObservation}),...(reaping&&{reaping}),...(fissure&&{fissure}),
         ...(dotBreakdown&&(!scenario.theaAverage||estimate.scope==='ss14-thea-joint-combat')&&{dotBreakdown})};
     }),
     uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};
