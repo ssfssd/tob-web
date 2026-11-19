@@ -1,6 +1,6 @@
 // Group repeated calculation diagnostics by the place where the user can act.
 // Keep every original diagnostic; grouping never changes calculation support.
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDotWindowRepairs } from './seasonDps.js';
 import { SEASON_HERO_COMBAT_FIELDS } from './seasonMechanicInputs.js';
 import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
@@ -94,7 +94,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     for(const row of rows) if(row.group==='gear' && row.name && reason.includes(row.name))
       for(const control of row.conditionControls) if(control.value===''){
         if(control.numbedMinimum>0&&!legacyNumbed&&!control.timedNumbed)
-          add('combat','마취 중첩 입력','dps-input','enemy:numbedStacks');
+          add('combat','마취 중첩 입력','dps-input','enemy:numbedStacks',{tab:'conditions'});
         else if(nearbyEnemyGroups.includes(control.conditionGroup)){
           if(!links.some(link=>link.key===nearbyEnemyCountInput))add('combat','주변 적 수 선택',nearbyEnemyCountInput,nearbyEnemyCountInput);
         }else add('combat',control.label??'장비 효과 조건 입력','component-condition',control.key);
@@ -130,6 +130,10 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'&&e.value>0))
       for(const control of row.conditionControls.filter(c=>c.key.endsWith(`:nether-buff-${row.buffSkill}`)&&c.value===1))
         add('skills',row.name+' 오라 설정','component-condition',control.key,{index:row.buffSkill});
+    for(const row of dps?.manaReservations??report?.character?.manaReservations??[]) {
+      if(Number.isInteger(row.supportIndex)&&!row.blocked&&row.applied>0)
+        add('skills',row.name+' 보조 편집',undefined,undefined,{index:row.rowIndex,supportIndex:row.supportIndex});
+    }
     return links;
   }
   if (reason.startsWith('채널링의 MP 차감 시각') || reason.startsWith('채널링 MP 차감과 다른 행동')) {
@@ -139,6 +143,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     return [...times,{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
   }
   if(reason.includes('초당 MP 소모율을 입력하세요.')) return [{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
+  if(reason.startsWith('스킬 시전 시간 배분의 합이 100%를 초과'))
+    return [{tab:'conditions',role:'cast-share-allocation',label:'스킬별 시전 배분 수정'}];
   if(/^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간)/u.test(reason)) return [{section:'combat',role:'season-thea-controls',label:'복합 계산 켜기'}];
   if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계')||reason.includes(SEASON_DPS_SKILL_FIELDS.reapingOverlap.label)){
     const overflow=reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계');
@@ -155,9 +161,24 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       section:'combat',label:`스킬 ${i+1} 수확 겹침 입력`,edit:'dps-input',key:`${i}:reapingOverlap`,
     }));
   if(/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은/u.test(reason)) {
-    if(reason.includes('적용 구간')) return (dps?.dotWindowIssues?.[reason]??[]).map(rowIndex=>({
-      section:'combat', tab:'conditions', label:`스킬 ${rowIndex+1} 적용 구간`, edit:'dps-input', key:`${rowIndex}:dotWindows`,
-    }));
+    if(reason.includes('적용 구간')) {
+      const affected=dps?.dotWindowIssues?.[reason]??[];
+      const routed=new Set();
+      if(reason.includes('측정 종료 시각')){
+        const {overlaps,bounds}=seasonDotWindowRepairs(report);
+        for(const conflict of overlaps.filter(conflict=>conflict.slots.every(index=>affected.includes(index)))){
+          links.push({tab:'conditions',role:`dot-window-overlap-${conflict.id}`,label:`${conflict.slots.map(index=>index+1).join('·')}번 칸 겹침 배정`});
+          for(const index of conflict.slots)routed.add(index);
+        }
+        for(const index of new Set(bounds.map(bound=>bound.rowIndex)))if(affected.includes(index)){
+          links.push({tab:'conditions',role:`dot-window-bound-${index}`,label:`${index+1}번 칸 측정 범위 수정`});
+          routed.add(index);
+        }
+      }
+      return [...links,...affected.filter(index=>!routed.has(index)).map(rowIndex=>({
+        section:'combat',tab:'conditions',label:`스킬 ${rowIndex+1} 적용 구간`,edit:'dps-input',key:`${rowIndex}:dotWindows`,
+      }))];
+    }
     const confirm = reason.endsWith('슬롯별 유지율 배정을 확인하세요.');
     const affected = confirm ? dps?.dotExclusiveUnconfirmed : dps?.dotUptimeOverflow;
     const groups=report?.fullDps?.dotAllocationGroups?.filter(group=>group.slots.some(slot=>affected?.includes(slot.rowIndex)))??[];
@@ -179,7 +200,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     }
   }
   for(const [key,def] of Object.entries(SEASON_DPS_ENEMY_FIELDS))if(reason.includes(def.label)&&(key!=='numbedStacks'||!links.length))
-    add('combat',key==='affliction'?'대상 심화 입력':key==='numbedStacks'?'마취 중첩 입력':'대상 조건 입력','dps-input','enemy:'+key);
+    add('combat',key==='affliction'?'대상 심화 입력':key==='numbedStacks'?'마취 중첩 입력':'대상 조건 입력','dps-input','enemy:'+key,
+      key==='numbedStacks'?{tab:'conditions'}:{});
   const commandRow = dps?.observedCommandRow;
   if(Number.isInteger(commandRow) && reason.includes('스마트 웨폰에 적용할 현재 통솔 수치'))
     add('combat','현재 통솔 수치 입력','dps-input',commandRow+':command');
@@ -187,7 +209,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     for(const row of dps?.rows??[]) if(row.syntheticTroop && Number.isInteger(row.rowIndex))
       add('combat','스킬 '+(row.rowIndex+1)+' 소환체 수','dps-input',row.rowIndex+':minionCount');
   }
-  const contextualKey = reason.startsWith('아이스링 처치 재발동의 대상 적중 횟수를 확인') ? 'repeatHits'
+  const contextualKey = reason.includes('소환 스킬 시전 시간 배분을 입력') ? 'useShare'
+    : reason.startsWith('아이스링 처치 재발동의 대상 적중 횟수를 확인') ? 'repeatHits'
     : reason.startsWith('복합 계산의 스킬별 일반 시전 횟수를 선택') || reason.startsWith('일반 시전 횟수가 시전 배분·속도로 가능한 횟수를 초과') ? 'castRate'
     : reason.includes('채널링 회차가 수확 쿨타임을 충족하는지 확인할 수 없습니다. 관측값 입력을 선택하세요.') ? 'reapingMode'
     : reason.includes('소환체 수량 상한') ? 'minionCount' : null;
@@ -197,7 +220,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     const dot=(report?.fullDps?.dotAllocationGroups??[]).some(group=>group.slots.some(slot=>
       slot.rowIndex===row.rowIndex&&slot.field===key));
     add('combat','스킬 '+(row.rowIndex+1)+(key==='dotUptime'||key==='permafrostUptime'?' 유지율 입력':' 조건 입력'),
-      'dps-input',row.rowIndex+':'+key,dot?{tab:'conditions'}:{});
+      'dps-input',row.rowIndex+':'+key,dot||key==='useShare'?{tab:'conditions'}:{});
   }
   if(links.length)return links.filter((l,i)=>links.findIndex(v=>v.key===l.key&&v.index===l.index)===i);
   if(/주력 스킬을 선택/.test(reason))return [{section:'skills',index:0,label:'주력 스킬 선택'}];

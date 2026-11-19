@@ -208,6 +208,15 @@ function continuousDotWindows(value) {
   }
   return merged;
 }
+export function seasonDotWindowRepairs(report) {
+  const overlaps=new Map(), bounds=new Map();
+  for(const dps of [report?.assumedDps,report?.fullDps]){
+    for(const conflict of dps?.dotWindowConflicts??[])overlaps.set(conflict.id,conflict);
+    for(const bound of dps?.dotWindowBounds??[])bounds.set(`${bound.rowIndex}:${bound.start}:${bound.stop}:${bound.end}`,bound);
+  }
+  return {overlaps:[...overlaps.values()],bounds:[...bounds.values()]};
+}
+
 export function seasonDotWindowAssignment(build, conflict, winner) {
   if (!conflict?.slots.includes(winner)) return null;
   const loser = conflict.slots.find(slot => slot !== winner);

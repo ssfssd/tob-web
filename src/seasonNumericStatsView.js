@@ -24,7 +24,7 @@ function skillCosts(cost, key) {
     +(perSecond!=null?cell(`수동 시전 ${label}`,perSecond,`${key}-${resource}-per-second`,'/초'):'')).join('');
 }
 function manaBalance(budget, measured, assumed, otherBudget, survival, costs, excluded, timedCombat) {
-  const observe = '<button type="button" data-ss14-action="requirement" data-section="combat" data-field="character-input" data-field-key="observedManaRecovery">관측 MP 회복 입력</button>';
+  const observe = '<button type="button" data-ss14-action="result-tab" data-tab="conditions" data-field="character-input" data-field-key="observedManaRecovery">관측 MP 회복 입력</button>';
   const staleObservation = survival?.manaObservationStale;
   const staleNote = staleObservation ? '<p data-role="stale-mana-observation">MP 회복 조건이 바뀌어 새 관측값이 필요합니다.</p>' : '';
   if(!budget)return staleNote ? staleNote+observe : '';
@@ -41,8 +41,10 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
     : survival?.manaScenarios?.find(row=>row.id==='observed'));
   const basisRows=observed?[observed]:budget.recovery;
   const assumptions=observed?budget.recovery.filter(row=>row!==observed):[];
-  const otherMana=otherBudget?.manaPerSecond;
+  const otherMana=otherBudget?.manaPerSecond, otherLife=otherBudget?.lifePerSecond;
   const compareMana=Number.isFinite(otherMana)&&otherMana!==budget.manaPerSecond;
+  const compareLife=Number.isFinite(otherLife)&&otherLife!==budget.lifePerSecond&&(otherLife>0||budget.lifePerSecond>0);
+  const otherLabel=assumed?'입력 조건':'방어 전';
   const hasLife=costs.some(row=>row.lifePerSecond>0);
   const skillCosts=costs.length?`<details data-role="manual-costs-by-skill"><summary>스킬별 초당 소모</summary>
     <table><thead><tr><th scope="col">스킬</th><th scope="col">MP/초</th>${hasLife?'<th scope="col">HP/초</th>':''}</tr></thead><tbody>
@@ -50,9 +52,10 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
   const table=(rows, inputOnly=false)=>`<table aria-label="${inputOnly?'입력 조건의 관측 MP 수지':'초당 MP 자연 회복과 차이'}"><thead><tr><th scope="col">${measured && !inputOnly ? '측정 구간 평균 자연 회복' : '자연 회복'}</th><th scope="col">MP/초</th><th scope="col">소모 대비</th></tr></thead><tbody>
     ${rows.map(row=>`<tr><th scope="row">${esc(row.label)}</th><td>${number(row.value)}</td><td data-stat="mana-balance-${esc(row.id)}">${net(row.balance)}</td></tr>`).join('')}</tbody></table>`;
   return `<section aria-label="수동 시전 자원 수급"><h3>수동 시전 자원 수급</h3><dl class="native-stat-list">
-    ${cell('MP 소모',budget.manaPerSecond,'manual-mana-total','/초')}${compareMana?cell(assumed?'입력 조건 MP 소모':'방어 전 MP 소모',otherMana,'manual-mana-other','/초'):''}${budget.lifePerSecond>0?cell('HP 소모',budget.lifePerSecond,'manual-life-total','/초'):''}</dl>
+    ${cell('MP 소모',budget.manaPerSecond,'manual-mana-total','/초')}${compareMana?cell(otherLabel+' MP 소모',otherMana,'manual-mana-other','/초'):''}
+    ${budget.lifePerSecond>0||compareLife?cell('HP 소모',budget.lifePerSecond,'manual-life-total','/초'):''}${compareLife?cell(otherLabel+' HP 소모',otherLife,'manual-life-other','/초'):''}</dl>
     ${skillCosts}${excluded.length?`<p class="native-stat-note">시전 소모 미집계 · ${excluded.map(name=>esc(name)).join(' · ')}</p>`:''}
-    ${budget.shareOverflow?`<p>시전 배분 ${number(budget.shareOverflow)}% / 최대 100%</p><button type="button" data-ss14-action="result-tab" data-tab="conditions">시전 배분 확인</button>`:''}
+    ${budget.shareOverflow?`<p>시전 배분 ${number(budget.shareOverflow)}% / 최대 100%</p><button type="button" data-ss14-action="result-tab" data-tab="conditions" data-focus-role="cast-share-allocation">시전 배분 확인</button>`:''}
     ${unknown.length?`<p class="native-stat-note">스킬 ${unknown.map(row=>row+1).join('·')}의 비용 또는 시전 횟수를 확인하세요.</p>`:''}
     ${channels.map(({rowIndex,rate,max,valid,variable})=>valid?'':Number.isFinite(rate)&&Number.isFinite(max)&&rate<=max&&variable
       ? `<p class="native-stat-note">스킬 ${rowIndex+1}의 비용이 전투 중 바뀌어 평균 차감 횟수로는 소모량을 확정할 수 없습니다.${timedCombat?' '+editChannel(rowIndex,true):''}</p>`
@@ -68,7 +71,13 @@ function manaReservationRows(rows) {
   const percent = value => Number.isFinite(value) ? number(value)+'%' : '확인 필요';
   const sourceLabel=rows.some(row=>Number.isInteger(row.supportIndex))?'스킬·보조':'오라';
   return `<table aria-label="${sourceLabel}별 MP 봉인"><thead><tr><th scope="col">${sourceLabel}</th><th scope="col">기본 봉인</th><th scope="col">적용 봉인</th></tr></thead><tbody>
-    ${rows.map(row=>`<tr data-role="mana-reservation-${row.rowIndex}${Number.isInteger(row.supportIndex)?'-support-'+row.supportIndex:''}"><th scope="row">${esc(safeName(row.name))}</th><td>${row.active===false?'—':percent(row.base)}</td><td>${row.blocked?'확인 필요':row.active===false?'꺼짐':percent(row.applied)}</td></tr>`).join('')}</tbody></table>`;
+    ${rows.map(row=>{
+      const support=Number.isInteger(row.supportIndex);
+      const name=esc(safeName(row.name));
+      return `<tr data-role="mana-reservation-${row.rowIndex}${support?'-support-'+row.supportIndex:''}">
+        <th scope="row"><button type="button" data-ss14-action="inspect-socket" data-row="${row.rowIndex}" data-index="${row.supportIndex??-1}" aria-label="${name} ${support?'보조':'오라'} 편집">${name}</button></th>
+        <td>${row.active===false?'—':percent(row.base)}</td><td>${row.blocked?'확인 필요':row.active===false?'꺼짐':percent(row.applied)}</td></tr>`;
+    }).join('')}</tbody></table>`;
 }
 const signed = v => `${v > 0 ? "+" : ""}${number(v)}`;
 function sourceValue(source, stat) {

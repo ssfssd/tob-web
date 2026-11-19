@@ -1069,7 +1069,7 @@ export function renderNativeDps(s) {
   const active = s.resultTab ?? 'stats';
   const showEstimate = s.report.assumedDps?.supported && !dps.supported && !s.pending.size;
   const hasSkill = s.report.components.some(component=>component.category==='skills');
-  const blockedStatus = !hasSkill ? '스킬 미장착' : seasonDpsStatusLabel(s.report) === '입력 필요' ? '입력 필요' : '계산 보류';
+  const blockedStatus = hasSkill ? seasonDpsStatusLabel(s.report) : '스킬 미장착';
   const status = s.pending.size ? '입력 적용 대기' : dps.supported ? dps.dps.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : blockedStatus;
   const dpsLink = hasSkill && !dps.supported && !showEstimate && !s.pending.size && active !== 'calculation'
     ? button(blockedStatus === '입력 필요' ? '입력 항목 보기' : '보류 이유 보기', 'result-tab', 'data-tab="calculation" data-show-dps="true"') : '';
@@ -1085,7 +1085,7 @@ export function renderNativeDps(s) {
     analysis: () => renderResultAnalysis(s),
   };
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
-    ${mobileDpsBar(s)}
+    ${mobileDpsBar(s,esc(blockedStatus))}
     <div class="native-result-summary">${showEstimate ? renderAssumedDps(s, true) : ''}<small${showEstimate ? ' hidden' : ''}>전체 DPS</small><strong data-role="native-dps"${showEstimate ? ' hidden' : ''}>${status}</strong>
     ${renderEditDpsComparison(s, true)}
     ${dpsLink}

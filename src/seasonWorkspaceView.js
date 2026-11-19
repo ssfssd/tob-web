@@ -257,6 +257,12 @@ export function observedManaInputState(document, report) {
     : {value:value ?? '',hint:'같은 전투 조건에서 확인한 초당 자연 회복량입니다.'};
 }
 
+export function renderObservedManaInput(document,report,pendingValue) {
+  const state=observedManaInputState(document,report);
+  const {label,min,max}=SEASON_CHARACTER_INPUTS.observedManaRecovery;
+  return `<label>${label}<input type="number" min="${min}" max="${max}" step="any" data-season-edit="character-input" data-key="observedManaRecovery" aria-label="SS14 ${label}" value="${escape(pendingValue??state.value)}" /><small data-role="mana-observation-hint">${escape(state.hint)}</small></label>`;
+}
+
 export function renderBuffActivation(control,value,{binding,slot=false}={}) {
   const label=control.label.replace(/ 효과 적용 중 여부$/u,' 적용 여부');
   const attributes=binding??`data-season-edit="component-condition" data-key="${escape(control.key)}"`;
@@ -279,10 +285,10 @@ function characterControls(document, report, formValues) {
   const conditions = [...conditionGroups.values()];
   return `<fieldset><legend>SS14 자원·방어 기본 입력</legend><details><summary>기본 속성 입력 기준</summary><p>선택 장비·재능 등의 효과를 더하기 전 힘·민첩·지혜를 입력하세요. 게임 기본값으로 자동 추정하지 않습니다. 기존 SS13 전투 조건은 보존하되 이 입력과 섞지 않습니다.</p></details>
     ${Object.entries(SEASON_CHARACTER_INPUTS).map(([key, field]) => {
-      const observation = key==='observedManaRecovery' ? observedManaInputState(document,report) : null;
-      const saved = observation?.value ?? document.targetBuild.ss14Inputs.character?.[key] ?? '';
+      if(key==='observedManaRecovery')return renderObservedManaInput(document,report,formValues[`character-input:${key}`]);
+      const saved = document.targetBuild.ss14Inputs.character?.[key] ?? '';
       const value = formValues[`character-input:${key}`] ?? saved;
-      return `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(value)}" />${observation?`<small data-role="mana-observation-hint">${escape(observation.hint)}</small>`:''}</label>`;
+      return `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(value)}" /></label>`;
     }).join("")}</fieldset>
     ${conditions.length || nearby ? `<fieldset><legend>효과 조건</legend><details><summary>조건 적용 기준</summary><p>같은 조건을 쓰는 효과에는 한 번만 입력하면 됩니다.</p><p id="season-stack-scope">축복 자체의 기본 효과까지 연결하려면 별도의 축복 현재 중첩 입력 3종을 확인하세요.</p></details>${nearby}${conditions.map(([c,...shared], index) => {
       const value = formValues[`component-condition:${c.key}`] ?? c.value;
@@ -439,9 +445,12 @@ export function renderFixedNumbedField(build,report,value) {
   if(!usesTargetNumbedInput(build,report))return '';
   const gearCondition=report.components.some(row=>row.category==='gear'&&row.calculations?.some(entry=>
     entry.conditionControls?.some(control=>control.numbedMinimum>0)));
+  const relevantDps=[report.fullDps,report.assumedDps].some(dps=>
+    dps?.rows?.some(row=>row.minionDamageByType?.lightning>0)
+    || dps?.blockers?.some(reason=>reason.includes(SEASON_DPS_ENEMY_FIELDS.numbedStacks.label)));
   if(value==null&&!gearCondition&&!report.coupledSkills.rows.some(row=>
     [row.offenseBasis?.pools,row.offenseBasis?.dotPools].some(pools=>pools?.some(pool=>pool.type==='lightning'&&pool.max>0)))
-    && !report.fullDps.blockers.some(reason=>reason.includes(SEASON_DPS_ENEMY_FIELDS.numbedStacks.label)))return '';
+    && !relevantDps)return '';
   return renderSeasonDpsField('enemy:numbedStacks',SEASON_DPS_ENEMY_FIELDS.numbedStacks,value??'','전투 조건');
 }
 function dpsControls(document, report, formValues, showDummy = false) {

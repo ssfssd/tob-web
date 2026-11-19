@@ -1,6 +1,6 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition } from './seasonDps.js';
-import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput } from './seasonWorkspaceView.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDotWindowRepairs } from './seasonDps.js';
+import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, renderObservedManaInput } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
 import { inputDestinations } from './seasonInputRequirements.js';
@@ -181,16 +181,25 @@ export function renderResultConditions(s) {
   const hasManualConditions = hasSeasonDpsConditionOverrides(inputs.dps)
     || Object.keys(inputs.componentConditions ?? {}).length > 0
     || Object.values(inputs.supports ?? {}).some(binding => Object.keys(binding.conditions ?? {}).length > 0);
-  const shareOverflow=s.report.fullDps.manualResources?.shareOverflow;
+  const shareOverflow=s.report.fullDps.manualResources?.shareOverflow??s.report.assumedDps?.manualResources?.shareOverflow;
+  const shareSlots=s.report.coupledSkills.rows.filter(row=>skillConditionKeys(s,row.rowIndex,row.id).includes('useShare'))
+    .map(({rowIndex,id})=>({rowIndex,id,value:inputs.dps?.skills?.[rowIndex]?.useShare}));
+  const showShares=shareSlots.length>1||Boolean(shareOverflow);
+  const shareTotal=shareOverflow??shareSlots.reduce((sum,{value})=>sum+(Number.isFinite(value)?value:0),0);
+  const missingShare=shareSlots.some(({value})=>!Number.isFinite(value));
+  const castShares=showShares?`<fieldset><legend>스킬별 시전 시간 배분</legend>
+    <p data-role="cast-share-allocation" tabindex="-1"${shareOverflow?' role="status"':''}>${missingShare?'입력된 ':''}시전 배분 ${number(shareTotal)}% / 최대 100%</p>
+    ${shareSlots.map(({rowIndex,id,value})=>renderSeasonDpsField(`${rowIndex}:useShare`,{...SEASON_DPS_SKILL_FIELDS.useShare,
+      label:`${rowIndex+1}번 칸 · ${SS14_CARDS.records[id]?.name??'스킬'} 시전 시간 배분 (%)`},value,'시전 배분')).join('')}
+    </fieldset>`:'';
   const periodicBurst=hasPeriodicBurstSupport(s.report.components);
   const sharedDots=s.report.fullDps.dotAllocationGroups??[];
   const sharedReaping=s.report.fullDps.reapingAllocationGroups??[];
-  const overlaps=s.report.fullDps.dotWindowConflicts??s.report.assumedDps?.dotWindowConflicts??[];
-  const outOfBounds=s.report.fullDps.dotWindowBounds??s.report.assumedDps?.dotWindowBounds??[];
+  const {overlaps,bounds:outOfBounds}=seasonDotWindowRepairs(s.report);
   const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
   const windowAssignments=overlaps.map(({id,start,stop,slots})=>{
     const name=SS14_CARDS.records[id]?.name??'지속 대미지';
-    return `<fieldset data-role="dot-window-overlap-${esc(id)}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
+    return `<fieldset tabindex="-1" data-role="dot-window-overlap-${esc(id)}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
       <p>겹친 시간에 대미지를 준 슬롯을 선택하세요.</p>
       ${slots.map(index=>button(`${index+1}번 칸에 배정`,'assign-dot-window',`data-key="${esc(id)}" data-start="${start}" data-stop="${stop}" data-index="${index}"`)).join('')}</fieldset>`;
   }).join('');
@@ -198,7 +207,7 @@ export function renderResultConditions(s) {
     const ranges=outOfBounds.filter(bound=>bound.rowIndex===rowIndex);
     const {end}=ranges[0];
     const labels=ranges.map(({start,stop})=>`${time(start)}–${time(stop)}초`).join(', ');
-    return `<div class="native-stat-note" data-role="dot-window-bound-${rowIndex}"><p>${rowIndex+1}번 칸 · ${labels} 구간이 측정 종료 ${time(end)}초를 넘습니다.</p>
+    return `<div class="native-stat-note" tabindex="-1" data-role="dot-window-bound-${rowIndex}"><p>${rowIndex+1}번 칸 · ${labels} 구간이 측정 종료 ${time(end)}초를 넘습니다.</p>
       ${button('측정 종료까지만 유지','trim-dot-window',`data-index="${rowIndex}" data-end="${end}"`)}
       ${button('적용 구간 수정','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${rowIndex}:dotWindows"`)}</div>`;
   }).join('');
@@ -221,7 +230,7 @@ export function renderResultConditions(s) {
   }).join('');
   const skillFields = s.report.coupledSkills.rows.filter(row => row.rowIndex < 5).map(row => {
     const component = s.report.components.find(c => c.category === 'skills' && c.id === row.id);
-    const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!sharedDots.some(group=>
+    const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!(key==='useShare'&&showShares)&&!sharedDots.some(group=>
       group.slots.some(slot=>slot.rowIndex===row.rowIndex&&(key===slot.field||key==='dotExclusive')))
       && !(key==='reapingOverlap'&&sharedReaping.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex))));
     const dpsRow=s.report.fullDps.rows.find(entry=>entry.rowIndex===row.rowIndex);
@@ -233,8 +242,7 @@ export function renderResultConditions(s) {
     if (!keys.length&&!observedCosts) return '';
     const minionMaximum = dpsRow?.minionMaximum;
     const sharedCommand = s.report.fullDps.observedCommandRow === row.rowIndex;
-    const expanded=shareOverflow&&inputs.dps?.skills?.[row.rowIndex]?.useShare>0;
-    return `<details data-role="dock-skill-conditions-${row.rowIndex}"${expanded?' open':''}><summary>${row.rowIndex === 0 ? '주력' : '액티브 ' + (row.rowIndex+1)} · ${esc(component.name)}</summary>
+    return `<details data-role="dock-skill-conditions-${row.rowIndex}"><summary>${row.rowIndex === 0 ? '주력' : '액티브 ' + (row.rowIndex+1)} · ${esc(component.name)}</summary>
       ${keys.map(key=>renderSeasonDpsField(`${row.rowIndex}:${key}`, seasonDpsSkillFieldDefinition(row.id,key,row.terraChargeMaximum), inputs.dps?.skills?.[row.rowIndex]?.[key], '조건 탭', {minionMaximum,sharedCommand})).join('')}
       ${observedCosts}
       ${button('스킬 계산 보기','result-tab',`data-tab="calculation" data-index="${row.rowIndex}" data-focus-role="calculation-skill"`)}</details>`;
@@ -248,11 +256,13 @@ export function renderResultConditions(s) {
       return `<div><dt><label for="dock-enemy-${key}">${esc(def.label)}</label></dt><dd><input id="dock-enemy-${key}" type="number" step="any" min="${def.min}" max="${def.max}" data-season-edit="dps-input" data-key="enemy:${key}" value="${esc(inputs.dps?.enemy?.[key])}" placeholder="미입력"></dd></div>`;
     }).join('')}</dl></details>
     ${renderFixedNumbedField(build,s.report,inputs.dps?.enemy?.numbedStacks)}
+    <details data-role="dock-mana-observation"><summary>관측 MP 자연 회복</summary>${renderObservedManaInput(s.document,s.report)}</details>
     ${periodicBurst ? renderSeasonDpsField(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(inputs.dps),'조건 탭') : ''}
     ${windowBounds}${windowAssignments}
     ${allocations}
     ${reapingAllocations}
-    ${skillFields ? `${shareOverflow?`<p role="status">시전 배분 ${number(shareOverflow)}% / 최대 100%</p>`:''}<details data-role="dock-skill-conditions"${shareOverflow?' open':''}><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}
+    ${castShares}
+    ${skillFields ? `<details data-role="dock-skill-conditions"><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}
     <details data-role="dock-more-conditions"><summary>추가 전투 조건</summary>
     ${edit('대상·스킬 조건 전체', 'season-dps-input')}${edit('기본 속성', 'season-character-input')}${edit('기본 크리티컬', 'native-critical-input')}${edit('축복 중첩', 'native-blessing-input')}
     ${inputs.theaCycle || s.report.theaAverage ? `<h2>티아1 은총</h2><p>${inputs.theaCycle?.mode === 'automatic' ? `자동 주기 평균 · ${number(inputs.theaCycle.seconds)}초` : '현재 상태 직접 설정'}</p>
@@ -295,17 +305,34 @@ function renderUpgradeRanking(s){
     const metricLabel=job.metric==='assumedDps'?'방어 전 DPS':'전체 DPS';
     const skillMetricLabel=job.metric==='assumedDps'?'선택 스킬 방어 전 DPS':'선택 스킬 DPS';
     const signed=n=>(n>0?'+':'')+number(n);
-    const candidate=(r,index,label)=>`<strong>${esc(r.label)}</strong>${r.detail?`<div>${esc(r.detail)}</div>`:''}
+    const candidate=(r,index,label)=>{
+      const labels={before:'변경 전',after:'변경 후'};
+      const breakdown=r.breakdown?renderDamageBreakdown(r.breakdown,esc,labels)
+        +renderDamageRouteChanges(r.breakdown.damageRoutes,{...labels,role:`ranking-damage-routes-${index}`}):'';
+      const levels=renderSkillLevelChanges(r.levels??[],esc,labels);
+      const damage=breakdown+levels;
+      return `<strong>${esc(r.label)}</strong>${r.detail?`<div>${esc(r.detail)}</div>`:''}
       ${r.optionChanges?.length?`<details><summary>변경 ${r.optionChanges.length}건</summary><ul>${r.optionChanges.map(change=>`<li>${esc(change)}</li>`).join('')}</ul></details>`:''}
       ${r.skillImpact?`<div>${skillMetricLabel} ${number(r.skillImpact.base)} → <b>${number(r.skillImpact.value)}</b></div>
       <strong class="native-comparison-delta">${signed(r.skillImpact.delta)} DPS</strong>
       <div class="native-stat-note">${metricLabel} ${number(job.base)} → ${number(r.value)} (${signed(r.delta)})</div>`:
         `<div>${metricLabel} ${number(job.base)} → <b>${number(r.value)}</b></div><strong class="native-comparison-delta">+${number(r.delta)} DPS${r.percent==null?'':' (+'+number(r.percent)+'%)'}</strong>`}
+      ${damage?`<details data-role="ranking-damage-changes"><summary>대미지 변화</summary>${damage}</details>`:''}
+      ${r.resources?renderResourceChanges({...r.resources,dpsBasis:job.metric},esc,{board:true}):''}
       ${r.hypothetical?'':r.saved?(s.dirty?'사본 저장됨':button('저장된 사본 열기','open',`data-id="${esc(r.saved)}"`)):button('사본에 적용','rank-copy',`data-index="${index}" aria-label="${label} 사본에 적용"`)}`;
+    };
     const rows=job.rows.map((r,i)=>`<li>${candidate(r,i,(i+1)+'위')}</li>`).join('');
-    const blockedSkills=job.blockedSkills?.map((row,index)=>`<li data-blocked-skill-name="${esc(row.label)}"><details><summary>${esc(row.label)}</summary>
-      <ul>${row.reasons.map(reason=>`<li>${esc(reason.replace(/^현재: /u,''))}</li>`).join('')}</ul>
-      ${row.canOpen?button('시험 사본 열기','rank-skill-trial',`data-index="${index}" aria-label="${esc(row.label)} 시험 사본 열기"`):''}</details></li>`).join('');
+    const blockedType=skillReplacement?'스킬':'장비';
+    const candidateReason=reason=>{
+      const text=reason.replace(/^현재: /u,'');
+      const effect=/^(조건·대상·수치 미확인|전체 공격 계산에 연결되지 않은 효과): (.+)$/su.exec(text);
+      return effect&&(!/[가-힣]/u.test(effect[2])||/\p{Script=Han}/u.test(effect[2]))
+        ? effect[1]+' · 한국어 원문 미제공' : text;
+    };
+    const blockedCandidates=(skillReplacement?job.blockedSkills:job.blockedGear)?.map((row,index)=>`<li data-blocked-candidate-name="${esc(row.label+' '+(row.detail??''))}"><details><summary>${esc(row.label)}${row.needsInput?' · 입력 필요':''}</summary>
+      ${row.detail?`<p>${esc(row.detail)}</p>`:''}
+      <ul>${[...new Set(row.reasons.map(candidateReason))].map(reason=>`<li>${esc(reason)}</li>`).join('')}</ul>
+      ${row.canOpen?button('시험 사본 열기',skillReplacement?'rank-skill-trial':'rank-gear-trial',`data-index="${index}" aria-label="${esc(row.label)} 시험 사본 열기"`):''}</details></li>`).join('');
     const resources=job.resources?.map(r=>`<li><span>${esc(r.label)} · ${r.from} → ${r.to}<br><small>${metricLabel} ${number(r.fromDps)} → ${number(r.toDps)}</small></span><b>${signed(r.delta)} DPS</b></li>`).join('');
     const empty=equipment&&job.assembled?'한 부위만 바꿔 DPS가 오르는 후보 없음'
       :job.checked===0?'선택한 대상에 비교할 후보 없음':job.checked===job.blocked?'비교 가능한 후보 없음':(job.skillIndex!=null?skillMetricLabel:metricLabel)+'가 오르는 후보 없음';
@@ -315,19 +342,20 @@ function renderUpgradeRanking(s){
       ${job.assembled?`<article class="upgrade-combination">${candidate(job.assembled,'assembled','옵션 조합')}</article>`:''}
       ${resources?`<details><summary>자원 1단위당 DPS</summary><ul class="upgrade-resource-list">${resources}</ul></details>`:''}
       ${job.blockedReasons?.length?`<details data-role="ranking-exclusions"><summary>비교 보류 ${job.blocked}건</summary>
-      ${blockedSkills?`<label>보류 스킬 검색<input type="search" data-blocked-skill-filter></label><p data-blocked-skill-empty role="status" hidden>검색 결과 없음</p>
-      <ul class="upgrade-blocked-skills" aria-label="보류 스킬">${blockedSkills}</ul>`:''}
+      ${blockedCandidates?`<label>보류 ${blockedType} 검색<input type="search" data-blocked-candidate-filter></label><p data-blocked-candidate-empty role="status" hidden>검색 결과 없음</p>
+      <ul class="upgrade-blocked-skills" aria-label="보류 ${blockedType}">${blockedCandidates}</ul>`:''}
       <ul>${job.blockedReasons.map(r=>`<li>${esc(r.reason)} · ${r.count}건</li>`).join('')}</ul></details>`:''}`;
   }
   return `<section aria-label="전체 DPS 추천"><h2>DPS 분석</h2>
     <label>분석 유형<select data-upgrade-group>${Object.entries(UPGRADE_GROUPS).map(([key,label])=>`<option value="${key}"${key===group?' selected':''}>${label}</option>`).join('')}</select></label>
     ${equipment||group==='gear'||group==='craft'?`<label>장비 부위<select ${replacement?'data-replacement-slot':'data-upgrade-slot'}>${slots((replacement?s.replacementSlot:s.upgradeSlot)??'all')}</select></label>`:''}
     ${equipment?`<label>후보 출처<select data-upgrade-source>${Object.entries(GEAR_UPGRADE_SOURCES).map(([key,label])=>`<option value="${key}"${key===source?' selected':''}>${label}</option>`).join('')}</select></label>`:''}
+    ${equipment&&source!=='shelf'?`<label class="analysis-roll-toggle"><input type="checkbox" data-upgrade-corrosion${s.includeUpgradeCorrosion?' checked':''}>침식 효과도 비교</label>`:''}
     ${replacement&&source==='shelf'&&(s.replacementSlot??'all')==='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-equipment${s.assembleEquipment?' checked':''}>보관함 장비 조합도 비교</label>`:''}
     ${group==='gear'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-rolls${s.assembleRolls?' checked':''}>현재 옵션의 범위 조합 비교</label>`:''}
     ${group==='craft'&&s.upgradeSlot&&s.upgradeSlot!=='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-craft${s.assembleCraft?' checked':''}>제작 옵션 조합도 비교</label>`:''}
     ${skillAnalysis?`<label>액티브 스킬<select data-upgrade-skill><option value="all"${skillReplacement?' disabled':''}${chosenSkill?'':' selected'}>${skillReplacement?'교체할 스킬 칸 선택':'전체 액티브'}</option>${skillOptions.map(({id,label})=>`<option value="${id}"${id===s.upgradeSkill?' selected':''}>${esc(label)}</option>`).join('')}${skillUnavailable&&!skillReplacement?`<option value="" selected disabled>분석할 스킬을 다시 선택하세요</option>`:''}</select></label>`:''}
-    ${button('분석 시작',replacement?'rank-gear':'rank-options',job?.busy||skillUnavailable?'disabled':'')}
+    ${button('분석 시작',replacement?'rank-gear':'rank-options',s.pending.size||job?.busy||skillUnavailable?'disabled':'')}
     <div data-upgrade-results>${content}</div>
     <details><summary>분석 기준</summary><p>${skillReplacement?'같은 칸에서 기본 레벨, 시전 시간 배분, 적중률을 유지하고 전체 빌드 DPS를 비교합니다. 연결할 수 없는 보조는 해제됩니다.':group==='unit'?'SS14에서 확인한 옵션을 하나씩 1단위 추가해 계산합니다.':equipment?'도감은 옵션 범위 상한, 보관함은 저장된 수치를 사용합니다.':group==='gearImpact'?'장비를 한 부위씩 해제해 DPS와 MP·HP 변화를 비교합니다.':group==='gear'?'옵션 수치를 한 단위씩 바꿉니다. 범위 조합은 양 끝값을 차례로 비교합니다.':group==='craft'?'제작창의 T1 기본값을 사용합니다. 한 부위의 조합은 가장 큰 상승을 주는 변경부터 한 칸씩 적용해 다시 비교합니다.':'선택한 수치나 레벨을 한 단계 바꿔 DPS를 비교합니다.'}</p></details></section>`;
 }
@@ -754,7 +782,8 @@ export function renderNumbedCalculation(s) {
       ...dotContributions(fixedContribution('fixedNumbedDotDps'),fixedContribution('fixedNumbedReapingDps')),
       ...minionContribution('fixedNumbedMinionDps'),
     ])+(report.coupledSkills.rows.some(row=>row.voltageJolt)?'<p class="native-stat-note">혼비백산을 사용한 전투에서 관측한 대상 중첩을 적용합니다.</p>':'')
-      +button('마취 조건 편집','requirement',`data-section="combat" data-field="${fixed.sourceKey?'component-condition':'dps-input'}" data-field-key="${esc(fixed.sourceKey??'enemy:numbedStacks')}"`),'numeric-numbed');
+      +(fixed.sourceKey?button('마취 조건 편집','requirement',`data-section="combat" data-field="component-condition" data-field-key="${esc(fixed.sourceKey)}"`)
+        :button('마취 조건 편집','result-tab','data-tab="conditions" data-field="dps-input" data-field-key="enemy:numbedStacks"')),'numeric-numbed');
   }
   const cycle=report.theaAverage;
   const stats=assumed?report.assumedDps.numbed:{

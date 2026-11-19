@@ -8,12 +8,14 @@ import {calculateSeasonBuild, seasonGearSlotRollEntry} from './seasonBuild.js';
 import {compareSeasonDpsSnapshots, preferredSeasonDpsMetric} from './seasonAdvisor.js';
 import {labeledGearRolls} from './seasonWorkspaceView.js';
 import {craftFamilySlots, craftOptions, itemGearKind} from './seasonItemCraft.js';
+import {corrosionBasePool,corrosionOptions} from './seasonCorrosion.js';
+import {inputDestinations} from './seasonInputRequirements.js';
 import {editItemWorkshop} from './seasonItemWorkshop.js';
 import {captureShelf} from './seasonShelf.js';
 import {boundBlessingStacks,blessingConditionValue} from './seasonBlessings.js';
 import {theaState} from './seasonTheaState.js';
 import {seasonUnitOptionLines} from './seasonComponents.js';
-import {compareSeasonResourceCosts,gearOptionComparisons} from './seasonGearPicker.js';
+import {compareSeasonDamageBreakdown,compareSeasonResourceCosts,compareSeasonSkillLevels,gearOptionComparisons} from './seasonGearPicker.js';
 import {describeSeasonOptionChange} from './seasonNumericStatsView.js';
 import {FIXED_NUMBED_FIELD} from './seasonNetherModifiers.js';
 
@@ -90,7 +92,7 @@ function optionCandidates(document,report,group,slot,skill,rangeBounds=false){
   return rows;
 }
 
-function gearCandidates(document,slot,shelf,legendaryOnly,source,allowOffhand=false){
+function gearCandidates(document,slot,shelf,legendaryOnly,source,allowOffhand=false,includeCorrosion=false){
   const gear=normalizeBuild(document.targetBuild).gear.slots, rows=[];
   for(const [slotIndex,name] of SEASON_GEAR_SLOT_LABELS.entries()){
     if(slot!=='all' && Number(slot)!==slotIndex)continue;
@@ -100,7 +102,25 @@ function gearCandidates(document,slot,shelf,legendaryOnly,source,allowOffhand=fa
     const before=current?(choices.get(current)??'현재 장비'):'미장착';
     if(source!=='shelf')for(const [id,title] of choices){
       if(legendaryOnly && itemGearKind(id)!=='legendary')continue;
-      if(id!==current)rows.push({label:name+' · '+title,detail:before+' → '+title+' (도감)',catalog:true,edits:[{kind:'gear-selection',slotIndex,value:id}]});
+      const selection={kind:'gear-selection',slotIndex,value:id};
+      const detail=before+' → '+title+' (도감)';
+      const label=name+' · '+title;
+      if(id!==current)rows.push({label,detail,catalog:true,edits:[selection]});
+      if(!includeCorrosion||itemGearKind(id)!=='legendary')continue;
+      const binding=id===current?document.targetBuild.ss14Inputs?.gear?.[slotIndex]:null;
+      if(binding?.logGear||id===current&&(gear[slotIndex].corrupted||gear[slotIndex].affixText?.trim()
+        ||gear[slotIndex].legendaryDraft?.corrodedSlotIds?.length||Object.keys(gear[slotIndex].crafts??{}).length))continue;
+      const variantDetail=id===current?'장착 중인 장비':detail;
+      for(const option of corrosionOptions(id)){
+        if(binding?.corrosion?.selected?.includes(option.base))continue;
+        rows.push({label:label+' · 침식',detail:variantDetail+' · '+option.corroded.replace(/\s+/gu,' '),catalog:true,
+          edits:[selection,{kind:'gear-corrosion',slotIndex,key:option.base,value:true}]});
+      }
+      for(const option of corrosionBasePool(id)?.rows??[]){
+        if(binding?.corrosion?.implicit?.id===option.id)continue;
+        rows.push({label:label+' · 침식 기본',detail:variantDetail+' · '+option.ko.replace(/\s+/gu,' '),catalog:true,
+          edits:[selection,{kind:'gear-corrosion-base',slotIndex,value:option.id}]});
+      }
     }
     if(source!=='catalog')for(const item of shelf)if(item.kind==='gear'&&choices.has(item.item?.itemId)&&(!legendaryOnly || itemGearKind(item.item.itemId)==='legendary'))
       rows.push({label:name+' · '+item.name,detail:before+' → '+item.name+' (보관함 저장 수치)',edits:[{kind:'shelf-apply',slotIndex,value:item}]});
@@ -161,8 +181,8 @@ function wornGearCandidates(document, report) {
 }
 
 function sameGearOptionChanges(edit, document, before, after) {
-  if(edit.kind!=='shelf-apply' || edit.value.kind!=='gear'
-    || document.targetBuild.gear?.slots?.[edit.slotIndex]?.itemId!==edit.value.item.itemId) return [];
+  const id=edit.kind==='gear-selection'?edit.value:edit.value?.kind==='gear'?edit.value.item.itemId:null;
+  if(!id||document.targetBuild.gear?.slots?.[edit.slotIndex]?.itemId!==id)return [];
   return gearOptionComparisons(before,after,[edit.slotIndex]).map(describeSeasonOptionChange).filter(Boolean);
 }
 
@@ -204,6 +224,16 @@ function craftCandidateDetail(candidate, report) {
 const calculate=(document,metric)=>(metric==='assumedDps'?calculateEditorSeasonBuild:calculateSeasonBuild)
   (document.targetBuild,{sourceBuild:document.sourceBuild});
 const skillDpsRow = (report, metric, index) => report[metric]?.rows?.find(row=>row.rowIndex===index);
+function upgradeDetails(before,after,metric){
+  const breakdown=compareSeasonDamageBreakdown(before,after,metric);
+  const [only]=breakdown.skillDpsChanges;
+  // The card already shows the full DPS pair when one unchanged skill accounts for all of it.
+  if(breakdown.skillDpsChanges.length===1&&only.beforeId===only.afterId
+    &&only.from.toFixed(2)===before[metric].dps.toFixed(2)&&only.to.toFixed(2)===after[metric].dps.toFixed(2))
+    breakdown.skillDpsChanges=[];
+  return {breakdown:{...breakdown,dpsBasis:metric},levels:compareSeasonSkillLevels(before,after),
+    resources:compareSeasonResourceCosts(before,after,metric,{allActive:true})};
+}
 function resourceCandidates(document,report){
   const build=document.targetBuild, candidates=[], groups=new Set();
   const stacks=boundBlessingStacks(build);
@@ -234,18 +264,21 @@ function resourceCandidates(document,report){
   }
   return candidates;
 }
-export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',active=()=>true,progress=()=>{}}={}){
+export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',includeCorrosion=false,active=()=>true,progress=()=>{}}={}){
   const metric=preferredSeasonDpsMetric(report);
   const base={document,report},baseline=compareSeasonDpsSnapshots(base,base,metric);
   const result={metric,rows:[],resources:[],checked:0,blocked:0,total:0,reasons:baseline.reasons,base:baseline.baseValue};
   const skillReplacement=group==='skillReplacement';
+  const equipment=mode==='gear'||group==='replacement'||group==='legendary';
   if(skillReplacement)result.blockedSkills=[];
+  if(equipment)result.blockedGear=[];
   const reasonCounts=new Map();
-  function block(reasons,candidate=null,canOpen=false){
+  function block(reasons,candidate=null,canOpen=false,needsInput=false){
     result.blocked++;
     const unique=[...new Set(reasons)];
     for(const reason of unique)reasonCounts.set(reason,(reasonCounts.get(reason)??0)+1);
     if(skillReplacement&&candidate)result.blockedSkills.push({...candidate,reasons:unique,canOpen});
+    if(equipment&&candidate)result.blockedGear.push({...candidate,reasons:unique,canOpen,needsInput});
   }
   const selectedSkill=group==='skills'||skillReplacement?String(skill):'all';
   if(skillReplacement&&selectedSkill==='all'){
@@ -270,13 +303,12 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
   const impact = group==='gearImpact';
   const unit = group==='unit';
   if(impact)result.impacts=[];
-  const equipment=mode==='gear'||group==='replacement'||group==='legendary';
   if(equipment&&!Object.hasOwn(GEAR_UPGRADE_SOURCES,source))throw Error('장비 추천의 후보 출처를 선택하세요.');
   const existingOptions=document.targetBuild.customAffixes?.trimEnd();
   const candidates=impact?wornGearCandidates(document,report)
     :unit?seasonUnitOptionLines().map(label=>({label,
       edits:[{kind:'custom-options',value:existingOptions?existingOptions+'\n'+label:label}]}))
-    :equipment?gearCandidates(document,slot,shelf,group==='legendary',source)
+    :equipment?gearCandidates(document,slot,shelf,group==='legendary',source,false,includeCorrosion)
     :group==='craft'?craftCandidates(document,slot)
     :skillReplacement?skillReplacementCandidates(document,report,selectedIndex)
     :optionCandidates(document,report,group,slot,selectedSkill);
@@ -331,7 +363,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
           next=editSeasonWorkspace(next,roll);
           candidate.edits.push(roll);
         }
-      }catch(error){block([error.message]);continue;}
+      }catch(error){block([error.message],candidate);continue;}
       if(rolls.length){
         candidate.detail+=' · '+rolls.map(c=>c.label+' '+c.max).join(' / ');
       }
@@ -346,7 +378,12 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       if(!supported)block(reasons);
       continue;
     }
-    if(!comparison.supported){block(comparison.reasons,candidate,true);continue;}
+    if(!comparison.supported){
+      const needsInput=equipment&&comparison.reasons.some(reason=>reason.startsWith('현재: ')
+        &&inputDestinations(after,reason.slice(4),after[metric]).some(link=>link.edit&&link.key));
+      block(comparison.reasons,candidate,true,needsInput);
+      continue;
+    }
     let skillImpact;
     if(selectedRow&&!skillReplacement){
       const row=skillDpsRow(after,metric,selectedRow.rowIndex);
@@ -362,13 +399,14 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       const option = unit ? {label:candidate.label,hypothetical:true} : candidate;
       const optionChanges = equipment?sameGearOptionChanges(candidate.edits[0],document,report,after):[];
       result.rows.push({...option,metric,value:comparison.value,delta:comparison.delta,percent:comparison.percent,
+        ...(!unit&&upgradeDetails(report,after,metric)),
         ...(optionChanges.length&&{optionChanges}),
         ...(skillImpact&&{skillImpact})});
       result.rows.sort((a,b)=>rankDelta(b)-rankDelta(a)||a.label.localeCompare(b.label,'ko'));
       if(result.rows.length>20)result.rows.pop();
     }
   }
-  let combined=document,combinedValue=baseline.value;
+  let combined=document,combinedValue=baseline.value,combinedReport=report;
   const edits=[],changes=[];
   for(const range of ranges){
     let best=null;
@@ -378,16 +416,18 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       const edit={...range.edit,value};
       let next;
       try{next=editSeasonWorkspace(combined,edit);}catch(error){block([error.message]);continue;}
-      const check=compareSeasonDpsSnapshots(base,{document:next,report:calculate(next,metric)},metric);
+      const after=calculate(next,metric);
+      const check=compareSeasonDpsSnapshots(base,{document:next,report:after},metric);
       if(!check.supported){block(check.reasons);continue;}
-      if(check.value>(best?.value??combinedValue))best={document:next,value:check.value,edit};
+      if(check.value>(best?.value??combinedValue))best={document:next,value:check.value,edit,after};
     }
     if(best){
-      combined=best.document;combinedValue=best.value;edits.push(best.edit);
+      combined=best.document;combinedValue=best.value;combinedReport=best.after;edits.push(best.edit);
       changes.push(range.label+' '+range.current+' → '+best.edit.value);
     }
   }
-  if(edits.length)result.assembled={label:'장비 옵션 조합',detail:changes.join(' / '),edits,metric,value:combinedValue,delta:combinedValue-baseline.value};
+  if(edits.length)result.assembled={label:'장비 옵션 조합',detail:changes.join(' / '),edits,metric,value:combinedValue,delta:combinedValue-baseline.value,
+    ...upgradeDetails(report,combinedReport,metric)};
   if(equipment && assemble && source==='shelf' && slot==='all'){
     const [single]=result.rows;
     let seed=single && {edits:single.edits,details:[single.detail.replace(/ · 서브 무기 해제$/u,'')],value:single.value};
@@ -414,7 +454,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     const selectedSlots=new Set(combination.map(edit=>edit.slotIndex));
     const selectedItems=new Set(combination.map(edit=>edit.value.id));
     combined=seed?.next??combination.reduce(editSeasonWorkspace,document);
-    let combinedReport=seed?.after??(seed?calculate(combined,metric):report);
+    combinedReport=seed?.after??(seed?calculate(combined,metric):report);
     combinedValue=seed?.value??baseline.value;
     const details=combination.flatMap((edit,index)=>{
       const removedOffhand=edit.slotIndex===0 && gear[1]?.itemId && !combined.targetBuild.gear.slots[1]?.itemId;
@@ -449,7 +489,8 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       combinedValue=best.value;
     }
     if(combination.length>1)result.assembled={label:'보관함 장비 조합',optionChanges:details,edits:combination,
-      metric,value:combinedValue,delta:combinedValue-baseline.value};
+      metric,value:combinedValue,delta:combinedValue-baseline.value,
+      ...upgradeDetails(report,combinedReport,metric)};
   }
   if(!equipment && group==='craft' && assemble && slot!=='all' && result.rows.length){
     const first=result.rows[0], slotIndex=first.craft.slotIndex;
@@ -476,13 +517,15 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       if(!best)break;
       combined=best.next;
       combinedValue=best.value;
+      combinedReport=best.after;
       used.add(position(best.candidate));
       details.push(`${best.candidate.label} · ${craftCandidateDetail(best.candidate,best.after)}`);
       crafts.push(best.candidate.craft);
     }
     if(details.length>1)result.assembled={label:'제작 옵션 조합',optionChanges:details,
       edits:[{kind:'shelf-apply',slotIndex,value:captureShelf(combined.targetBuild,'gear',slotIndex)}],
-      metric,value:combinedValue,delta:combinedValue-baseline.value,crafts};
+      metric,value:combinedValue,delta:combinedValue-baseline.value,crafts,
+      ...upgradeDetails(report,combinedReport,metric)};
   }
   result.blockedReasons=[...reasonCounts].sort((a,b)=>b[1]-a[1]).map(([reason,count])=>({reason,count}));
   return result;
@@ -496,6 +539,13 @@ function applyCandidateToCopy(document,row,suffix){
 
 export function copySeasonSkillTrial(document,row){
   if(!row?.canOpen||row.edits[0]?.kind!=='skill-selection')throw Error('열 수 있는 스킬 후보를 선택하세요.');
+  return applyCandidateToCopy(document,row,' 시험 사본');
+}
+
+export function copySeasonGearTrial(document,row){
+  const selection=row?.edits[0];
+  if(!row?.canOpen||(selection?.kind!=='gear-selection'&&!(selection?.kind==='shelf-apply'&&selection.value?.kind==='gear')))
+    throw Error('열 수 있는 장비 후보를 선택하세요.');
   return applyCandidateToCopy(document,row,' 시험 사본');
 }
 

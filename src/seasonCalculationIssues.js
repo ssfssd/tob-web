@@ -12,6 +12,7 @@ export function seasonIssueCause(value) {
   if (/^unsupported-nonnumeric-mechanic-or-flavor$|호환 조건·효과 해석 미완료/u.test(reason)) return 'unresolved';
   if (/^range-value-requires-selected-roll$|^attack-base-damage-unavailable$/u.test(reason)) return 'input';
   if (reason === '추가 번개 대미지의 최소·최대 값을 모두 확인하세요.') return 'input';
+  if (/^동일 지속 스킬의 중첩 구간을 한 번씩만 센 유지율 합계|^같은 지속 스킬의 수확 겹침 비율 합계|^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간).*복합 계산을 켜세요/u.test(reason)) return 'input';
   if (reason === 'added-damage-effectiveness-unavailable' || /이 레벨의 추가 대미지 효율을 확인할 수 없습니다/u.test(reason)) return 'source';
   if (/^spell-base-damage-unavailable$|^level-formula-pattern-unsupported$/u.test(reason)) return 'source';
   if (/^(?:trigger|stacking|skill-support)-runtime-required$|^legendary-runtime-mechanic$/u.test(reason)) return 'model';
@@ -35,5 +36,5 @@ export function seasonCalculationIssues(report) {
 export function seasonDpsStatusLabel(report) {
   const groups = seasonCalculationIssues(report);
   if (groups.length === 1) return groups[0].label;
-  return groups.length ? '입력·효과 확인 필요' : '계산 확인 필요';
+  return groups.some(group=>group.cause==='input') ? '입력·효과 확인 필요' : groups.length ? '계산 보류' : '계산 확인 필요';
 }

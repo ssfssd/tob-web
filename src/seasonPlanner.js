@@ -15,8 +15,8 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
-import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowAssignment, seasonDotWindowTrim } from './seasonDps.js';
-import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
+import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowAssignment, seasonDotWindowTrim, seasonDotWindowRepairs } from './seasonDps.js';
+import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,copySeasonGearTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
 import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem, openGearWorkshop } from './seasonItemWorkshop.js';
@@ -90,6 +90,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   function storeEntry(entry) {
     return storeEntries([entry]);
   }
+  function writeShelf(list,gearChanged) {
+    storage.setItem(SHELF_KEY,JSON.stringify(list));
+    state.shelfCount=list.length;
+    if(gearChanged&&state.upgrades?.usesShelf){
+      state.upgrades=null;
+      if(state.resultTab==='analysis')void api.rank();
+    }
+  }
   function storeEntries(entries) {
     const list=readShelf(storage);
     const signature=({id,...rest})=>JSON.stringify({...rest,item:{...rest.item,instanceId:undefined}});
@@ -98,8 +106,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if(existing>=0) entry=list.splice(existing,1)[0];
       list.push(entry);
     }
-    storage.setItem(SHELF_KEY,JSON.stringify(list));
-    state.shelfCount=list.length;
+    writeShelf(list,entries.some(entry=>entry.kind==='gear'));
     return list;
   }
   function keepConfirmed(kind,index,entry) {
@@ -505,15 +512,20 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       state.supportImpact = {rowIndex, rows};
     },
-    async rank(mode){
-      const job={mode,busy:true,checked:0,total:0};
+    async rank(){
+      if(state.pending.size||state.upgrades?.busy)return;
+      const group=state.upgradeGroup??'all';
+      const replacement=group==='replacement';
+      const source=state.upgradeSource??'all';
+      const usesShelf=(replacement||group==='legendary')&&source!=='catalog';
+      const job={busy:true,checked:0,total:0,usesShelf};
       state.upgrades=job;
       const active=()=>state.upgrades===job;
       try{
-        const group=mode==='gear'?'all':state.upgradeGroup??'all';
-        const result=await rankSeasonUpgrades(state.document,state.report,{mode,slot:(mode==='gear'?state.replacementSlot:state.upgradeSlot)??'all',group,skill:state.upgradeSkill??'all',
-          assemble:(mode==='gear'?state.assembleEquipment:group==='craft'?state.assembleCraft:state.assembleRolls)===true,source:state.upgradeSource??'all',
-          shelf:(mode==='gear'||group==='legendary')&&state.upgradeSource!=='catalog'?readShelf(storage):[],active,
+        const result=await rankSeasonUpgrades(state.document,state.report,{slot:(replacement?state.replacementSlot:state.upgradeSlot)??'all',group,skill:state.upgradeSkill??'all',
+          assemble:(replacement?state.assembleEquipment:group==='craft'?state.assembleCraft:group==='gear'&&state.assembleRolls)===true,source,
+          includeCorrosion:state.includeUpgradeCorrosion===true,
+          shelf:usesShelf?readShelf(storage):[],active,
           progress(checked,total){
             Object.assign(job,{checked,total});
             const out=root?.querySelector?.('[data-upgrade-progress]');
@@ -755,16 +767,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       draft.document=doc;
     },
     input(event) {
-      if(event.target.hasAttribute?.('data-blocked-skill-filter')){
+      if(event.target.hasAttribute?.('data-blocked-candidate-filter')){
         const panel=event.target.closest('[data-role="ranking-exclusions"]');
         const key=value=>String(value).normalize('NFKC').toLocaleLowerCase('ko').replace(/\s/gu,'');
         const query=key(event.target.value);
         let visible=false;
-        for(const entry of panel.querySelectorAll('[data-blocked-skill-name]')){
-          entry.hidden=!key(entry.dataset.blockedSkillName).includes(query);
+        for(const entry of panel.querySelectorAll('[data-blocked-candidate-name]')){
+          entry.hidden=!key(entry.dataset.blockedCandidateName).includes(query);
           visible||=!entry.hidden;
         }
-        panel.querySelector('[data-blocked-skill-empty]').hidden=visible;
+        panel.querySelector('[data-blocked-candidate-empty]').hidden=visible;
         return;
       }
       if(event.target.hasAttribute?.('data-memory-search')){
@@ -1035,6 +1047,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       if(input.hasAttribute?.('data-upgrade-source')){
         if(Object.hasOwn(GEAR_UPGRADE_SOURCES,input.value))state.upgradeSource=input.value;
+        state.upgrades=null;api.render();return;
+      }
+      if(input.hasAttribute?.('data-upgrade-corrosion')){
+        state.includeUpgradeCorrosion=input.checked;
         state.upgrades=null;api.render();return;
       }
       if(input.hasAttribute?.('data-upgrade-slot')||input.hasAttribute?.('data-replacement-slot')||input.hasAttribute?.('data-upgrade-skill')){
@@ -1378,7 +1394,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             else api.openBoard(kind==='prism'?'talents':'divinity');
             api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});return;
           }
-          if(action==='shelf-remove'){const query=state.overlay.query;list.splice(pos,1);storage.setItem(SHELF_KEY,JSON.stringify(list));openShelf(list,kind,slot,all);Object.assign(state.overlay,{query,boardDraft});return;}
+          if(action==='shelf-remove'){
+            const query=state.overlay.query;
+            list.splice(pos,1);
+            writeShelf(list,kind==='gear');
+            openShelf(list,kind,slot,all);
+            Object.assign(state.overlay,{query,boardDraft});
+            return;
+          }
           if(action==='shelf-preview'){
             const baseline=boardDraft??state;
             const preview=previewSlotEdit(baseline.document,baseline.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]},{includeSnapshot:true});
@@ -1503,7 +1526,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if (action === 'assign-dot-window') {
           api.flush();
-          const conflicts=state.report.fullDps.dotWindowConflicts??state.report.assumedDps?.dotWindowConflicts??[];
+          const {overlaps:conflicts}=seasonDotWindowRepairs(state.report);
           const conflict=conflicts.find(row=>row.id===d.key && row.start===Number(d.start) && row.stop===Number(d.stop));
           const edit=seasonDotWindowAssignment(state.document.targetBuild,conflict,Number(d.index));
           if (!edit) throw new Error('겹친 구간이 바뀌었거나 시간표가 입력 한도를 넘었습니다. 적용 구간을 확인하세요.');
@@ -1513,7 +1536,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if (action === 'trim-dot-window') {
           api.flush();
-          const bounds=[...(state.report.fullDps.dotWindowBounds??[]),...(state.report.assumedDps?.dotWindowBounds??[])];
+          const {bounds}=seasonDotWindowRepairs(state.report);
           const bound=bounds.find(row=>row.rowIndex===Number(d.index) && row.end===Number(d.end));
           const edit=seasonDotWindowTrim(state.document.targetBuild,bound);
           if (!edit) throw new Error('측정 구간이 바뀌었습니다. 적용 구간을 다시 확인하세요.');
@@ -1530,7 +1553,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             state.focusRole = d.focusRole;
             if(d.tab==='conditions'&&d.field)state.focusField={edit:d.field,key:d.fieldKey,inResults:true};
           }
-          if(d.tab==='analysis'&&!state.upgrades)void api.rank('options');
+          if(d.tab==='analysis'&&!state.upgrades)void api.rank();
           return;
         }
         if (action==='support-matrix-category'||action==='support-matrix-selected') {
@@ -1545,7 +1568,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           }
           return;
         }
-        if(action==='rank-options'||action==='rank-gear'){void api.rank(action==='rank-gear'?'gear':'options');return;}
+        if(action==='rank-options'||action==='rank-gear'){void api.rank();return;}
         if(action==='rank-cancel'){state.upgrades=null;return;}
         if(action==='compare-support-impact'){
           const rowIndex=Number(d.index);
@@ -1579,13 +1602,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.notice=saved.targetBuild.name+' 저장됨';
           return;
         }
-        if(action==='rank-skill-trial'){
-          const row=state.upgrades?.blockedSkills?.[Number(d.index)];
+        if(action==='rank-skill-trial'||action==='rank-gear-trial'){
+          const skill=action==='rank-skill-trial';
+          const row=(skill?state.upgrades?.blockedSkills:state.upgrades?.blockedGear)?.[Number(d.index)];
           if(!row||state.pending.size)return;
-          const copy=copySeasonSkillTrial(state.document,row);
+          const copy=skill?copySeasonSkillTrial(state.document,row):copySeasonGearTrial(state.document,row);
           api.openImportedCopy(copy);
+          if(!skill&&state.report.fullDps.supported){
+            api.openGear(row.edits[0].slotIndex,false);
+            state.notice='장비 시험 사본을 열었습니다.';
+            return;
+          }
           state.section='overview';
-          state.calculationIndex=row.edits[0].rowIndex;
+          if(skill)state.calculationIndex=row.edits[0].rowIndex;
           state.resultTab='calculation';
           state.showDpsNotes=true;
           state.notice='시험 사본을 열었습니다. 전체 DPS 보류 이유를 확인하세요.';

@@ -120,11 +120,11 @@ export function shelfTools(kind,index,filled,button,candidate=false){
   const create=candidate?button('후보만 보관','workshop-store',attrs):wearable?button(kind==='gear'?'장비 제작':'추억 제작','workshop-open',attrs):'';
   return `<div class="native-slot-actions">${create}${button(wearable?'보관함에서 장착':'보관함 열기','shelf-open',attrs)}${filled&&!candidate?button(wearable?'장착 중인 '+(kind==='gear'?'장비':'추억')+' 보관':'보관함에 저장','shelf-save',attrs):''}</div>`;
 }
-export function mobileDpsBar(s){
+export function mobileDpsBar(s,blockedStatus='확인 필요'){
   const assumed=s.report.assumedDps;
   const d=s.report.fullDps;
   const showAssumed=!d.supported&&assumed?.supported;
   const value=showAssumed?assumed.dps:d.dps;
   const change=compactSeasonEditDelta(showAssumed?s.editComparison?.assumed:s.editComparison);
-  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기"><span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):'확인 필요'}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small></a>`;
+  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기"><span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):blockedStatus}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small></a>`;
 }
