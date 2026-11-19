@@ -11,6 +11,7 @@ import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { isObservedTerraGearEffect } from './seasonGearEffects.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { seasonAppliedOverlevelMultiplier } from './seasonSkillLevels.js';
 
 // This is deliberately a direct-card projection, not a character model. Every
 // gear effect must be either consumed or explicitly disclosed outside its scope.
@@ -315,6 +316,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
           weaponHands = rotations.map((e,i)=>({slotIndex:i, baseCriticalRating:candidateHands[i].baseCriticalRating,
             weaponSpeedBase:candidateHands[i].weaponSpeedBase, weaponSpeed:candidateHands[i].weaponSpeed,
             receipts:candidateHands[i].receipts, hitDps:e.hit.dps, pools:e.hit.pools, excluded:e.excluded,
+            levelGrowthMultiplier:seasonAppliedOverlevelMultiplier(e.applied),
             conversionTrace:e.applied.filter(effect=>['conversion','gained-as-extra'].includes(effect.stage))
               .map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null}))}));
         } else reasons.push('쌍수 교대 공격의 두 무기 적중·공격 속도를 확인할 수 없습니다.');

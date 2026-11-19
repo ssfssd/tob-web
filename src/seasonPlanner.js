@@ -15,7 +15,7 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
-import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowAssignment } from './seasonDps.js';
+import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowAssignment, seasonDotWindowTrim } from './seasonDps.js';
 import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
@@ -45,7 +45,8 @@ const stringKinds = new Set(["name", "custom-options", "hero-selection", "hero-c
 export function readSeasonPlannerEdit(input) {
   const d = input.dataset, kind = d.seasonEdit;
   const dpsField = kind==='dps-input' ? SEASON_DPS_SKILL_FIELDS[d.key?.split(':')[1]] : null;
-  return { kind, rowIndex: Number(d.row), supportIndex: Number(d.support), slotIndex: Number(d.slot), key: d.key ?? d.choice ?? d.roll,
+  const rowIndex = kind === 'elixir-selection' && d.row === undefined ? undefined : Number(d.row);
+  return { kind, rowIndex, supportIndex: Number(d.support), slotIndex: Number(d.slot), key: d.key ?? d.choice ?? d.roll,
     value: stringKinds.has(kind) || kind==='bing-event-source' || kind==='memory-tier' ? input.value
       : dpsField?.times || dpsField?.windows ? input.value.trim()
       : String(input.value).trim() === "" ? "" : Number(input.value) };
@@ -1506,6 +1507,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const conflict=conflicts.find(row=>row.id===d.key && row.start===Number(d.start) && row.stop===Number(d.stop));
           const edit=seasonDotWindowAssignment(state.document.targetBuild,conflict,Number(d.index));
           if (!edit) throw new Error('겹친 구간이 바뀌었거나 시간표가 입력 한도를 넘었습니다. 적용 구간을 확인하세요.');
+          api.edit(edit);
+          state.focusField={edit:edit.kind,key:edit.key,inResults:true};
+          return;
+        }
+        if (action === 'trim-dot-window') {
+          api.flush();
+          const bounds=[...(state.report.fullDps.dotWindowBounds??[]),...(state.report.assumedDps?.dotWindowBounds??[])];
+          const bound=bounds.find(row=>row.rowIndex===Number(d.index) && row.end===Number(d.end));
+          const edit=seasonDotWindowTrim(state.document.targetBuild,bound);
+          if (!edit) throw new Error('측정 구간이 바뀌었습니다. 적용 구간을 다시 확인하세요.');
           api.edit(edit);
           state.focusField={edit:edit.kind,key:edit.key,inResults:true};
           return;

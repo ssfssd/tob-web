@@ -32,10 +32,10 @@ export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장
   if(!rows?.length)return '';
   const single=rows.length===1?rows[0]:null;
   const summary=single?` · ${single.from} → ${single.to}${single.toConfirmed?'':' (확인 필요)'}`:'';
-  const value=(base,level,verified)=>`Lv.${level}${verified?'':' (수치 미확인)'}${base!==level?`<small> · 기본 ${base}</small>`:''}`;
-  const content=rows.map(({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed})=>{
+  const value=(base,level,verified,growth)=>`Lv.${level}${verified?'':' (수치 미확인)'}${base!==level?`<small> · 기본 ${base}</small>`:''}${verified&&Number.isFinite(growth)?`<small> · 대미지 ×${fmt(growth)}</small>`:''}`;
+  const content=rows.map(({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth})=>{
     const socket=Number.isInteger(supportIndex)?` · 보조 ${supportIndex+1}`:'';
-    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${skillName(id)}`)}</th><td>${value(fromBase,from,fromConfirmed)}</td><td>${value(toBase,to,toConfirmed)}</td></tr>`;
+    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${skillName(id)}`)}</th><td>${value(fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(toBase,to,toConfirmed,toGrowth)}</td></tr>`;
   }).join('');
   return `<details data-role="${esc(role)}"><summary>스킬 레벨${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
 }
@@ -51,6 +51,9 @@ export function renderSkillDpsChanges(rows,basis,esc,{before='장착 전',after=
 export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 후'}={}){
   const skill=renderSkillDpsChanges(p.skillDpsChanges??[],p.dpsBasis,esc,{before,after});
   const headers=`<th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th>`;
+  const composition=p.damageCompositionChanges?.length?`<table class="slot-dps-table" data-role="damage-composition-preview"><caption>발동 유형별 ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
+    <thead><tr><th scope="col">유형</th>${headers}<th scope="col">변화</th></tr></thead>
+    <tbody>${p.damageCompositionChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
   const speed=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:4});
   const speeds=p.skillSpeedChanges?.length?`<table class="slot-dps-table" data-role="skill-speed-preview"><caption>스킬 사용 가능 속도 · 회/초${p.dpsBasis==='assumedDps'?' · 방어 전 기준':''}</caption>
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
@@ -66,20 +69,23 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const numbed=p.numbedDamageChanges?.length?`<table class="slot-dps-table" data-role="numbed-damage-preview"><caption>${p.dpsBasis==='assumedDps'?'마취 기여 · 방어 전 DPS':'마취 기여 DPS'}</caption>
     <thead><tr><th scope="col">대미지</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.numbedDamageChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
+  const numbedState=p.numbedStateChanges?.length?`<table class="slot-dps-table" data-role="numbed-state-preview"><caption>마취 적용 변화</caption>
+    <thead><tr><th scope="col">수치</th>${headers}</tr></thead>
+    <tbody>${p.numbedStateChanges.map(({label,from,to,unit})=>`<tr><th scope="row">${esc(label)}</th><td>${fmt(from)}${esc(unit)}</td><td>${fmt(to)}${esc(unit)}</td></tr>`).join('')}</tbody></table>`:'';
   const uptimeValue=(rate,dps)=>esc(rate)+(Number.isFinite(dps)?`<small> · ${fmt(dps)} DPS</small>`:'');
   const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>가동률 변화 · ${p.dpsBasis==='assumedDps'?'방어 전 DPS 기여':'DPS 기여'}</caption>
     <thead><tr><th scope="col">효과</th>${headers}</tr></thead>
     <tbody>${p.uptimeChanges.map(({name,from,to,fromDps,toDps})=>`<tr><th scope="row">${esc(name)}</th><td>${uptimeValue(from,fromDps)}</td><td>${uptimeValue(to,toDps)}</td></tr>`).join('')}</tbody></table>`:'';
-  return skill+speeds+usage+uptimes+numbed;
+  return skill+composition+speeds+usage+uptimes+numbedState+numbed;
 }
 
-export function renderResourceChanges(p,esc,{board=false,skill=false}={}){
+export function renderResourceChanges(p,esc,{board=false,skill=false,action=board?'적용':'교체'}={}){
   const resourceValue=(value,unit)=>amount(value)+(Number.isFinite(value)?unit:'');
   const resourceText=({label,a,b,unit=''})=>`${label} ${resourceValue(a,unit)} → ${resourceValue(b,unit)}`;
   const rows=[...(p.resourceChanges??[]),...(p.resourceCosts??[]),...(p.resourceRecovery??[])];
   const castCosts=skill?rows.filter(row=>row.label==='시전당 MP'||row.label==='시전당 HP'):[];
   const [first,...rest]=castCosts.length?rows.filter(row=>!castCosts.includes(row)):rows;
-  const manaNote=p.manaObservationStale?`<p>${p.previous?'직전 변경 · ':''}MP 회복 조건이 바뀌었습니다. ${board?'적용':'교체'} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
+  const manaNote=p.manaObservationStale?`<p>${p.previous?'직전 변경 · ':''}MP 회복 조건이 바뀌었습니다. ${esc(action)} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
   if(!first&&!castCosts.length)return manaNote;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
   const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;

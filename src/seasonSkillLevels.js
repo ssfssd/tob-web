@@ -154,13 +154,22 @@ export function seasonSkillSlotCalculation(report, rowIndex, supportIndex) {
 export function seasonSkillCalculationLevel(report, rowIndex) {
   const entry = seasonSkillSlotCalculation(report,rowIndex);
   const state = seasonSkillLevelState(entry);
-  const growth = report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex)?.trace?.find(effect=>
-    effect.stage==='damage-modifier' && effect.sourceText===overlevelSource && Number.isFinite(effect.resolvedValue));
+  const coupled = report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
+  const hands = coupled?.offenseBasis?.weaponHands ?? [];
+  const [main, off] = hands;
+  const sharedGrowth = hands.length===2 && main.levelGrowthMultiplier===off.levelGrowthMultiplier
+    ? main.levelGrowthMultiplier : null;
   const moonStrike = entry?.mechanics?.find(m=>m.kind==='moon-strike-forms');
   const moonGrowth = moonStrike?.level === state.level ? moonStrike?.growthMultiplier : null;
   const minion = report.fullDps?.rows.find(row=>row.rowIndex===rowIndex&&row.id===entry?.itemId);
   const minionGrowth = minion?.minionLevel === state.level && minion.minionLevelMultiplier > 1
     ? minion.minionLevelMultiplier : null;
-  const growthMultiplier = growth ? 1+growth.resolvedValue/100 : moonGrowth ?? minionGrowth;
+  const growthMultiplier = seasonAppliedOverlevelMultiplier(coupled?.trace) ?? sharedGrowth ?? moonGrowth ?? minionGrowth;
   return {...state,unavailable:entry?.levelUnavailable===true,growthMultiplier:state.confirmed ? growthMultiplier : null};
+}
+
+export function seasonAppliedOverlevelMultiplier(trace) {
+  const growth = trace?.find(effect=>effect.stage==='damage-modifier' && effect.sourceText===overlevelSource
+    && Number.isFinite(effect.resolvedValue));
+  return growth ? 1+growth.resolvedValue/100 : null;
 }

@@ -9,7 +9,7 @@ import { summarizeSeasonOptionSources } from './seasonNumericStats.js';
 import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { getSkillEnergyUsage } from './skillRuntimeModel.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
-import { seasonNumbedDamageRows } from './seasonDps.js';
+import { seasonDamageComposition, seasonNumbedDamageRows } from './seasonDps.js';
 import { compareSeasonUptimeChanges } from './seasonUptimeDetails.js';
 
 const indexes = new Map(SS14_CURRENT_DATABASE.inventory.filter(r=>r.category==='gear').map(r=>[r.runtimeId,r.indexes]));
@@ -64,25 +64,38 @@ function skillDamageRoutes(report, dps, rowIndex) {
   return direct?.supported ? direct.trace : undefined;
 }
 const elixirDamageRoutes = (dps,index) => dps.rows.find(row=>row.rowIndex===index)?.elixirDamageRoutes;
+const weaponDamageRoutes = (dps,index) => dps.rows.find(row=>row.rowIndex===index && row.supported)?.weaponHands
+  ?.map(({slotIndex,conversionTrace})=>({slotIndex,trace:conversionTrace}));
 
 function damageRouteChanges(before,after,beforeDps,afterDps) {
   const changes=[];
   const equippedBefore=new Map(beforeDps.rows.map(row=>[row.rowIndex,row.id]));
-  const routes=(report,dps,index)=>skillDamageRoutes(report,dps,index)
+  const routeEdges=trace=>trace
     ?.filter(e=>e.stage==='conversion'||e.stage==='gained-as-extra')
     .map(({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage,gainedBaseDamage})=>({
       stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage,gainedBaseDamage,
     }));
+  const routes=(report,dps,index)=>{
+    const states=elixirDamageRoutes(dps,index);
+    if(states)return {states};
+    const hands=weaponDamageRoutes(dps,index);
+    if(hands?.length)return {hands};
+    const trace=routeEdges(skillDamageRoutes(report,dps,index));
+    return trace && {trace};
+  };
+  const applies=trace=>trace?.some(edge=>edge.stage==='conversion'?edge.effectivePercent>0:edge.resolvedValue>0);
+  const hasRoute=({states,hands,trace})=>applies(trace) || hands?.some(group=>applies(group.trace))
+    || states?.states.some(phase=>phase.groups.some(group=>applies(group.trace)));
+  const routeGroups=groups=>groups.map(({slotIndex,trace})=>({slotIndex,trace:routeEdges(trace)}));
+  const comparableRoutes=({states,hands,trace})=>states?{...states,states:states.states.map(phase=>({...phase,groups:routeGroups(phase.groups)}))}
+    :hands?routeGroups(hands):trace;
   for(const {rowIndex:index,id} of afterDps.rows){
     if(equippedBefore.get(index)!==id)continue;
-    const previousStates=elixirDamageRoutes(beforeDps,index),currentStates=elixirDamageRoutes(afterDps,index);
-    if(previousStates||currentStates){
-      if(previousStates&&currentStates&&JSON.stringify(previousStates)!==JSON.stringify(currentStates))
-        changes.push({index,id,previousStates,currentStates});
-      continue;
-    }
     const previous=routes(before,beforeDps,index),current=routes(after,afterDps,index);
-    if(previous&&current&&JSON.stringify(previous)!==JSON.stringify(current))changes.push({index,id,previous,current});
+    if(!previous||!current||(!hasRoute(previous)&&!hasRoute(current)))continue;
+    if(JSON.stringify(comparableRoutes(previous))===JSON.stringify(comparableRoutes(current)))continue;
+    changes.push({index,id,previous:previous.trace,current:current.trace,
+      previousStates:previous.states,currentStates:current.states,previousHands:previous.hands,currentHands:current.hands});
   }
   return changes;
 }
@@ -97,10 +110,12 @@ export function compareSeasonSkillLevels(before,after) {
     const previous=previousSlots.get(key(slot));
     if (!previous) continue;
     const {id,entry}=slot, {rowIndex,supportIndex}=entry;
-    const {base:fromBase,level:from,confirmed:fromConfirmed}=seasonSkillLevelState(previous);
-    const {base:toBase,level:to,confirmed:toConfirmed}=seasonSkillLevelState(entry);
+    const fromState=Number.isInteger(supportIndex)?seasonSkillLevelState(previous):seasonSkillCalculationLevel(before,rowIndex);
+    const toState=Number.isInteger(supportIndex)?seasonSkillLevelState(entry):seasonSkillCalculationLevel(after,rowIndex);
+    const {base:fromBase,level:from,confirmed:fromConfirmed,growthMultiplier:fromGrowth}=fromState;
+    const {base:toBase,level:to,confirmed:toConfirmed,growthMultiplier:toGrowth}=toState;
     if (!Number.isInteger(from)||!Number.isInteger(to)||(from===to&&fromBase===toBase)) continue;
-    changes.push({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed});
+    changes.push({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth});
   }
   return changes.sort((a,b)=>a.rowIndex-b.rowIndex||(a.supportIndex??-1)-(b.supportIndex??-1));
 }
@@ -137,6 +152,25 @@ function numbedDamageChanges(before, after) {
   });
 }
 
+function numbedStateChanges(before, after, metric) {
+  if(!before[metric].supported||!after[metric].supported||before[metric].scope!==after[metric].scope) return [];
+  const timed=before[metric].scope==='ss14-thea-joint-combat';
+  const state=report=>{
+    if(metric==='assumedDps')return timed?report.assumedDps.numbed:report.assumedDps.fixedNumbed;
+    const cycle=report.theaAverage;
+    return timed?{duration:cycle?.playerNumbedDuration,stacks:cycle?.numbedAverage,effect:cycle?.numbedEffectAverage}
+      :report.componentProjection.fixedNumbed;
+  };
+  const a=state(before), b=state(after);
+  if(!a||!b)return [];
+  const fields=timed?[['duration','지속 시간','초'],['stacks','평균 중첩',''],['effect','시간 평균 번개 대미지 보정','%']]
+    :[['stacks','대상 중첩',''],['bonus','번개 대미지 보정','%']];
+  return fields.flatMap(([key,label,unit])=>{
+    const from=a[key], to=b[key];
+    return Number.isFinite(from)&&Number.isFinite(to)&&from.toFixed(2)!==to.toFixed(2)?[{label,from,to,unit}]:[];
+  });
+}
+
 function skillSpeedChanges(before, after, metric) {
   if ([before,after].some(report=>['ss14-observed-elixir-uptime','ss14-thea-joint-combat'].includes(report[metric].scope)
     || (metric==='fullDps'?report.theaAverage?.supported:report.assumedDps.measuredResources))) return [];
@@ -152,6 +186,13 @@ function skillSpeedChanges(before, after, metric) {
 }
 
 export function compareSeasonDamageBreakdown(before, after, metric) {
+  const beforeParts = seasonDamageComposition(before[metric]);
+  const afterParts = seasonDamageComposition(after[metric]);
+  const mixed = beforeParts && afterParts && beforeParts.filter(({value}, index) => value>0 || afterParts[index].value>0).length>1;
+  const damageCompositionChanges = mixed ? beforeParts.flatMap(({label,value:from}, index) => {
+    const to = afterParts[index].value;
+    return from.toFixed(2) === to.toFixed(2) ? [] : [{label,from,to}];
+  }) : [];
   const manualUsageChanges=after[metric].rows.flatMap(row=>{
     const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
     const from=old?.measuredManualUses, to=row.measuredManualUses;
@@ -164,10 +205,12 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
   });
   return {
     skillDpsChanges:skillDpsChanges(before[metric],after[metric]),
+    damageCompositionChanges,
     damageRoutes:damageRouteChanges(before,after,before[metric],after[metric]),
     skillSpeedChanges:skillSpeedChanges(before,after,metric),
     manualUsageChanges,
     numbedDamageChanges:numbedDamageChanges(before[metric],after[metric]),
+    numbedStateChanges:numbedStateChanges(before,after,metric),
     uptimeChanges:compareSeasonUptimeChanges(before,after,metric),
   };
 }
@@ -263,7 +306,9 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
     const elixirDpsStates=afterDps.rows.find(row=>row.rowIndex===edit.rowIndex)?.elixirDpsStates;
     const activation=edit.kind==='skill-selection'?auraActivationControl(after.componentProjection,edit.rowIndex):undefined;
     const growthMultiplier=edit.kind==='skill-selection' ? seasonSkillCalculationLevel(after,edit.rowIndex).growthMultiplier : null;
-    skill={entry,activation,growthMultiplier,conversion:states?undefined:skillDamageRoutes(after,afterDps,edit.rowIndex),elixirDamageRoutes:states,elixirDpsStates,removedSupports,
+    const hands=states?undefined:weaponDamageRoutes(afterDps,edit.rowIndex);
+    skill={entry,activation,growthMultiplier,conversion:states||hands?.length?undefined:skillDamageRoutes(after,afterDps,edit.rowIndex),
+      weaponDamageRoutes:hands,elixirDamageRoutes:states,elixirDpsStates,removedSupports,
       ...(energyChanged?{energyChange:{before:beforeEnergy,after:afterEnergy}}:{})};
   }
   return {comparison,offhandRemoved,assumedComparison,stats,options,dpsBasis,

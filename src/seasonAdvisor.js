@@ -10,6 +10,7 @@ import { isAuraActivationControl } from './seasonNetherModifiers.js';
 import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
 import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaElixirTimingKeys } from './seasonTheaEvents.js';
+import { observedSkillCostFields } from './seasonDps.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -55,6 +56,12 @@ function extensionEncounterValues(build, report) {
   return entries;
 }
 
+export function sameObservedSkillCostBasis(before, after, index, metric) {
+  const observation = report => (report?.[metric] ?? report?.fullDps)?.rows?.find(row=>row.rowIndex===index)?.castCostObservation;
+  const a=observation(before), b=observation(after);
+  return a?.status==='applied' && b?.status==='applied' && a.basis===b.basis;
+}
+
 // Build choices (hero, memories, skill identity and base rating) belong to the
 // compared build. Only shared encounter assumptions constrain a full-DPS diff.
 export function sameSeasonEncounter(left, right, leftReport, rightReport, metric = 'fullDps') {
@@ -91,6 +98,7 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
       || (a.useShare ?? (singleSkill ? 100 : undefined)) !== (b.useShare ?? (singleSkill ? 100 : undefined)))) return false;
     const row = report => report?.fullDps?.rows?.find(r=>r.rowIndex===Number(index));
     const leftRow = row(leftReport), rightRow = row(rightReport);
+    const compareObservedCosts = sameSkill && sameObservedSkillCostBasis(leftReport,rightReport,Number(index),metric);
     const leftWindows = timed ? leftRow?.dotWindows : undefined;
     const rightWindows = timed ? rightRow?.dotWindows : undefined;
     const chargeSchedule = channel => channel?.times ?? (channel?.rate === 0 ? [] : undefined);
@@ -105,6 +113,7 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
       || stable(leftCharges) !== stable(rightCharges)
       || stable(leftReaps) !== stable(rightReaps))) return false;
     for (const key of Object.keys(a)) {
+      if (key==='observedSkillCostBasis' || (!compareObservedCosts && observedSkillCostFields.includes(key))) continue;
       if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
       if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime'
         || sameSkill && leftCharges && rightCharges && key==='channelCostRate') continue;

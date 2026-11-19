@@ -39,7 +39,7 @@ import { renderSlateEditor,slateEditorBoard } from './seasonSlateEditor.js';
 import { regularSlateFamilies } from './seasonDivinity.js';
 import { nativeSlateOptions } from './seasonNativeDivinity.js';
 import { compareSeasonDpsSnapshots, SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
-import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion, renderElixirDamageRoutes, renderSkillElixirDps, renderDamageRouteChanges } from './seasonResultPanels.js';
+import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion, renderElixirDamageRoutes, renderWeaponDamageRoutes, renderSkillElixirDps, renderDamageRouteChanges } from './seasonResultPanels.js';
 import {renderSeasonSupportMatrix} from './seasonSupportMatrix.js';
 import {isOfflineEdition} from './offlinePresentation.js';
 import {screenshotGroups,seasonScreenshotTargets} from './seasonScreenshotImport.js';
@@ -230,7 +230,9 @@ export function renderSkillCandidateResult(s) {
     +(removed?.length?`<p data-role="skill-removed-supports">보조 해제 예정 · ${removed.map(id=>esc(title(id))).join(' · ')}</p>`:'')
     +(preview?renderSlotPreview(preview,esc,{showDps:false,showResourcesInline:true,extraDetails:
       renderSkillElixirDps(preview.skill?.elixirDpsStates,'candidate')
-      +(renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
+      +(renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')
+        ||renderWeaponDamageRoutes(preview.skill?.weaponDamageRoutes,'candidate')
+        ||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
 }
 function renderGearSkillChanges(preview) {
   return renderSkillLevelChanges(preview?.skillLevels,esc,{role:'gear-skill-level-changes'})

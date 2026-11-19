@@ -32,6 +32,37 @@ const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const hash = v => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
 const round = v => finite(v) ? Math.round(v * 1e5) / 1e5 : null;
 const wiltingBeamId = "skills-tlidb-com-cn-wilting-beam";
+export const SEASON_DPS_PARTS = [
+  ['manualDps', '일반 시전'], ['spellBurstDps', '매직 버스트'], ['repeatDps', '추가 발동'],
+  ['heroDps', '히어로 발동'], ['netherDps', '명왕 발동'], ['dotDps', '지속'],
+  ['permafrostDps', '동토 지속 대미지'], ['reapingDps', '수확'], ['minionDps', '소환체'],
+  ['omenDps', '오멘'], ['playerDeteriorationDps', '악화'],
+];
+
+export function seasonDamageComposition(report) {
+  if (!report?.supported || !Number.isFinite(report.dps) || report.dps < 0) return null;
+  const parts = SEASON_DPS_PARTS.map(([key, label]) => ({ key, label, value: 0 }));
+  // The calculator rounds each reported DPS value to five decimal places.
+  const matches = (sum, total, terms) => Math.abs(sum - total) <= Math.max((terms + 1) * 0.000005, total * 1e-12);
+  let total = 0;
+  for (const row of report.rows) {
+    const values = row.values;
+    if (!row.supported || !Number.isFinite(values.dps) || values.dps < 0) return null;
+    let attributed = 0;
+    for (const part of parts) {
+      const value = Object.hasOwn(values, part.key) ? values[part.key] : 0;
+      if (!Number.isFinite(value) || value < 0) return null;
+      attributed += value;
+      part.value += value;
+    }
+    if (!matches(attributed, values.dps, parts.length)) return null;
+    total += values.dps;
+  }
+  return matches(total, report.dps, report.rows.length)
+    && matches(parts.reduce((sum, part) => sum + part.value, 0), report.dps, parts.length * report.rows.length)
+    ? parts : null;
+}
+
 export function seasonNumbedDamageRows(scope, values) {
   const prefix=scope==='ss14-thea-joint-combat'?'numbed':'fixedNumbed';
   return [['번개 적중','HitDps'],['번개 지속 대미지','DotDps'],['번개 수확','ReapingDps'],['소환체 번개 대미지','MinionDps']]
@@ -187,6 +218,17 @@ export function seasonDotWindowAssignment(build, conflict, winner) {
     : [[from,Math.min(to,start)],[Math.max(from,stop),to]].filter(([a,b])=>a<b));
   const value = remaining.length ? remaining.map(range=>range.join('-')).join(', ') : '없음';
   return dotWindowRanges(value) ? {kind:'dps-input',key:`${loser}:dotWindows`,value} : null;
+}
+export function seasonDotWindowTrim(build, bound) {
+  const cycle=build.ss14Inputs?.theaCycle;
+  if (!bound || cycle?.mode!=='automatic' || bound.end!==cycle.warmup+cycle.seconds) return null;
+  const key=`${bound.rowIndex}:dotWindows`;
+  const ranges=dotWindowRanges(build.ss14Inputs?.dps?.skills?.[bound.rowIndex]?.dotWindows);
+  if (!ranges?.some(([,stop])=>stop>bound.end+1e-8)) return null;
+  const cutoff=Math.floor((bound.end+1e-8)*1000)/1000;
+  const remaining=ranges.filter(([start])=>start<cutoff).map(([start,stop])=>`${start}-${Math.min(stop,cutoff)}`);
+  const value=remaining.join(', ')||'없음';
+  return dotWindowRanges(value) ? {kind:'dps-input',key,value} : null;
 }
 function observedTimeList(value) {
   if (typeof value !== 'string' || value.length > 4096) return null;

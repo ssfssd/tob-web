@@ -15,7 +15,7 @@ import { formatAppDateTime } from "./dateTimePresentation.js";
 import { SEASON_COMPONENT_LABELS } from "./seasonComponents.js";
 import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, SEASON_DPS_PARTS } from "./seasonDps.js";
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
@@ -483,13 +483,6 @@ function dpsControls(document, report, formValues, showDummy = false) {
     <p>적중률과 시전 시간 배분은 자원 소모·이동을 고려한 입력입니다. 복합 계산은 첫 매직 버스트 충전도 포함합니다. ${seasonWeaponProfile(build).enabled ? '무기 수치는 선택한 장비에서 자동 반영합니다.' : '무기 대미지는 무기 자체 수치로 입력하세요.'} 추가 번개는 스킬 계수 적용 전 수치입니다. 점화와 기본 마취 확률은 주력 스킬에 적용하며, 마취된 대상의 추가 중첩은 각 번개 적중에서 계산합니다.</p></details>
   </details>`;
 }
-
-export const SEASON_DPS_PARTS = [
-  ["manualDps", "일반 시전"], ["spellBurstDps", "매직 버스트"], ["repeatDps", "추가 발동"],
-  ["heroDps", "히어로 발동"], ["netherDps", "명왕 발동"],
-  ["dotDps", "지속"], ["permafrostDps", "동토 지속 대미지"], ["reapingDps", "수확"],
-  ["minionDps", "소환체"], ["omenDps", "오멘"], ["playerDeteriorationDps", "악화"],
-];
 
 function dpsResults(report, { embedded = false } = {}) {
   const r = report.fullDps;

@@ -13,11 +13,11 @@ import {captureShelf} from './seasonShelf.js';
 import {boundBlessingStacks,blessingConditionValue} from './seasonBlessings.js';
 import {theaState} from './seasonTheaState.js';
 import {seasonUnitOptionLines} from './seasonComponents.js';
-import {gearOptionComparisons} from './seasonGearPicker.js';
+import {compareSeasonResourceCosts,gearOptionComparisons} from './seasonGearPicker.js';
 import {describeSeasonOptionChange} from './seasonNumericStatsView.js';
 import {FIXED_NUMBED_FIELD} from './seasonNetherModifiers.js';
 
-export const UPGRADE_GROUPS = {all:'한계효용',unit:'가상 옵션 1단위',replacement:'장비 교체 추천',gearImpact:'방어구·장신구 기여',gear:'장비 옵션',craft:'제작 옵션 추천',talents:'재능',pact:'정령',memory:'추억',legendary:'레전드 장비',skills:'액티브 스킬 레벨·보조',skillReplacement:'액티브 스킬 교체 추천'};
+export const UPGRADE_GROUPS = {all:'한계효용',unit:'가상 옵션 1단위',replacement:'장비 교체 추천',gearImpact:'장착 장비 기여',gear:'장비 옵션',craft:'제작 옵션 추천',talents:'재능',pact:'정령',memory:'추억',legendary:'레전드 장비',skills:'액티브 스킬 레벨·보조',skillReplacement:'액티브 스킬 교체 추천'};
 export const GEAR_UPGRADE_SOURCES = {all:'도감·보관함',shelf:'보관함',catalog:'도감'};
 function skillReplacementCandidates(document,report,rowIndex) {
   const {skillId,level}=normalizeBuild(document.targetBuild).skills.active[rowIndex];
@@ -153,7 +153,7 @@ function exactEquipmentCombinations(candidates, twoHanded) {
 
 function wornGearCandidates(document, report) {
   return normalizeBuild(document.targetBuild).gear.slots.flatMap((item,slotIndex)=>{
-    if(slotIndex<2||!item?.itemId)return [];
+    if(!item?.itemId)return [];
     const name=report.components.find(row=>row.category==='gear'&&row.id===item.itemId)?.name;
     return [{slotIndex,label:SEASON_GEAR_SLOT_LABELS[slotIndex],name,
       edits:[{kind:'gear-selection',slotIndex,value:''}]}];
@@ -341,7 +341,8 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     const comparison=compareSeasonDpsSnapshots(base,{document:next,report:after},metric);
     if(impact){
       const {supported,reasons,value}=comparison;
-      result.impacts.push({...candidate,reasons,value,delta:supported ? baseline.value-value : null});
+      const resources=supported?compareSeasonResourceCosts(report,after,metric,{allActive:true}):null;
+      result.impacts.push({...candidate,reasons,value,delta:supported ? baseline.value-value : null,resources});
       if(!supported)block(reasons);
       continue;
     }

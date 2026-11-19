@@ -10,6 +10,7 @@ import { SS14_INSTALLED_LOG_OPTIONS } from "./data/ss14InstalledLogOptions.gener
 import { resolveLogGearMechanics, logMechanicStats } from "./seasonLogGearMechanics.js";
 import { inactiveIcePulseOptions, normalizeSeasonGearEffects, SEASON_LOCAL_WEAPON_STATS, SEASON_SPELL_FLAT_STATS, SEASON_NATIVE_GEAR_STATS } from "./seasonGearEffects.js";
 import { resolveSeasonGearConditions } from './seasonGearConditions.js';
+import { corrosionOptions } from './seasonCorrosion.js';
 
 Object.assign(SS14_LOG_GEAR.records, SS14_LOG_COMPLETION.gear);
 
@@ -47,7 +48,11 @@ function definition(authority, itemId, affix) {
   const native = SS14_INSTALLED_LOG_OPTIONS.records[itemId]?.find(r => r.row.id === String(affix.id));
   if (native) return { row: native.row, ko: native.ko, page: native, replaces: native.replaces };
   const matches = [...authority.normal, ...authority.corroded].filter(r => r.id === String(affix.id));
-  if (matches.length === 1) return { row: matches[0], page: authority, ko: authority.ko?.rows.find(r => r.id === String(affix.id)) };
+  if (matches.length === 1) {
+    const [row]=matches;
+    const pair=authority.corroded.includes(row) ? corrosionOptions(itemId).find(option=>option.variant===row.id) : undefined;
+    return {row,page:authority,ko:authority.ko?.rows.find(r=>r.id===row.id),replaces:pair?.base};
+  }
   if (matches.length || !["Prefix", "Suffix"].includes(affix.family)) return null;
   const keys = SS14_CRAFT.gear[itemId] ?? [];
   const hits = keys.map(k => SS14_CRAFT.identities[k]).filter(r => r.modifierId === String(affix.id)
@@ -98,13 +103,21 @@ export function inspectLogGear(itemId, log, build, slotIndex, icePulseScope) {
   };
   const baseLines = authority.baseLines?.filter(line => !["Neck", "Waist"].includes(line));
   if (baseLines?.length) parse(baseLines.join("\n"));
-  const selected = [];
+  const definitions=log.affixes.map(affix=>definition(authority,itemId,affix));
+  const requiredRows=found=>authority.normal.filter(required=>found && (found.row.id===required.id
+    || found.replaces===required.id || (!found.replaces && authority.corroded.some(row=>row.id===found.row.id)
+      && found.row.renderTemplate && found.row.renderTemplate===required.renderTemplate)));
+  const coverage=definitions.map(requiredRows);
+  const counts=new Map();
+  for(const rows of coverage)if(rows.length===1)counts.set(rows[0],(counts.get(rows[0])??0)+1);
   for (const [index, affix] of log.affixes.entries()) {
-    const found = definition(authority, itemId, affix);
+    const found = definitions[index];
     const row = found?.row;
     let reason = "";
     if (affix.invalid) reason = "옵션 기록의 수치 순서 또는 형식이 올바르지 않습니다.";
     else if (log.affixes.filter(a => a.id === affix.id).length > 1) reason = "같은 옵션 ID가 중복되어 합산하지 않습니다.";
+    else if (coverage[index].length>1) reason = "침식 효과가 대체할 일반 효과를 하나로 확인하지 못했습니다.";
+    else if (coverage[index].some(row=>counts.get(row)>1)) reason = "일반 옵션과 대체 옵션이 겹쳐 합산하지 않습니다.";
     else if (!row) reason = "이 장비의 SS14 옵션 ID를 확인하지 못했습니다.";
     const fragments = row?.rollFragments ?? [];
     const tokens = [...(row?.renderTemplate ?? "").matchAll(/\{\{roll_(\d+)\}\}/gu)].map(m => Number(m[1]));
@@ -134,17 +147,11 @@ export function inspectLogGear(itemId, log, build, slotIndex, icePulseScope) {
     const detail = safeKo(ko ? reason ? ko.text : render(ko) : "");
     optionRows.push({ id: affix.id, family: affix.family, detail, values, reason,
       receipt: found ? { season: "SS14", sourceUrl: found.page.sourceUrl, sourcePageSha256: found.page.sourcePageSha256 } : null });
-    if (row) selected.push({ ...row, replaces: found.replaces });
     if (reason) reasons.push(reason);
     else parse(render(row), { logModifierId: affix.id, detail, receipt: optionRows.at(-1).receipt });
   }
-  // Require every original option. A corroded variant is a replacement only
-  // when the current page supplies the identical template, never by suffix.
-  for (const required of authority.normal) {
-    const hits = selected.filter(row => row.id === required.id || row.replaces === required.id || authority.corroded.some(c => c.id === row.id)
-      && row.renderTemplate && row.renderTemplate === required.renderTemplate);
-    if (hits.length !== 1) reasons.push("장비의 기본·고유 옵션 일부가 없거나 대체 옵션이 겹칩니다.");
-  }
+  // Require each original row or its verified replacement exactly once.
+  if(authority.normal.some(row=>counts.get(row)!==1)) reasons.push("장비의 기본·고유 옵션 일부가 없거나 대체 옵션이 겹칩니다.");
   return result();
 }
 

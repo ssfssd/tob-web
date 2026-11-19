@@ -1,7 +1,7 @@
-import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric } from './seasonAdvisor.js';
+import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, sameObservedSkillCostBasis } from './seasonAdvisor.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels } from './seasonGearPicker.js';
 import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, observedSkillCostFields } from './seasonDps.js';
 
 function encounterInputChanges(before, after, metric) {
   const old=before.document.targetBuild, current=after.document.targetBuild;
@@ -27,6 +27,11 @@ function encounterInputChanges(before, after, metric) {
     for(const [key,fallback] of [['hitChance',100],['useShare',single?100:undefined]]) {
       const label=SEASON_DPS_SKILL_FIELDS[key].label;
       add(`${index+1}번 칸 · ${label}`,a[key]??fallback,b[key]??fallback,'dps-input',`${index}:${key}`,'conditions','%');
+    }
+    if(sameObservedSkillCostBasis(before.report,after.report,index,metric)){
+      for(const key of observedSkillCostFields)
+        if(Number.isFinite(a[key])&&Number.isFinite(b[key]))
+          add(`${index+1}번 칸 · ${SEASON_DPS_SKILL_FIELDS[key].label}`,a[key],b[key],'dps-input',`${index}:${key}`,'conditions');
     }
   });
   return changes;
