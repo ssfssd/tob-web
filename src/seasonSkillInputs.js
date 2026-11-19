@@ -9,8 +9,10 @@ export function writePeriodicBurstUptime(dps,value) {
   if(value==='')delete dps.periodicBurstUptime;
   else dps.periodicBurstUptime=value;
 }
-export const hasPeriodicBurstSupport = (components=[]) => components.some(c => c.category==='supports'
-  && c.calculations?.some(entry=>entry.mechanics?.some(m=>m.kind==='periodic-burst')));
+export const periodicBurstLinks = (components=[]) => components.filter(c=>c.category==='supports').flatMap(({id,calculations})=>
+  (calculations??[]).flatMap(linked=>(linked.mechanics??[]).filter(mechanic=>mechanic.kind==='periodic-burst')
+    .map(mechanic=>({id,linked,mechanic}))));
+export const hasPeriodicBurstSupport = components => periodicBurstLinks(components).length>0;
 
 // Only encounter choices whose meaning is independent of the selected skill
 // can survive replacement. Proc rates, weapon values and minion bases cannot.

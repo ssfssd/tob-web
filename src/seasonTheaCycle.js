@@ -6,7 +6,7 @@ import { createTheaEventRuntime, validTheaEvents } from "./seasonTheaEvents.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { calculateTheaCombatAverage } from "./seasonTheaCombat.js";
-import { manualResourceBalance } from "./seasonDps.js";
+import { manualResourceBalance, seasonDamageTypeParts } from "./seasonDps.js";
 
 export function validTheaInputs(inputs) {
   if (inputs.theaCombatReceipt !== undefined && !/^[a-f0-9]{64}$/u.test(inputs.theaCombatReceipt)) return false;
@@ -136,6 +136,7 @@ export function calculateTheaAverage(build, calculateState) {
   };
   let projectileDps = 0;
   let projectileNumbedDps = 0;
+  let projectileDamageByType = {};
   const projectileCosts = { mana: 0, life: 0 };
   let sampleError = null;
   if (!blockers.length) {
@@ -163,7 +164,11 @@ export function calculateTheaAverage(build, calculateState) {
       // Applies to this successful consumption cast only, never to every hit
       // in the following four-second recent-consumption window.
       const row = after.rows[0];
+      const weight=1/samples/cycle.seconds;
       projectileDps += row.values.averageHit / samples / cycle.seconds;
+      if (!row.averageHitByType) projectileDamageByType=null;
+      if (projectileDamageByType) for (const [type,damage] of Object.entries(row.averageHitByType))
+        projectileDamageByType[type]=(projectileDamageByType[type]??0)+damage*weight;
       if (Number.isFinite(projectileNumbedDps) && Number.isFinite(row.fixedNumbedPerCast))
         projectileNumbedDps += row.fixedNumbedPerCast / samples / cycle.seconds;
       else projectileNumbedDps = null;
@@ -196,6 +201,22 @@ export function calculateTheaAverage(build, calculateState) {
   }, 0) : null;
   for (const row of rows) {
     const stateRow = state => state.rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
+    row.damageByType=undefined;
+    row.minionDamageByType=undefined;
+    if (supported&&projectileCast&&row.rowIndex===0) row.damageByType=projectileDamageByType??undefined;
+    else if (supported) {
+      const types={};
+      const complete=simulation.segments.every(segment=>{
+        const parts=seasonDamageTypeParts(stateRow(cache.get(segment)));
+        if (!parts) return false;
+        for (const [type,damage] of parts) types[type]=(types[type]??0)+damage*segment.seconds/cycle.seconds;
+        return true;
+      });
+      if (complete) {
+        row.damageByType=types;
+        if (row.values.minionDps>0&&row.values.minionDps===row.values.dps) row.minionDamageByType=types;
+      }
+    }
     for (const key of ["reapingDps", "permafrostDps", "minionHitDps", "fixedNumbedHitDps", "fixedNumbedDotDps", "fixedNumbedReapingDps", "fixedNumbedMinionDps"]) {
       if (!Object.hasOwn(row.values,key)) continue;
       row.values[key] = timeAverage(state => stateRow(state)?.values[key]);

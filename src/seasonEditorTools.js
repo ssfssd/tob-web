@@ -54,6 +54,9 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const composition=p.damageCompositionChanges?.length?`<table class="slot-dps-table" data-role="damage-composition-preview"><caption>발동 유형별 ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
     <thead><tr><th scope="col">유형</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.damageCompositionChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
+  const types=p.damageTypeChanges?.length?`<table class="slot-dps-table" data-role="damage-type-preview"><caption>속성별 ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
+    <thead><tr><th scope="col">속성</th>${headers}<th scope="col">변화</th></tr></thead>
+    <tbody>${p.damageTypeChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
   const speed=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:4});
   const speeds=p.skillSpeedChanges?.length?`<table class="slot-dps-table" data-role="skill-speed-preview"><caption>스킬 사용 가능 속도 · 회/초${p.dpsBasis==='assumedDps'?' · 방어 전 기준':''}</caption>
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
@@ -73,10 +76,13 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
     <thead><tr><th scope="col">수치</th>${headers}</tr></thead>
     <tbody>${p.numbedStateChanges.map(({label,from,to,unit})=>`<tr><th scope="row">${esc(label)}</th><td>${fmt(from)}${esc(unit)}</td><td>${fmt(to)}${esc(unit)}</td></tr>`).join('')}</tbody></table>`:'';
   const uptimeValue=(rate,dps)=>esc(rate)+(Number.isFinite(dps)?`<small> · ${fmt(dps)} DPS</small>`:'');
-  const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>가동률 변화 · ${p.dpsBasis==='assumedDps'?'방어 전 DPS 기여':'DPS 기여'}</caption>
+  const uptimeLabel=p.uptimeChanges?.some(row=>row.buffState)?'가동률·버프 상태 변화':'가동률 변화';
+  const uptimeDpsLabel=p.uptimeChanges?.some(row=>Number.isFinite(row.fromDps)||Number.isFinite(row.toDps))
+    ? ` · ${p.dpsBasis==='assumedDps'?'방어 전 DPS 기여':'DPS 기여'}`:'';
+  const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>${uptimeLabel}${uptimeDpsLabel}</caption>
     <thead><tr><th scope="col">효과</th>${headers}</tr></thead>
     <tbody>${p.uptimeChanges.map(({name,from,to,fromDps,toDps})=>`<tr><th scope="row">${esc(name)}</th><td>${uptimeValue(from,fromDps)}</td><td>${uptimeValue(to,toDps)}</td></tr>`).join('')}</tbody></table>`:'';
-  return skill+composition+speeds+usage+uptimes+numbedState+numbed;
+  return skill+composition+types+speeds+usage+uptimes+numbedState+numbed;
 }
 
 export function renderResourceChanges(p,esc,{board=false,skill=false,action=board?'적용':'교체'}={}){
@@ -86,12 +92,18 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
   const castCosts=skill?rows.filter(row=>row.label==='시전당 MP'||row.label==='시전당 HP'):[];
   const [first,...rest]=castCosts.length?rows.filter(row=>!castCosts.includes(row)):rows;
   const manaNote=p.manaObservationStale?`<p>${p.previous?'직전 변경 · ':''}MP 회복 조건이 바뀌었습니다. ${esc(action)} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
-  if(!first&&!castCosts.length)return manaNote;
+  const perSkill=p.skillResourceChanges?.length?`<details data-role="slot-skill-resource-changes"><summary>스킬별 초당 소모 변화</summary>
+    <table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${p.previous?'직전':'변경 전'}</th><th scope="col">변경 후</th></tr></thead>
+    <tbody>${p.skillResourceChanges.map(({index,beforeId,afterId,resource,a,b})=>{
+      const name=beforeId&&afterId&&beforeId!==afterId?`${skillName(beforeId)} → ${skillName(afterId)}`:skillName(afterId??beforeId);
+      return `<tr><th scope="row">${esc(`${slotName(index)} · ${name} · ${resource}/초`)}</th><td>${beforeId?amount(a):'—'}</td><td>${afterId?amount(b):'—'}</td></tr>`;
+    }).join('')}</tbody></table></details>`:'';
+  if(!first&&!castCosts.length)return manaNote+perSkill;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
   const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
   const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
-  return detailRows.length||manaNote||basisNote
-    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}</details>`
+  return detailRows.length||manaNote||basisNote||perSkill
+    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}${perSkill}</details>`
     : `<p data-role="slot-resource-preview">${esc(summary)}</p>`;
 }
 

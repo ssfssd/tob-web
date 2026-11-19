@@ -132,8 +132,11 @@ export function inactiveIcePulseOptions(parsed, record, scope) {
   return [...parsed.blockers,...parsed.effects].flatMap(({sourceText,stat})=>{
     if (scope.noChargeSkill && stat==='max_charges' && sourceText==='+1 Max Charges')
       return [{stat,sourceText,reason:'충전 횟수가 적용되는 스킬이 장착되어 있지 않습니다.'}];
-    if (scope.noPotionOrMobility && /^When defeating a Frostbitten enemy, - (20|25)\s*% current cooldown of potion and Mobility skills$/u.test(sourceText??''))
-      return [{stat:'potion_mobility_cooldown_on_frostbite_kill',sourceText,reason:'물약·위치 이동 스킬이 장착되어 있지 않습니다.'}];
+    if ((scope.noPotionOrMobility || scope.usesSelectedBuffState)
+      && /^When defeating a Frostbitten enemy, - (20|25)\s*% current cooldown of potion and Mobility skills$/u.test(sourceText??''))
+      return [{stat:'potion_mobility_cooldown_on_frostbite_kill',sourceText,reason:scope.noPotionOrMobility
+        ? '물약·위치 이동 스킬이 장착되어 있지 않습니다.'
+        : '현재 DPS는 선택한 간헐적 폭발 적용 상태를 사용합니다. 처치 시 쿨타임 감소로 버프 유지율을 계산하지 않습니다.'}];
     return [];
   });
 }

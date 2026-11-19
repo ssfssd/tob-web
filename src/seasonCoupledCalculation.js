@@ -10,7 +10,7 @@ import { SEASON_BLESSING_CAP_STATS } from './seasonBlessings.js';
 import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { isObservedTerraGearEffect } from './seasonGearEffects.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
-import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { periodicBurstLinks, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { seasonAppliedOverlevelMultiplier } from './seasonSkillLevels.js';
 
 // This is deliberately a direct-card projection, not a character model. Every
@@ -67,8 +67,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
   const recentDamageStates=components.filter(c=>c.category==='supports').flatMap(c=>c.calculations??[])
     .flatMap(row=>row.mechanics??[]).filter(m=>m.kind==='recent-nonphysical-damage-types');
   if(new Set(recentDamageStates.map(m=>m.types.join(','))).size>1)blockers.push(recentDamageConflict);
-  const periodicBursts=components.filter(c=>c.category==='supports').flatMap(({id,calculations})=>(calculations??[]).flatMap(linked=>
-    (linked.mechanics??[]).filter(m=>m.kind==='periodic-burst').map(mechanic=>({id,linked,mechanic}))));
+  const periodicBursts=periodicBurstLinks(components);
   if (periodicBursts.length) {
     const uptime=readPeriodicBurstUptime(build.ss14Inputs?.dps);
     if (![0,100].includes(uptime)) blockers.push('간헐적 폭발의 현재 적용 여부를 선택하세요.');

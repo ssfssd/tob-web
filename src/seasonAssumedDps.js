@@ -8,10 +8,11 @@ import { describeUptime, uptimeFields } from './seasonUptimeDetails.js';
 import { isPersistentModuleAction, seasonModuleProfile } from './seasonModules.js';
 import { seasonSkillCalculationLevel } from './seasonSkillLevels.js';
 import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
-import { hasPeriodicBurstSupport, readPeriodicBurstUptime, writePeriodicBurstUptime } from './seasonSkillInputs.js';
+import { hasPeriodicBurstSupport, writePeriodicBurstUptime } from './seasonSkillInputs.js';
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
 
 export const ASSUMED_DPS_IGNORED_DEFENSE_FIELDS = ['armor','fire','cold','lightning','erosion'];
+export const SEASON_UPTIME_INPUTS = ['dotUptime','permafrostUptime','reapingOverlap','minionUptime','moduleIgniteUptime','coreUptime','moduleRate0','moduleRate1'];
 
 // Build an ephemeral comparison scenario. Never write assumptions to an editor
 // document, its combat controls, storage, or its share code.
@@ -31,7 +32,6 @@ export function buildUptimeScenario(build, report) {
   const defaults = [];
   const skillUptimes = [];
   if(hasPeriodicBurstSupport(report.components)){
-    skillUptimes.push({name:'전투 버프',field:'periodicBurstUptime',saved:readPeriodicBurstUptime(dps),assumed:100});
     writePeriodicBurstUptime(dps,100);
   }
   for (const {id,rowIndex,name} of rows) {
@@ -169,7 +169,9 @@ export function calculateEditorSeasonBuild(build, options = {}) {
   const scenario = calculateSeasonBuild(next, {...options, sourceBuild:options.sourceBuild ?? build, beforeDefense:true, includeAverage:false});
   const estimate = scenario.fullDps;
   const {mana, reservedManaPercent, sealedManaCompensation, unreservedMana} = scenario.character.values;
-  report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,
+  const uptimeInputs=Object.fromEntries(Object.entries(next.ss14Inputs.dps.skills).map(([index,binding])=>[index,
+    Object.fromEntries(SEASON_UPTIME_INPUTS.filter(key=>Number.isFinite(binding[key])).map(key=>[key,binding[key]]))]));
+  report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,uptimeInputs,
     dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotWindowBounds:estimate.dotWindowBounds,
     dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
     dotExclusiveUnconfirmed:estimate.dotExclusiveUnconfirmed, reapingOverlapOverflow:estimate.reapingOverlapOverflow,
@@ -184,11 +186,11 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,measuredManualUses,castCostObservation})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,damageByType,measuredManualUses,castCostObservation})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
       return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
-        conversionTrace:conversionTrace??direct?.trace,minionDamageByType,
+        conversionTrace:conversionTrace??direct?.trace,minionDamageByType,damageByType,
         detail:{damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
           critical:offense?.values, pools, takenMultiplier, skillLevel:seasonSkillCalculationLevel(scenario,rowIndex),
           cadence:direct?.offenseBasis?.cadence,

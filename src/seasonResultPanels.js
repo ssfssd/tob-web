@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDotWindowRepairs } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDamageTypeComposition, SEASON_DAMAGE_TYPE_LABELS as damageTypes, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, renderObservedManaInput } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -85,7 +85,7 @@ export function renderEditDpsComparison(s, compact = false) {
   }
   const changedInputs=(rows,role)=>{
     if(!rows?.length)return '';
-    const value=(n,unit)=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:6})+unit:'미입력';
+    const value=(n,unit)=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:6})+unit:typeof n==='string'?esc(n)+(n==='없음'?'':unit):'미입력';
     return `<ul aria-label="달라진 전투 조건" data-role="${role}">${rows.map(({label,a,b,edit,key,tab,unit})=>
       `<li>${esc(label.replace(/ \(%\)$/u,''))} <strong>${value(a,unit)} → ${value(b,unit)}</strong>
         ${button('조건 수정',tab?'result-tab':'requirement',
@@ -199,7 +199,7 @@ export function renderResultConditions(s) {
   const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
   const windowAssignments=overlaps.map(({id,start,stop,slots})=>{
     const name=SS14_CARDS.records[id]?.name??'지속 대미지';
-    return `<fieldset tabindex="-1" data-role="dot-window-overlap-${esc(id)}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
+    return `<fieldset tabindex="-1" data-role="${esc(seasonDotWindowRole({id,start,stop}))}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
       <p>겹친 시간에 대미지를 준 슬롯을 선택하세요.</p>
       ${slots.map(index=>button(`${index+1}번 칸에 배정`,'assign-dot-window',`data-key="${esc(id)}" data-start="${start}" data-stop="${stop}" data-index="${index}"`)).join('')}</fieldset>`;
   }).join('');
@@ -359,7 +359,6 @@ function renderUpgradeRanking(s){
     <div data-upgrade-results>${content}</div>
     <details><summary>분석 기준</summary><p>${skillReplacement?'같은 칸에서 기본 레벨, 시전 시간 배분, 적중률을 유지하고 전체 빌드 DPS를 비교합니다. 연결할 수 없는 보조는 해제됩니다.':group==='unit'?'SS14에서 확인한 옵션을 하나씩 1단위 추가해 계산합니다.':equipment?'도감은 옵션 범위 상한, 보관함은 저장된 수치를 사용합니다.':group==='gearImpact'?'장비를 한 부위씩 해제해 DPS와 MP·HP 변화를 비교합니다.':group==='gear'?'옵션 수치를 한 단위씩 바꿉니다. 범위 조합은 양 끝값을 차례로 비교합니다.':group==='craft'?'제작창의 T1 기본값을 사용합니다. 한 부위의 조합은 가장 큰 상승을 주는 변경부터 한 칸씩 적용해 다시 비교합니다.':'선택한 수치나 레벨을 한 단계 바꿔 DPS를 비교합니다.'}</p></details></section>`;
 }
-const damageTypes={physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식'};
 
 function calcRows(entries) {
   return '<dl>'+entries.map(([label,value,source])=>`<div><dt>${esc(label)}${source?`<small class="skill-calc-source">${esc(source)}</small>`:''}</dt><dd>${esc(value)}</dd></div>`).join('')+'</dl>';
@@ -457,11 +456,14 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
   if(!rows?.length)return '';
   const route=(trace,states,hands,index)=>states?renderElixirDamageRoutes(states,index)
     :hands?renderWeaponDamageRoutes(hands,index):renderSkillConversion(trace,index);
-  return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,previous,current,previousStates,currentStates,previousHands,currentHands})=>{
+  const name=id=>{
     const card=SS14_CARDS.records[id];
-    const name=card?.season==='SS14'&&card.koreanTextVerified?card.name:'한국어 이름 미제공';
+    return card?.season==='SS14'&&card.koreanTextVerified?card.name:'한국어 이름 미제공';
+  };
+  return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,beforeId,previous,current,previousStates,currentStates,previousHands,currentHands})=>{
+    const skill=beforeId?`${name(beforeId)} → ${name(id)}`:name(id);
     const empty=' · 적용 없음';
-    return `<section><h4>${esc(name)} · ${index+1}번 칸</h4>
+    return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <div><b>${esc(before)}</b>${route(previous,previousStates,previousHands,`${role}-before-${index}`)||empty}</div>
       <div><b>${esc(after)}</b>${route(current,currentStates,currentHands,`${role}-after-${index}`)||empty}</div></section>`;
   }).join(''),role);
@@ -833,10 +835,13 @@ function skillContributions(s) {
   if ([...bySkill.values()].some(group=>group.count>1))
     slots.sort((a,b)=>(bySkill.get(a.id)?.first??a.index)-(bySkill.get(b.id)?.first??b.index));
   const parts = reconciled ? (seasonDamageComposition(dps) ?? []).filter(part=>part.value>0) : [];
-  const composition = parts.length>1
-    ? `<details data-role="analysis-damage-composition"><summary>발동 유형별 ${metric==='assumedDps'?'방어 전 ':''}DPS 비중</summary>
-      <table aria-label="발동 유형별 DPS 비중"><thead><tr><th scope="col">유형</th><th scope="col">DPS</th><th scope="col">비중</th></tr></thead>
-      <tbody>${parts.map(({label,value})=>`<tr><th scope="row">${label}</th><td>${number(value)}</td>${shareCell(value)}</tr>`).join('')}</tbody></table></details>` : '';
+  const types = reconciled ? (seasonDamageTypeComposition(dps) ?? []).filter(part=>part.value>0) : [];
+  const renderParts=(parts,role,label,column)=>parts.length>1
+    ? `<details data-role="${role}"><summary>${label} ${metric==='assumedDps'?'방어 전 ':''}DPS 비중</summary>
+      <table aria-label="${label} DPS 비중"><thead><tr><th scope="col">${column}</th><th scope="col">DPS</th><th scope="col">비중</th></tr></thead>
+      <tbody>${parts.map(({label,type,value})=>`<tr><th scope="row">${label??damageTypes[type]}</th><td>${number(value)}</td>${shareCell(value)}</tr>`).join('')}</tbody></table></details>` : '';
+  const composition=renderParts(parts,'analysis-damage-composition','발동 유형별','유형')
+    +renderParts(types,'analysis-damage-types','속성별','속성');
   return `<section class="skill-contributions" aria-label="스킬별 DPS"><h2>스킬별 DPS</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${slots.map(({index,id,row,hasSupport})=>{
     const label=nameFor(SS14_CARDS.records[id]);
     const slotName=index===0?'주력':index<active.length?'액티브 '+(index+1):'패시브 '+(index-active.length+1);

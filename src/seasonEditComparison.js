@@ -1,7 +1,10 @@
-import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, sameObservedSkillCostBasis } from './seasonAdvisor.js';
+import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, sameObservedSkillCostBasis, seasonTimedSkillInputs, seasonUptimeInputChanges } from './seasonAdvisor.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels } from './seasonGearPicker.js';
 import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, observedSkillCostFields } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldDefinition, observedSkillCostFields } from './seasonDps.js';
+import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { ADDED_FIELDS } from './seasonWeaponInputs.js';
+import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
 
 function encounterInputChanges(before, after, metric) {
   const old=before.document.targetBuild, current=after.document.targetBuild;
@@ -10,23 +13,42 @@ function encounterInputChanges(before, after, metric) {
     if (a!==b) changes.push({label,a,b,edit,key,tab,unit});
   };
   const oldInputs=old.ss14Inputs, inputs=current.ss14Inputs;
+  if (metric==='fullDps'&&hasPeriodicBurstSupport(before.report.components)&&hasPeriodicBurstSupport(after.report.components)) {
+    const {label,choices}=SEASON_DPS_SKILL_FIELDS.periodicBurstUptime;
+    const state=dps=>choices.find(([value])=>value===readPeriodicBurstUptime(dps))?.[1];
+    add(label,state(oldInputs.dps),state(inputs.dps),'dps-input',PERIODIC_BURST_INPUT,'conditions');
+  }
   for(const key of Object.keys(SEASON_DPS_ENEMY_FIELDS)) {
     if(metric==='assumedDps'&&ASSUMED_DPS_IGNORED_DEFENSE_FIELDS.includes(key))continue;
     const label=seasonDpsEnemyFieldDefinition(current,key).label;
-    add(label,oldInputs.dps?.enemy?.[key],inputs.dps?.enemy?.[key],'dps-input',`enemy:${key}`,
-      key!=='numbedStacks'?'conditions':null,label.endsWith('(%)')?'%':'');
+    add(label,oldInputs.dps?.enemy?.[key],inputs.dps?.enemy?.[key],'dps-input',`enemy:${key}`,'conditions',label.endsWith('(%)')?'%':'');
   }
   if(oldInputs.theaCycle?.mode==='automatic'&&inputs.theaCycle?.mode==='automatic'){
     for(const [key,label] of [['seconds','측정 시간'],['warmup','측정 전 준비 시간']])
       add(label,oldInputs.theaCycle[key],inputs.theaCycle[key],'thea-cycle-input',key,null,'초');
   }
   const single=before.report.coupledSkills.rows.length===1&&after.report.coupledSkills.rows.length===1;
+  const timed=theaCombatEnabled(old)&&oldInputs.theaCycle?.mode==='automatic';
   current.skills.active.forEach((slot,index)=>{
     if(!slot?.skillId||slot.skillId!==old.skills.active[index]?.skillId)return;
     const a=oldInputs.dps?.skills?.[index]??{}, b=inputs.dps?.skills?.[index]??{};
     for(const [key,fallback] of [['hitChance',100],['useShare',single?100:undefined]]) {
       const label=SEASON_DPS_SKILL_FIELDS[key].label;
       add(`${index+1}번 칸 · ${label}`,a[key]??fallback,b[key]??fallback,'dps-input',`${index}:${key}`,'conditions','%');
+    }
+    for(const [key,{label}] of Object.entries(ADDED_FIELDS))
+      add(`${index+1}번 칸 · ${label}`,a[key]??0,b[key]??0,'dps-input',`${index}:${key}`,'conditions');
+    for(const {key,a,b} of seasonUptimeInputChanges(old,current,before.report,after.report,index,metric)) {
+      const {label}=seasonDpsSkillFieldDefinition(slot.skillId,key);
+      add(`${index+1}번 칸 · ${label}`,a,b,'dps-input',`${index}:${key}`,'conditions',label.endsWith('(%)')?'%':'');
+    }
+    if(timed){
+      const from=seasonTimedSkillInputs(before.report,index,metric), to=seasonTimedSkillInputs(after.report,index,metric);
+      const text=values=>values?.length?values.map(v=>Array.isArray(v)?v.join('–'):v).join(', '):values?'없음':undefined;
+      for(const key of Object.keys(from)) {
+        const label=SEASON_DPS_SKILL_FIELDS[key].label.replace(/ \(초\)$/u,'');
+        add(`${index+1}번 칸 · ${label}`,text(from[key]),text(to[key]),'dps-input',`${index}:${key}`,'conditions','초');
+      }
     }
     if(sameObservedSkillCostBasis(before.report,after.report,index,metric)){
       for(const key of observedSkillCostFields)

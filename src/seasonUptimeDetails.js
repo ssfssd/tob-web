@@ -1,6 +1,7 @@
 import { blessingConditionValue, blessingLabel } from './seasonBlessings.js';
 import { combatNumbedEnabled } from './seasonTheaCombatInputs.js';
 import { seasonNumbedDamageRows } from './seasonDps.js';
+import { periodicBurstLinks, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
 export const uptimeFields = {
   dotUptime: ['지속 대미지', '효과가 끝나기 전에 같은 대상에게 다시 적용하면 100%를 유지할 수 있습니다. 지속 대미지 DPS에 유지율을 곱합니다.'],
@@ -8,7 +9,6 @@ export const uptimeFields = {
   minionUptime: ['소환체 공격', '대상을 소환체의 공격 범위 안에 유지하세요. 이 비율은 소환체의 직접 공격에 적용됩니다.'],
   moduleIgniteUptime: ['모듈 점화', '대상에게 소환체의 점화가 남아 있는 시간을 잽니다. 모듈 점화 DPS에 유지율을 곱합니다.'],
   coreUptime: ['클락워크 코어', '코어가 작동하는 시간을 잽니다. 초당 코어 발동 횟수에 유지율을 곱합니다.'],
-  periodicBurstUptime: ['간헐적 폭발', '보조 대상 이동 스킬로 버프를 얻고 다음 이동 스킬을 쓰면 2초 동안 공격·시전 속도가 증가합니다. 활성 상태의 속도를 계산에 적용합니다.'],
 };
 const permafrostUptime = ['동토 지속 대미지', '동토가 대상에게 대미지를 준 시간의 비율을 적용합니다. 직접 시전한 한빙 지면과 겹친 시간은 한 번만 계산합니다.'];
 
@@ -26,16 +26,19 @@ function damageContribution(report, field) {
 export function compareSeasonUptimeChanges(before, after, metric) {
   const key=metric==='assumedDps'?'assumed':'setting';
   const damage=metric==='assumedDps'?'contribution':'inputContribution';
-  const unit=(row)=>row[key].endsWith('%')?'percent':row.timedReaping&&row[key].endsWith('회')?'count':null;
+  const unit=(row)=>row.buffState?'state':row[key].endsWith('%')?'percent':row.timedReaping&&row[key].endsWith('회')?'count':null;
   const rows=(report)=>new Map((report.assumedDps?.uptimeDetails??[])
     .filter(row=>row.key&&unit(row)).map(row=>[row.key,row]));
   const previous=rows(before), current=rows(after);
-  return [...current].flatMap(([id,row])=>{
-    const old=previous.get(id);
-    if (!old||unit(old)!==unit(row)) return [];
+  const absent={buffState:true,[key]:'미장착'};
+  return [...new Set([...current.keys(),...previous.keys()])].flatMap(id=>{
+    let old=previous.get(id), row=current.get(id);
+    if (old?.buffState && !row) row={...absent,name:old.name};
+    if (row?.buffState && !old) old=absent;
+    if (!old||!row||unit(old)!==unit(row)) return [];
     const fromDps=old[damage], toDps=row[damage];
     const contributionChanged=Number.isFinite(fromDps)&&Number.isFinite(toDps)&&count(fromDps)!==count(toDps);
-    return old[key]!==row[key]||contributionChanged ? [{name:row.name,from:old[key],to:row[key],fromDps,toDps}] : [];
+    return old[key]!==row[key]||contributionChanged ? [{name:row.name,from:old[key],to:row[key],fromDps,toDps,...(row.buffState&&{buffState:true})}] : [];
   });
 }
 
@@ -75,6 +78,14 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       inputContribution:contribution(report,original),
     };
   });
+  const burst=periodicBurstLinks(estimate.components);
+  if (burst.length) {
+    const {interval,duration,value}=burst[0].mechanic;
+    const state=selected=>selected===0?'미적용':selected!==100?'미정':burst.length>1?'중첩 확인 필요':`적용 · 공격·시전 속도 +${percent(value)}`;
+    lines.push({key:'periodic-burst',name:'간헐적 폭발',buffState:true,
+      setting:state(readPeriodicBurstUptime(build.ss14Inputs.dps)),assumed:state(100),
+      method:`보조 대상 이동 스킬을 쓰면 ${count(interval)}초 간격으로 버프를 얻습니다. 다음 이동 스킬을 쓴 뒤 ${count(duration)}초 동안 속도가 증가합니다. DPS에는 선택한 순간의 속도를 반영합니다.`});
+  }
   for (const row of estimate.fullDps.rows) {
     const original=report.fullDps.rows.find(item=>item.rowIndex===row.rowIndex);
     const timed=row.timedReaping||original?.timedReaping;

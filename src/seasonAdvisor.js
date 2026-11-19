@@ -1,5 +1,5 @@
 import { calculateSeasonBuild } from "./seasonBuild.js";
-import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS, calculateEditorSeasonBuild } from './seasonAssumedDps.js';
+import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS, SEASON_UPTIME_INPUTS, calculateEditorSeasonBuild } from './seasonAssumedDps.js';
 import { normalizeBuild } from "./engine.js";
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
@@ -8,7 +8,7 @@ import { getSeasonSelectionRecord } from './seasonSelections.js';
 import { boundSeasonConditionGroups, exclusiveResourceStates, incompatibleNearbyEnemyStates } from './seasonEffectConditions.js';
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
 import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
-import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { hasPeriodicBurstSupport, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaElixirTimingKeys } from './seasonTheaEvents.js';
 import { observedSkillCostFields } from './seasonDps.js';
 
@@ -82,7 +82,8 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
   const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
-  if(leftBurst!==undefined&&rightBurst!==undefined&&leftBurst!==rightBurst)return false;
+  if(metric!=='assumedDps'&&leftBurst!==undefined&&rightBurst!==undefined&&leftBurst!==rightBurst
+    && hasPeriodicBurstSupport(leftReport?.components)&&hasPeriodicBurstSupport(rightReport?.components))return false;
   const leftInputs = left.ss14Inputs.dps?.skills ?? {}, rightInputs = right.ss14Inputs.dps?.skills ?? {};
   const slotId = (build, index) => (index < 5 ? build.skills?.active?.[index] : build.skills?.passive?.[index-5])?.skillId;
   const timed = theaCombatEnabled(left) && left.ss14Inputs.theaCycle?.mode === 'automatic';
@@ -96,28 +97,17 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     if (sameSkill && Object.keys(ADDED_FIELDS).some(key => (a[key] ?? 0) !== (b[key] ?? 0))) return false;
     if (sameSkill && ((a.hitChance ?? 100) !== (b.hitChance ?? 100)
       || (a.useShare ?? (singleSkill ? 100 : undefined)) !== (b.useShare ?? (singleSkill ? 100 : undefined)))) return false;
-    const row = report => report?.fullDps?.rows?.find(r=>r.rowIndex===Number(index));
-    const leftRow = row(leftReport), rightRow = row(rightReport);
     const compareObservedCosts = sameSkill && sameObservedSkillCostBasis(leftReport,rightReport,Number(index),metric);
-    const leftWindows = timed ? leftRow?.dotWindows : undefined;
-    const rightWindows = timed ? rightRow?.dotWindows : undefined;
-    const chargeSchedule = channel => channel?.times ?? (channel?.rate === 0 ? [] : undefined);
-    const leftCharges = timed ? chargeSchedule(leftRow?.channelCost) : undefined;
-    const rightCharges = timed ? chargeSchedule(rightRow?.channelCost) : undefined;
-    const reapSchedule = report => (report?.[metric]?.rows ?? report?.fullDps?.rows)
-      ?.find(r=>r.rowIndex===Number(index))?.reaping?.times;
-    const leftReaps = timed && sameSkill ? reapSchedule(leftReport) : undefined;
-    const rightReaps = timed && sameSkill ? reapSchedule(rightReport) : undefined;
-    if (sameSkill && timed && (stable(leftWindows) !== stable(rightWindows)
-      || stable(leftRow?.fissure?.times) !== stable(rightRow?.fissure?.times)
-      || stable(leftCharges) !== stable(rightCharges)
-      || stable(leftReaps) !== stable(rightReaps))) return false;
+    const leftSchedule=timed?seasonTimedSkillInputs(leftReport,Number(index),metric):{};
+    const rightSchedule=timed?seasonTimedSkillInputs(rightReport,Number(index),metric):{};
+    if (sameSkill&&timed&&stable(leftSchedule)!==stable(rightSchedule)) return false;
+    if (sameSkill&&seasonUptimeInputChanges(left,right,leftReport,rightReport,Number(index),metric).length) return false;
     for (const key of Object.keys(a)) {
       if (key==='observedSkillCostBasis' || (!compareObservedCosts && observedSkillCostFields.includes(key))) continue;
+      if (sameSkill&&SEASON_UPTIME_INPUTS.includes(key)) continue;
       if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
-      if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime'
-        || sameSkill && leftCharges && rightCharges && key==='channelCostRate') continue;
-      if (leftReaps && rightReaps && ['reapingTimes','reapingRate','reapingMode'].includes(key)) continue;
+      if (timed && key==='fissureHits' || sameSkill && leftSchedule.channelCostTimes && rightSchedule.channelCostTimes && key==='channelCostRate') continue;
+      if (sameSkill && leftSchedule.reapingTimes && rightSchedule.reapingTimes && ['reapingTimes','reapingRate','reapingMode'].includes(key)) continue;
       if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
     }
   }
@@ -145,6 +135,23 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     if (rightExtensions.has(key) && value !== rightExtensions.get(key)) return false;
   }
   return true;
+}
+export function seasonTimedSkillInputs(report, index, metric) {
+  const row=report?.fullDps?.rows?.find(r=>r.rowIndex===index);
+  const reaping=(report?.[metric]?.rows??report?.fullDps?.rows)?.find(r=>r.rowIndex===index)?.reaping;
+  return {dotWindows:row?.dotWindows, fissureTimes:row?.fissure?.times,
+    channelCostTimes:row?.channelCost?.times??(row?.channelCost?.rate===0?[]:undefined), reapingTimes:reaping?.times};
+}
+export function seasonUptimeInputChanges(left,right,leftReport,rightReport,index,metric) {
+  const read=(build,report)=>metric==='assumedDps'&&report?.assumedDps?.uptimeInputs
+    ? report.assumedDps.uptimeInputs[index]??{} : build.ss14Inputs.dps?.skills?.[index]??{};
+  const a=read(left,leftReport), b=read(right,rightReport);
+  const timed=theaCombatEnabled(left)&&left.ss14Inputs.theaCycle?.mode==='automatic';
+  const windowed=timed&&seasonTimedSkillInputs(leftReport,index,metric).dotWindows&&seasonTimedSkillInputs(rightReport,index,metric).dotWindows;
+  return SEASON_UPTIME_INPUTS.flatMap(key=>{
+    if ((windowed&&(key==='dotUptime'||key==='permafrostUptime')) || (timed&&key==='reapingOverlap')) return [];
+    return Number.isFinite(a[key])&&Number.isFinite(b[key])&&a[key]!==b[key]?[{key,a:a[key],b:b[key]}]:[];
+  });
 }
 const metricValue = (report, metric) => metric === "fullDps" || metric === 'assumedDps' ? report[metric]?.dps ?? null : metric === "elixirAverageDps" ? report.elixirAverage?.expectedDps : metric === "directDps"
   ? report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.values.dps ?? null : metric === "expectedHitDps"

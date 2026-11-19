@@ -34,11 +34,11 @@ const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDp
 const weighted=(states,read)=>states.every(({value})=>Number.isFinite(read(value)))
   ? states.reduce((sum,{value,weight})=>sum+read(value)*weight,0) : null;
 
-function averageMinionDamageByType(samples) {
-  if (!samples.every(({value}) => value?.minionDamageByType || value?.values.minionDps === 0)) return undefined;
-  const types = new Set(samples.flatMap(({value}) => Object.keys(value.minionDamageByType ?? {})));
+function averageDamageByType(samples, field, total) {
+  if (!samples.every(({value}) => value?.[field] || value?.values[total] === 0)) return undefined;
+  const types = new Set(samples.flatMap(({value}) => Object.keys(value[field] ?? {})));
   if (!types.size) return undefined;
-  return Object.fromEntries([...types].map(type => [type, weighted(samples, value => value.minionDamageByType?.[type] ?? 0)]));
+  return Object.fromEntries([...types].map(type => [type, weighted(samples, value => value[field]?.[type] ?? 0)]));
 }
 
 function averageDotBreakdown(samples, key) {
@@ -153,7 +153,8 @@ export function applyObservedElixirUptime(build,report,calculateState) {
         })},
       }),
       dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
-      minionDamageByType:supported?averageMinionDamageByType(samples):undefined,
+      minionDamageByType:supported?averageDamageByType(samples,'minionDamageByType','minionDps'):undefined,
+      damageByType:supported?averageDamageByType(samples,'damageByType','dps'):undefined,
       permafrostBreakdown:supported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
       dotDefense:supported?averageDotDefense(samples,'dotDefense'):undefined,
       frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,

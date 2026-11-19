@@ -25,6 +25,7 @@ function finishCombatRows(combat, seconds) {
     row.specialDps = row.omenDps + row.playerDeteriorationDps;
     row.dps = row.manualDps + row.spellBurstDps + row.repeatDps + row.heroDps + row.netherDps + row.specialDps + row.dotDps + row.permafrostDps + row.reapingDps + row.minionDps;
     for (const key of recordedKeys) row[key] /= seconds;
+    for (const type of Object.keys(row.damageByType)) row.damageByType[type] /= seconds;
     if (row.minionDamageByType) {
       for (const type of Object.keys(row.minionDamageByType)) row.minionDamageByType[type] /= seconds;
     }
@@ -115,8 +116,13 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const omen = createOmenAccumulator();
   const rows = new Map(report.fullDps.rows.map(r => [r.rowIndex, {
     ...Object.fromEntries(recordedKeys.map(k => [k, 0])),
-    ...(r.minionSkills && {minionDamageByType:{}}),
+    damageByType:{},
+    ...((r.minionSkills||r.minionDamageByType) && {minionDamageByType:{}}),
   }]));
+  const recordTypes=(rowIndex,amounts,weight)=>{
+    const totals=rows.get(rowIndex).damageByType;
+    for (const [type,damage] of Object.entries(amounts??{})) totals[type]=(totals[type]??0)+damage*weight;
+  };
   function accumulateMinionTypes(rowIndex, byType, weight, numbedEffect = 0) {
     const row = rows.get(rowIndex), totals = row.minionDamageByType;
     if (!totals || !byType) return;
@@ -242,6 +248,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         time = from + hi;
       }
       recordDamage(0, "omenDps", result.damage, time);
+      if (condition.elite&&inMeasurement(time)) recordTypes(0,{true:result.damage},1);
     }
   };
   function moduleCast(event, time, ctx) {
@@ -328,6 +335,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     const damageKey = event.trigger ? "netherDps" : event.kind === "burst" ? "spellBurstDps"
       : event.kind === "repeat" || event.kind === "fissure" ? "repeatDps" : "manualDps";
     recordDamage(event.row, damageKey, averageHit * hitMultiplier, time);
+    if (inMeasurement(time)&&row.combat.landedHit>0)
+      recordTypes(event.row,row.combat.landedByType,averageHit*hitMultiplier/row.combat.landedHit);
     if (row.combat.tags.includes("Spell") && averageHit > 0 && time + eps >= elixirInfiltrationReady
       && (build.skills.elixirs ?? []).some((s,i) => s?.skillId === "iridescent-butterfly-distillate" && elixirState(time)[`elixir${i}`])) {
       for (const type of Object.keys(infiltrations)) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
@@ -543,12 +552,14 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         for (const effect of active) {
           const amount = effect.damage * ignite.multiplier * (w + integral(lo, hi) / 100 * ignite.afflictionEffect);
           rows.get(effect.row)[effect.scorch ? "scorchDps" : "igniteDps"] += amount;
+          recordTypes(effect.row,{fire:amount},1);
         }
         for (const row of native) {
           const weight = w + integral(lo, hi) / 100 * row.combat.afflictionEffect;
           rows.get(row.rowIndex).dotDps += row.combat.dotWithoutAffliction * weight;
           rows.get(row.rowIndex).numbedDotDps += (row.combat.numbedDotWithoutAffliction ?? 0) * weight;
           rows.get(row.rowIndex).permafrostDps += (row.combat.frostWithoutAffliction ?? 0) * weight;
+          recordTypes(row.rowIndex,row.combat.persistentByType,weight);
         }
         // Minion action rates are explicit final rates. Integrate their own
         // state DPS; never emit player hit/ailment/blessing events for them.
@@ -614,6 +625,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
               if (inMeasurement(time)) reapedNativeRows.set(row.rowIndex,(reapedNativeRows.get(row.rowIndex)??0)+1);
               recordDamage(row.rowIndex,'reapingDps',amount,time);
               recordDamage(row.rowIndex,'numbedReapingDps',(row.combat.numbedDotWithoutAffliction ?? 0) * weight,time);
+              if (inMeasurement(time)) recordTypes(row.rowIndex,row.combat.persistentByType,weight);
             }
           }
           const active = activeIgnites();
@@ -624,15 +636,18 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
               const amount = effect.damage * multiplier;
               recordDamage(effect.row,'reapingDps',amount,time);
               recordDamage(effect.row,'igniteReapingDps',amount,time);
+              if (inMeasurement(time)) recordTypes(effect.row,{fire:amount},1);
             }
           }
         }
       }
       for (const event of deteriorations.filter(e => e.at <= time + eps)) {
         recordDamage(event.row, event.player ? 'playerDeteriorationDps' : 'minionDps', event.damage, time);
-        if (!event.player) {
+        if (event.player) {
+          if (inMeasurement(time)) recordTypes(event.row,{true:event.damage},1);
+        } else {
           recordDamage(event.row, 'minionDeteriorationDps', event.damage, time);
-          if (inMeasurement(time)) accumulateMinionTypes(event.row, {erosion:event.damage}, 1);
+          if (inMeasurement(time)) accumulateMinionTypes(event.row, {true:event.damage}, 1);
         }
         omenDamage(event.damage, time, getReport(ctx.snapshot()));
         deteriorations.splice(deteriorations.indexOf(event), 1);
@@ -808,12 +823,16 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       ? { events:reapingEvents/results.length,
         applied:sum(results.map(run=>run.reapedNativeRows.get(r.rowIndex)??0))/results.length }
       : null;
-    const typeSamples = supported && r.minionSkills ? results.map(run => run.rows.get(r.rowIndex).minionDamageByType) : [];
-    const types = new Set(typeSamples.flatMap(sample => Object.keys(sample ?? {})));
-    const minionDamageByType = types.size ? Object.fromEntries([...types].map(type => [
-      type, sum(typeSamples.map(sample => sample?.[type] ?? 0)) / results.length,
-    ])) : undefined;
-    return { ...r, minionDamageByType, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+    const averageTypes=field=>{
+      const samples=supported?results.map(run=>run.rows.get(r.rowIndex)[field]):[];
+      const types=new Set(samples.flatMap(sample=>Object.keys(sample??{})));
+      return Object.fromEntries([...types].map(type=>[type,sum(samples.map(sample=>sample?.[type]??0))/results.length]));
+    };
+    const minionTypes=averageTypes('minionDamageByType');
+    const damageByType=averageTypes('damageByType');
+    for(const [type,damage] of Object.entries(minionTypes))damageByType[type]=(damageByType[type]??0)+damage;
+    const minionDamageByType=Object.keys(minionTypes).length?minionTypes:undefined;
+    return { ...r, damageByType, minionDamageByType, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
       ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds}}),
       ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });

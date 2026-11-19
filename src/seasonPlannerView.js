@@ -224,13 +224,16 @@ export function renderSkillCandidateResult(s) {
   const activation=preview?.skill?.activation;
   const id=s.picker?.candidate;
   const support=Number.isInteger(s.supportIndex);
+  const routeChanges=renderDamageRouteChanges(preview?.damageRoutes,{role:'candidate-damage-route-changes'});
   return (support?appliedSkillLevel(entry):renderSkillLevelStats(entry,preview?.skill?.growthMultiplier))
     +(activation?renderBuffActivation(activation,activation.value,{binding:'data-role="candidate-aura-activation" data-candidate-aura-activation'}):'')
     +(id?`<div class="skill-candidate-effect" aria-label="스킬 효과">${skillLevelEffects(id,entry,support,s.picker.levels?.[id])}</div>`:'')
     +(removed?.length?`<p data-role="skill-removed-supports">보조 해제 예정 · ${removed.map(id=>esc(title(id))).join(' · ')}</p>`:'')
+    +renderSkillLevelChanges(preview?.skillLevels,esc,{role:'candidate-skill-level-changes'})
+    +routeChanges
     +(preview?renderSlotPreview(preview,esc,{showDps:false,showResourcesInline:true,extraDetails:
       renderSkillElixirDps(preview.skill?.elixirDpsStates,'candidate')
-      +(renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')
+      +(routeChanges?'':renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')
         ||renderWeaponDamageRoutes(preview.skill?.weaponDamageRoutes,'candidate')
         ||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
 }
@@ -1142,7 +1145,7 @@ function renderAssumedDpsDetails(s) {
       ${estimate.uptimeDetails?.length?`<ul>${estimate.uptimeDetails.map(row=>{
         const amounts=[['입력 조건',row.inputContribution],['방어 전',row.contribution]]
           .filter(([,value])=>Number.isFinite(value)).map(([label,value])=>`${label} ${fmt(value)} DPS`);
-        return `<li><b>${esc(row.name)}</b><br>${row.setting===row.assumed?`적용 ${esc(row.assumed)}`:`입력 ${esc(row.setting)} → 방어 전 ${esc(row.assumed)}`}${amounts.length?`<br>${amounts.join(' · ')}`:''}<br>${esc(row.method)}</li>`;
+        return `<li><b>${esc(row.name)}</b><br>${row.setting===row.assumed?`${row.buffState?'':'적용 '}${esc(row.assumed)}`:`입력 ${esc(row.setting)} → 방어 전 ${esc(row.assumed)}`}${amounts.length?`<br>${amounts.join(' · ')}`:''}<br>${esc(row.method)}</li>`;
       }).join('')}</ul>`:''}
       ${button('전투 조건 보기','result-tab','data-tab="conditions"')}</details>`:''}`;
 }

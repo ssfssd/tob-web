@@ -28,7 +28,7 @@ import { seasonMemoryRows, validSeasonMemoryBases, validSeasonMemoryRolls } from
 import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
-import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, observedSkillCostFields } from "./seasonDps.js";
+import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, observedSkillCostFields, seasonDotWindowAssignment } from "./seasonDps.js";
 import { trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
@@ -581,6 +581,10 @@ export function editSeasonWorkspace(document, edit) {
     if(!group||group.overflow||group.slots.some(slot=>slot.uptime===null))
       throw new Error('각 칸의 유지율을 입력하고 합계를 100% 이내로 배정하세요.');
     for(const {rowIndex} of group.slots.filter(slot=>slot.uptime>0))editSeasonDpsInput(target,`${rowIndex}:dotExclusive`,1);
+  } else if (edit.kind === 'assign-dot-window') {
+    const updates=seasonDotWindowAssignment(target,edit.conflict,edit.winner);
+    if (!updates) throw new Error('겹친 구간이 바뀌었거나 시간표가 입력 한도를 넘었습니다. 적용 구간을 확인하세요.');
+    for (const {key,value} of updates) editSeasonDpsInput(target,key,value);
   } else if (edit.kind === "dps-input") {
     const [slot,field]=String(edit.key).split(':');
     if (observedSkillCostFields.includes(field)) {

@@ -1,6 +1,6 @@
 // Group repeated calculation diagnostics by the place where the user can act.
 // Keep every original diagnostic; grouping never changes calculation support.
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDotWindowRepairs } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
 import { SEASON_HERO_COMBAT_FIELDS } from './seasonMechanicInputs.js';
 import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
@@ -167,7 +167,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       if(reason.includes('측정 종료 시각')){
         const {overlaps,bounds}=seasonDotWindowRepairs(report);
         for(const conflict of overlaps.filter(conflict=>conflict.slots.every(index=>affected.includes(index)))){
-          links.push({tab:'conditions',role:`dot-window-overlap-${conflict.id}`,label:`${conflict.slots.map(index=>index+1).join('·')}번 칸 겹침 배정`});
+          links.push({tab:'conditions',role:seasonDotWindowRole(conflict),label:`${conflict.start}–${conflict.stop}초 · ${conflict.slots.map(index=>index+1).join('·')}번 칸 겹침 배정`});
           for(const index of conflict.slots)routed.add(index);
         }
         for(const index of new Set(bounds.map(bound=>bound.rowIndex)))if(affected.includes(index)){

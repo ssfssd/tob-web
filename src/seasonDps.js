@@ -63,6 +63,28 @@ export function seasonDamageComposition(report) {
     ? parts : null;
 }
 
+export const SEASON_DAMAGE_TYPE_LABELS={physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식',true:'트루 대미지'};
+export function seasonDamageTypeParts(row) {
+  const dps=row?.values?.dps;
+  if (!row?.supported || !finite(dps) || dps<0) return null;
+  if (dps===0) return [];
+  const parts=Object.entries(row.damageByType??row.minionDamageByType??{});
+  if (!parts.length||parts.some(([type,value])=>!Object.hasOwn(SEASON_DAMAGE_TYPE_LABELS,type)||!finite(value)||value<0)) return null;
+  return Math.abs(parts.reduce((sum,[,value])=>sum+value,0)-dps)<=Math.max(0.00005,dps*1e-12)?parts:null;
+}
+export function seasonDamageTypeComposition(report) {
+  if (!report?.supported || !finite(report.dps)) return null;
+  if (!['ss14-fixed-scenario-full-dps','ss14-observed-elixir-uptime','ss14-thea-joint-combat','ss14-thea-cycle-full-dps'].includes(report.scope)) return null;
+  const totals=new Map(Object.keys(SEASON_DAMAGE_TYPE_LABELS).map(type=>[type,0]));
+  for (const row of report.rows) {
+    const parts=seasonDamageTypeParts(row);
+    if (!parts) return null;
+    for (const [type,value] of parts) totals.set(type,totals.get(type)+value);
+  }
+  if (Math.abs([...totals.values()].reduce((sum,value)=>sum+value,0)-report.dps)>Math.max(0.00005*report.rows.length,report.dps*1e-12)) return null;
+  return [...totals].map(([type,value])=>({type,value}));
+}
+
 export function seasonNumbedDamageRows(scope, values) {
   const prefix=scope==='ss14-thea-joint-combat'?'numbed':'fixedNumbed';
   return [['번개 적중','HitDps'],['번개 지속 대미지','DotDps'],['번개 수확','ReapingDps'],['소환체 번개 대미지','MinionDps']]
@@ -139,7 +161,8 @@ export const SEASON_DPS_SKILL_FIELDS = {
   euphoria: { label: "해당 스킬의 버프 적용 여부 (0 또는 1)", min: 0, max: 1, integer: true },
   swampMoved: { label: "현재 늪이 이동 보너스를 보유함 (0 또는 1)", min: 0, max: 1, integer: true },
   recentSpellProjectiles: { label: "최근 생성한 주술 투사체 수", min: 0, max: 10000, integer: true },
-  periodicBurstUptime: { label: "간헐적 폭발 현재 상태", shared: true, min: 0, max: 100, choices: [[0, "미적용"], [100, "적용"]] },
+  periodicBurstUptime: { label: "간헐적 폭발 현재 상태", shared: true, min: 0, max: 100, choices: [[0, "미적용"], [100, "적용"]],
+    hint: "속도 증가가 켜진 순간을 계산하려면 적용을 선택하세요. 방어 전 DPS는 버프가 켜진 상태로 계산합니다." },
   incomingHits: { label: "반사를 유발하는 피격 횟수 / 초", min: 0, max: 1000 },
   coreTriggerRate: { label: "코어 전체 주술 발동 횟수 / 초", min: 0, max: 1000 },
   coreUptime: { label: "클락워크 코어 유지율 (%)", min: 0, max: 100 },
@@ -208,25 +231,56 @@ function continuousDotWindows(value) {
   }
   return merged;
 }
+export const seasonDotWindowRole = ({id,start,stop}) => `dot-window-overlap-${id}-${start}-${stop}`;
+
 export function seasonDotWindowRepairs(report) {
   const overlaps=new Map(), bounds=new Map();
   for(const dps of [report?.assumedDps,report?.fullDps]){
-    for(const conflict of dps?.dotWindowConflicts??[])overlaps.set(conflict.id,conflict);
+    for(const conflict of dps?.dotWindowConflicts??[]){
+      const key=seasonDotWindowRole(conflict), other=overlaps.get(key);
+      overlaps.set(key,other?{...conflict,slots:[...new Set([...other.slots,...conflict.slots])].sort((a,b)=>a-b)}:conflict);
+    }
     for(const bound of dps?.dotWindowBounds??[])bounds.set(`${bound.rowIndex}:${bound.start}:${bound.stop}:${bound.end}`,bound);
   }
   return {overlaps:[...overlaps.values()],bounds:[...bounds.values()]};
 }
 
 export function seasonDotWindowAssignment(build, conflict, winner) {
-  if (!conflict?.slots.includes(winner)) return null;
-  const loser = conflict.slots.find(slot => slot !== winner);
-  const ranges = dotWindowRanges(build.ss14Inputs.dps?.skills?.[loser]?.dotWindows);
-  if (!ranges) return null;
+  if (!conflict?.slots.includes(winner) || conflict.slots.length<2) return null;
   const {start,stop} = conflict;
-  const remaining = ranges.flatMap(([from,to]) => to <= start || from >= stop ? [[from,to]]
-    : [[from,Math.min(to,start)],[Math.max(from,stop),to]].filter(([a,b])=>a<b));
-  const value = remaining.length ? remaining.map(range=>range.join('-')).join(', ') : '없음';
-  return dotWindowRanges(value) ? {kind:'dps-input',key:`${loser}:dotWindows`,value} : null;
+  if (!Number.isFinite(start)||!Number.isFinite(stop)||start<0||start>=stop) return null;
+  const updates=[];
+  for (const index of conflict.slots) {
+    const ranges=continuousDotWindows(build.ss14Inputs.dps?.skills?.[index]?.dotWindows);
+    if (!ranges?.some(([from,to])=>from<=start&&to>=stop)) return null;
+    if (index===winner) continue;
+    const remaining=ranges.flatMap(([from,to])=>to<=start||from>=stop?[[from,to]]
+      :[[from,start],[stop,to]].filter(([a,b])=>a<b));
+    const value=remaining.length?remaining.map(range=>range.join('-')).join(', '):'없음';
+    if (!dotWindowRanges(value)) return null;
+    updates.push({key:`${index}:dotWindows`,value});
+  }
+  return updates;
+}
+
+function overlappingDotSegments(windows) {
+  const events=new Map();
+  for (const window of windows) for (const time of [window.start,window.stop]) {
+    if (!events.has(time)) events.set(time,[]);
+    events.get(time).push(window);
+  }
+  const active=new Set();
+  const segments=[];
+  let start;
+  for (const [stop,changes] of [...events].sort(([a],[b])=>a-b)) {
+    if (active.size>1) segments.push({start,stop,windows:[...active]});
+    for (const window of changes) {
+      if (window.stop===stop) active.delete(window);
+      else active.add(window);
+    }
+    start=stop;
+  }
+  return segments;
 }
 export function seasonDotWindowTrim(build, bound) {
   const cycle=build.ss14Inputs?.theaCycle;
@@ -1104,6 +1158,12 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const repeatDps = landedHit * (iceRing ? b?.repeatHits : 0);
     const heroDps = hit * shotgun.multiplier * heroRate * burstHitMore;
     let dotDps = 0, lightningDotDps = 0, lightningReapingDps = 0, frostDps = 0, frostActiveDps = 0;
+    const damageByType={}, persistentByType={};
+    const addTypedDamage=(type,damage)=>{damageByType[type]=(damageByType[type]??0)+damage;};
+    const addPersistentDamage=(type,damage)=>{
+      addTypedDamage(type,damage);
+      if(combat) persistentByType[type]=(persistentByType[type]??0)+damage;
+    };
     const fixedNumbedBonus = report.componentProjection.fixedNumbed?.bonus ?? 0;
     const affliction=input?.enemy?.affliction??0;
     const afflictionMultiplier = 1 + affliction / 100 * netherAfflictionEffect(effects);
@@ -1130,15 +1190,21 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
           * (p.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1);
         return part * offense?.values.attributeMultiplier * afflictionMultiplier * receivedMore;
       };
+      const mitigatePools=pools=>pools.map(pool=>({type:pool.type,active:mitigateDot(pool)}));
+      const total=pools=>pools.reduce((sum,pool)=>sum+pool.active,0);
+      const activeFrostDamage=frostActive?mitigatePools(frost.dotPools??[]):[];
+      const activeDotDamage=mitigatePools(dotPools);
       if (frostActive) {
-        frostActiveDps=(frost.dotPools??[]).reduce((sum,p)=>sum+mitigateDot(p),0);
+        frostActiveDps=total(activeFrostDamage);
         frostDps=frostActiveDps*frostUptime/100;
+        for(const {type,active} of activeFrostDamage)addPersistentDamage(type,active*frostUptime/100);
       }
-      const activeDotDps=dotPools.reduce((sum,p)=>sum+mitigateDot(p),0);
-      const activeLightningDotDps=dotPools.filter(p=>p.type==='lightning').reduce((sum,p)=>sum+mitigateDot(p),0);
+      const activeDotDps=total(activeDotDamage);
+      const activeLightningDotDps=total(activeDotDamage.filter(p=>p.type==='lightning'));
       if(hasDot){
         dotDps = activeDotDps * dotUptime / 100;
         lightningDotDps = activeLightningDotDps * dotUptime / 100;
+        for(const {type,active} of activeDotDamage)addPersistentDamage(type,active*dotUptime/100);
         dotBreakdown = { active: round(activeDotDps), uptime: dotUptime };
       }
       const reapedUptime = frostActive ? frostUptime : b?.dotUptime;
@@ -1160,6 +1226,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
           appliedReapingOverlap = overlap;
           const reapWeight = reapDuration * reapRate * overlap / 100;
           reapingDps = (frostActive ? frostActiveDps : activeDotDps) * reapWeight;
+          for(const {type,active} of frostActive?activeFrostDamage:activeDotDamage)addTypedDamage(type,active*reapWeight);
           if (!frostActive) lightningReapingDps = activeLightningDotDps * reapWeight;
         }
       }
@@ -1235,15 +1302,33 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     // lightning left after conversion without toggling any threshold effects.
     const lightningShare = weaponHands ? weaponHands.reduce((sum,hand)=>sum+hand.landedLightning,0)/(2*landedHit)
       : pools.filter(p=>p.type==='lightning').reduce((sum,p)=>sum+meanPool(p),0)/mean;
-    const lightningHitDps = waxWeaponShares
-      ? (weaponShareValue('landedLightning',waxWeaponShares.normal)*ordinaryRate
-        + weaponShareValue('landedLightning',waxWeaponShares.burst)*burstRate*burstHitMore*waxBurstMultiplier)*hitChance/100
-      : lightningShare>0?(manualDps+burstDps+repeatDps+heroDps+extraDps)*lightningShare:0;
+    let lightningHitDps=0;
+    const landedByType={};
+    const sampledProjectile=automaticCycle&&!combat&&tags.includes('Projectile');
+    if (!reasons.length&&landedHit>0) {
+      for (const type of new Set(pools.map(pool=>pool.type))) {
+        const typedPools=pools.filter(pool=>pool.type===type);
+        const landed=weaponHands ? weaponHands.map(hand=>meanHit(typedPools.filter(pool=>pool.weaponSlot===hand.slotIndex),hand)*hand.hitMultiplier*attributeAndTaken)
+          : [meanHit(typedPools,offense?.values)*criticalMultiplier*attributeAndTaken];
+        const equalHandValue=landed.reduce((sum,value)=>sum+value,0)/landed.length;
+        if(combat||sampledProjectile)landedByType[type]=equalHandValue;
+        const normal=waxWeaponShares?landed[0]*waxWeaponShares.normal+landed[1]*(1-waxWeaponShares.normal):equalHandValue;
+        const bursting=waxWeaponShares?landed[0]*waxWeaponShares.burst+landed[1]*(1-waxWeaponShares.burst):equalHandValue;
+        // Nether's fixed-rate activations and returns reuse this skill's resolved hit.
+        const typedDps=(normal*ordinaryRate+bursting*burstRate*burstHitMore*waxBurstMultiplier)*shotgun.multiplier*hitChance/100
+          +equalHandValue/landedHit*(repeatDps+heroDps+extraDps+nether.dps);
+        addTypedDamage(type,typedDps);
+        if(type==='lightning')lightningHitDps=typedDps;
+      }
+    }
+    const averageHit=round(hit);
+    const averageHitByType=sampledProjectile&&!reasons.length&&(averageHit===0?{}:landedHit>0&&Object.keys(landedByType).length
+      ? Object.fromEntries(Object.entries(landedByType).map(([type,damage])=>[type,damage*averageHit/landedHit])) : null);
     const fixedNumbedShare = fixedNumbedBonus>0 ? fixedNumbedBonus/(100+fixedNumbedBonus) : 0;
     const observedNumbedEffect = combatState.numbedEffect ?? 0;
     const observedNumbedShare = observedNumbedEffect>0 ? observedNumbedEffect/(100+observedNumbedEffect) : 0;
     return { id: direct.id, rowIndex: direct.rowIndex, supported: reasons.length === 0, blockers: [...new Set(reasons)], numbedOnHit,
-      values: { dps: reasons.length ? null : round(dps), averageHit: reasons.length ? null : round(hit),
+      values: { dps: reasons.length ? null : round(dps), averageHit: reasons.length ? null : averageHit,
         ...(frost&&{permafrostDps:reasons.length?null:round(frostDps)}),
         averageLandedHit: reasons.length || !pools.length ? null : round(landedHit),
         fixedNumbedHitDps: reasons.length ? null : round(lightningHitDps * fixedNumbedShare),
@@ -1252,6 +1337,8 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         manualDps: reasons.length ? null : round(manualDps), spellBurstDps: reasons.length ? null : round(burstDps),
         repeatDps: reasons.length ? null : round(repeatDps + extraDps), heroDps: reasons.length ? null : round(heroDps), dotDps: reasons.length ? null : round(dotDps), reapingDps: reasons.length ? null : round(reapingDps), netherDps:reasons.length?null:round(nether.dps), manualRate: round(manualRate), burstActivationRate: round(burstActivationRate), burstExtraRate: round(burstExtraRate) },
       nether, shotgun, takenMultiplier, manaPerUse:round(cost?.mana), lifePerUse:round(cost?.life),
+      ...(!reasons.length&&{damageByType}),
+      ...(averageHitByType&&{averageHitByType}),
       ...(cost?.observation&&{castCostObservation:cost.observation}),
       fixedNumbedPerCast:reasons.length ? null : round(lightningShare>0 ? hit*lightningShare*fixedNumbedShare : 0),
       ...(finite(permafrostHitDps) && {permafrostHitDps}),
@@ -1282,12 +1369,13 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       pools, mechanics: entry?.mechanics ?? [],
       combat: combat ? { tags, rate: basis?.rate, increasedAttackSpeed: evaluationAttackSpeed(direct.trace), luck,
         elixirScorch: report.componentProjection.rows.some(r => r.mechanics?.some(m => m.kind === "elixir-scorch")),
-        attributeMultiplier: offense?.values.attributeMultiplier, critical: offense?.values, landedHit, takenMultiplier, penetration,
+        attributeMultiplier: offense?.values.attributeMultiplier, critical: offense?.values, landedHit, landedByType, takenMultiplier, penetration,
         numbedHitBonus: observedNumbedShare>0
           ? pools.filter(p=>p.type==='lightning').reduce((n,p)=>n+meanPool(p),0) * offense?.values.attributeMultiplier
             * criticalMultiplier * takenMultiplier * observedNumbedShare : 0,
         burstHitMore, maxBurst, burstChargeSpeed: burstSpeed * burstMore, eligibleBurst, hasDot,
         dotWithoutAffliction: hasDot ? dotDps / afflictionMultiplier : 0,
+        persistentByType:Object.fromEntries(Object.entries(persistentByType).map(([type,damage])=>[type,damage/afflictionMultiplier])),
         numbedDotWithoutAffliction: lightningDotDps * observedNumbedShare / afflictionMultiplier,
         frostWithoutAffliction: frostActiveDps / afflictionMultiplier,
         ...(frostActive && { frostSource: JSON.stringify([frost.dotPools, offense?.values.attributeMultiplier]) }),
@@ -1341,22 +1429,19 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       const end = build.ss14Inputs.theaCycle.warmup + build.ss14Inputs.theaCycle.seconds;
       const windows = group.flatMap(row=>row.dotWindows.map(([start,stop])=>({start,stop,index:row.rowIndex}))).sort((a,b)=>a.start-b.start);
       const invalid = new Set();
-      let furthest, conflict;
       for (const window of windows) {
         if (window.stop>end+1e-8) {
           invalid.add(window.index);
           dotWindowBounds.push({id,rowIndex:window.index,start:window.start,stop:window.stop,end});
         }
-        if (furthest && window.start<furthest.stop) {
-          invalid.add(window.index);
-          invalid.add(furthest.index);
-          if (!conflict && furthest.index !== window.index && window.stop <= end + 1e-8 && furthest.stop <= end + 1e-8)
-            conflict = {id,start:window.start,stop:Math.min(window.stop,furthest.stop),slots:[furthest.index,window.index].sort((a,b)=>a-b)};
-        }
-        if (!furthest || window.stop>furthest.stop) furthest=window;
+      }
+      for (const {start,stop,windows:overlap} of overlappingDotSegments(windows)) {
+        const slots=[...new Set(overlap.map(window=>window.index))].sort((a,b)=>a-b);
+        for (const index of slots) invalid.add(index);
+        if (slots.length===overlap.length&&overlap.every(window=>window.stop<=end+1e-8))
+          dotWindowConflicts.push({id,start,stop,slots});
       }
       if (invalid.size) {
-        if (conflict) dotWindowConflicts.push(conflict);
         const scope=group.length===1?'지속 대미지':'동일 지속 스킬의';
         addWindowIssue(`${scope} 적용 구간은 겹치지 않게 측정 종료 시각 안에서 입력하세요.`,invalid);
         continue;

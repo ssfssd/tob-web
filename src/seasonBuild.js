@@ -265,16 +265,34 @@ function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN
             || binding?.logGear || binding?.corrosion || slot.corrupted || slot.affixText?.trim();
         });
         const hosts=inputs.references.filter(({category})=>category==='skills'||category==='supports')
-          .map(({category,id})=>selectedCards[category]?.[id]);
-        if (!hasTrigger && hosts.length && hosts.every(card=>card?.season==='SS14'&&card.detail)) {
-          const noPotionOrMobility=hosts.every(card=>!card.tags?.some(tag=>['Mobility','Restoration','Elixir'].includes(tag))
-            && !/\b(?:Mobility|Restoration|Potion) Skills?\b/iu.test(card.detail));
-          icePulseScope={noPotionOrMobility,noChargeSkill:noPotionOrMobility
-            && hosts.every(card=>!/\b(?:Cooldown|Charges|Charging Progress)\b/iu.test(card.detail))};
+          .map(({category,id})=>({category,id,card:selectedCards[category]?.[id]}));
+        if (!hasTrigger && hosts.length && hosts.every(({card})=>card?.season==='SS14'&&card.detail)) {
+          const isPotionOrMobility=card=>card.tags?.some(tag=>['Mobility','Restoration','Elixir'].includes(tag))
+            || /\b(?:Mobility|Restoration|Potion) Skills?\b/iu.test(card.detail);
+          const noPotionOrMobility=hosts.every(({card})=>!isPotionOrMobility(card));
+          const isPeriodicBurst=({category,id,card})=>category==='supports' && card.sourceRecordKey==='Periodic_Burst'
+            && card.detail===SS14_SUPPORTS_EN.records[id]?.detail;
+          const noChargeSkill=hosts.every(host=>{
+            const {category,card}=host;
+            if (category==='skills' && /^Cooldown: [\d.]+ s\. Unaffected by Charges$/mu.test(card.detail)) return true;
+            if (isPeriodicBurst(host)) return true;
+            return !isPotionOrMobility(card) && !/\b(?:Cooldown|Charges|Charging Progress)\b/iu.test(card.detail);
+          });
+          // Supreme Descent is a non-damaging utility skill. With only Periodic
+          // Burst linked to it, combat DPS uses the buff state, never its cadence.
+          const supremeDescentId='skills-ss14-supreme-descent';
+          const periodicBurstId='supports-tlidb-com-cn-periodic-burst';
+          const usesSelectedBuffState=noChargeSkill && !nonempty(build.customAffixes)
+            && hosts.some(host=>isPeriodicBurst(host) && host.id===periodicBurstId)
+            && slots.some(slot=>slot.skillId===supremeDescentId && slot.supports.some(s=>s?.supportId===periodicBurstId))
+            && slots.filter(slot=>slot.skillId===supremeDescentId).every(slot=>slot.supports.every(s=>!s?.supportId||s.supportId===periodicBurstId))
+            && hosts.every(host=>!isPotionOrMobility(host.card) || isPeriodicBurst(host)
+              || (host.id===supremeDescentId && host.card.detail===SS14_CARDS_EN.records[supremeDescentId]?.detail));
+          icePulseScope={noPotionOrMobility,noChargeSkill,usesSelectedBuffState};
         }
       }
-      const slots = inputs.normalized.gear.slots.flatMap((slot, index) => slot?.itemId === item.id ? [{ index, slot }] : []);
-      const calculations = slots.map(({ index, slot }) => ({ slotIndex: index, ...inspectGear(item, slot, gear.records, {
+      const gearSlots = inputs.normalized.gear.slots.flatMap((slot, index) => slot?.itemId === item.id ? [{ index, slot }] : []);
+      const calculations = gearSlots.map(({ index, slot }) => ({ slotIndex: index, ...inspectGear(item, slot, gear.records, {
         isTarget: build?.patchSnapshot?.season === "SS14", targetBinding: build?.ss14Inputs?.gear?.[index], build, slotIndex: index, noTerra,observedVoltage,noReaping,icePulseScope,
         sourceSlot: sourceInputs.normalized.gear.slots[index],
         sourceSeason: sourceBuild?.patchSnapshot?.season,
