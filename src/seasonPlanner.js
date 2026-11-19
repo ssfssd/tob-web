@@ -15,6 +15,7 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
+import { SEASON_DPS_SKILL_FIELDS } from './seasonDps.js';
 import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
@@ -43,9 +44,10 @@ export const ACTIVE_SEASON_WORKSPACE_KEY = "tob.activeSeasonWorkspace.v1";
 const stringKinds = new Set(["name", "custom-options", "hero-selection", "hero-choice", "skill-selection", "gear-selection", "support-selection", "memory-selection", "slate-affix", "talent-board", "spirit-selection", "destiny-selection", "thea-board", "elixir-selection", "module-selection", "module-option", "nether-layout", "nether-quality", "nether-banishment"]);
 export function readSeasonPlannerEdit(input) {
   const d = input.dataset, kind = d.seasonEdit;
+  const dpsField = kind==='dps-input' ? SEASON_DPS_SKILL_FIELDS[d.key?.split(':')[1]] : null;
   return { kind, rowIndex: Number(d.row), supportIndex: Number(d.support), slotIndex: Number(d.slot), key: d.key ?? d.choice ?? d.roll,
     value: stringKinds.has(kind) || kind==='bing-event-source' || kind==='memory-tier' ? input.value
-      : kind==='dps-input' && /:(?:dotWindows|fissureTimes|reapingTimes)$/u.test(d.key??'') ? input.value.trim()
+      : dpsField?.times || dpsField?.windows ? input.value.trim()
       : String(input.value).trim() === "" ? "" : Number(input.value) };
 }
 const editKey = e => JSON.stringify([e.kind, e.rowIndex, e.supportIndex, e.slotIndex, e.key]);
