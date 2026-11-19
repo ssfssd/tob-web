@@ -39,8 +39,9 @@ export function simulateTheaCycle({ seconds, warmup = 0, caps = { Focus: 4, Agil
     events: { ...runtime.state(time), ...(combat?.state(time, stacks, runtime.state(time)) ?? {}) } });
   let activeTime = 0; let doubleTime = 0;
   while (time < end) {
-    const candidates = [end, nextGrant, runtime.next(time), combat?.next(time) ?? Infinity, ...Object.values(expires), ...boons.map(b => b.expires),
+    const stateTimes = [nextGrant, runtime.next(time), ...Object.values(expires), ...boons.map(b => b.expires),
       stacks.Focus === caps.Focus && ready > time ? ready : Infinity];
+    const candidates = [end, combat?.next(time) ?? Infinity, ...stateTimes];
     const earliest = Math.min(...candidates);
     // The event queues already use this tolerance for simultaneous events.
     // Advance to the common boundary before checking expiry or measurement.
@@ -66,7 +67,8 @@ export function simulateTheaCycle({ seconds, warmup = 0, caps = { Focus: 4, Agil
     }
     for (const bonus of runtime.apply(time, stacks, caps, expires)) if (time >= warmup && time < end) castBonuses.push({ ...bonus,
       state: { ...bonus.state, boons: boons.map(b => ({ consumed: b.consumed, atMax: 1 })) } });
-    if (time < end) combat?.apply(time, { stacks, caps, expires, runtime, snapshot });
+    if (time < end) combat?.apply(time, { stacks, caps, expires, runtime, snapshot,
+      stateBoundary: stateTimes.some(at=>Math.abs(at-time)<=1e-8) });
     if (stacks.Focus === caps.Focus && ready <= time) {
       boons.push({ consumed: stacks.Focus, expires: time + duration });
       boons = boons.slice(-maxBoons); stacks.Focus = 0; expires.Focus = Infinity;
@@ -133,6 +135,7 @@ export function calculateTheaAverage(build, calculateState) {
     return stateCache.get(key);
   };
   let projectileDps = 0;
+  let projectileNumbedDps = 0;
   const projectileCosts = { mana: 0, life: 0 };
   let sampleError = null;
   if (!blockers.length) {
@@ -161,6 +164,9 @@ export function calculateTheaAverage(build, calculateState) {
       // in the following four-second recent-consumption window.
       const row = after.rows[0];
       projectileDps += row.values.averageHit / samples / cycle.seconds;
+      if (Number.isFinite(projectileNumbedDps) && Number.isFinite(row.fixedNumbedPerCast))
+        projectileNumbedDps += row.fixedNumbedPerCast / samples / cycle.seconds;
+      else projectileNumbedDps = null;
       sampleDps[runIndex] += row.values.averageHit / cycle.seconds;
       for (const [resource, cost] of [["mana", row.manaPerUse], ["life", row.lifePerUse]]) {
         const value = projectileCosts[resource];
@@ -190,12 +196,18 @@ export function calculateTheaAverage(build, calculateState) {
   }, 0) : null;
   for (const row of rows) {
     const stateRow = state => state.rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
+    for (const key of ["reapingDps", "permafrostDps", "minionHitDps", "fixedNumbedHitDps", "fixedNumbedDotDps", "fixedNumbedReapingDps"]) {
+      if (!Object.hasOwn(row.values,key)) continue;
+      row.values[key] = timeAverage(state => stateRow(state)?.values[key]);
+    }
     row.manualManaPerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.mana
       : timeAverage(state => stateRow(state)?.manualManaPerSecond);
     row.manualLifePerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.life
       : timeAverage(state => stateRow(state)?.manualLifePerSecond);
   }
-  if (supported && projectileCast) for (const key of ["manualDps", "dps"]) rows[0].values[key] = projectileDps;
+  if (supported && projectileCast) Object.assign(rows[0].values, {
+    manualDps:projectileDps, dps:projectileDps, fixedNumbedHitDps:projectileNumbedDps,
+  });
   const dps = supported ? projectileCast ? projectileDps : simulation.segments.reduce((n, segment) => n + cache.get(segment).dps * segment.seconds / cycle.seconds, 0) : null;
   report.theaAverage = { supported, ...simulation, uptime: supported ? simulation.uptime : null, doubleUptime: supported ? simulation.doubleUptime : null,
     blockers: [...new Set(blockers)], dps, standardError: supported ? sampleError : null, receipt: theaRulePin() };

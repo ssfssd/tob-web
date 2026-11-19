@@ -1,6 +1,7 @@
 import { SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
-import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
+import { seasonSupportKoreanCard } from "./seasonSupport.js";
+import { seasonKoreanCardDetail } from './gameTextPresentation.js';
 
 const groups = { hero: "히어로·추억", talents: "재능", talent: "재능", divinity: "신격", pact: "정령",
   gear: "장비", skills: "스킬", supports: "보조", elixirs: "영약", modularization: "모듈", blessings: "축복" };
@@ -29,7 +30,10 @@ export function excludedSeasonHitRoutes(skill) {
 export function seasonEffectSources(report) {
   const rows = [];
   const trace = (report.coupledSkills?.rows ?? []).flatMap(skill => (skill.trace ?? []).map(t => ({ ...t, rowIndex: skill.rowIndex })));
-  const absent = (report.coupledSkills?.rows ?? []).flatMap(excludedSeasonHitRoutes);
+  const absent = (report.coupledSkills?.rows ?? []).flatMap(skill=>[
+    ...excludedSeasonHitRoutes(skill),
+    ...(skill.offenseBasis?.excluded??[]).filter(effect=>effect.reason==='no-hit-damage-not-applied'&&!effect.affectsCompletion),
+  ]);
   const add = (source, effects = [], blockers = [], inactive = [], mechanics = []) => {
     const origin = effectSourceLabel(source.path, source.group);
     for (const [i, effect] of effects.entries()) {
@@ -39,7 +43,8 @@ export function seasonEffectSources(report) {
       const valid = Number.isFinite(effect.value) && (!effect.roll || effect.value >= effect.roll.min && effect.value <= effect.roll.max);
       rows.push({ ...source, ...(effect.detail ? { detail: effect.detail, receipt: effect.receipt } : {}), origin, effect, key: `${source.path}:effect:${i}`, status: !valid ? "blocked" : applied.length ? "direct" : missingSource ? "not-applicable" : "selected",
         ...(!valid ? { reason: "선택 수치가 없거나 허용 범위를 벗어났습니다." }
-          : missingSource ? {reason:`계산 가능한 스킬에 ${missingSource.stage==='conversion'?'전환':'추가 획득'}의 원본 적중 대미지가 없습니다.`} : {}),
+          : missingSource ? {reason:missingSource.stage==='damage-modifier'?'이 옵션을 적용할 적중 대미지가 없습니다.'
+            :`계산 가능한 스킬에 ${missingSource.stage==='conversion'?'전환':'추가 획득'}의 원본 적중 대미지가 없습니다.`} : {}),
         appliedTo: [...new Set(applied.map(t => slotLabel(t.rowIndex)))], value: valid ? effect.value : null });
     }
     for (const [i, effect] of inactive.entries()) rows.push({ ...source, origin, effect, reason:effect.reason, key: `${source.path}:inactive:${i}`, status: "inactive", value: null });
@@ -50,23 +55,28 @@ export function seasonEffectSources(report) {
   for (const row of report.componentProjection?.rows ?? []) add(row, row.effects, row.blockers, row.inactive, row.mechanics);
   for (const component of report.components ?? []) {
     if (!["gear", "skills", "supports"].includes(component.category)) continue;
-    const card = SS14_CARDS.records[component.id] ?? SS14_SUPPORTS.records[component.id];
+    const card = SS14_CARDS.records[component.id] ?? seasonSupportKoreanCard(component.id);
+    const name = safe(card?.name ?? component.name);
     if (!component.calculations?.length) {
       const paths = component.paths?.filter(p => !p.startsWith("selections.")) ?? [];
       for (const path of paths.length ? paths : [component.paths?.[0] ?? component.id]) add({
-        group: component.category, path, itemId: component.id, name: safe(component.name),
-        detail: card?.koreanTextVerified ? safe(card.detail) : "", receipt: component.sourceReceipt,
+        group: component.category, path, itemId: component.id, name,
+        detail: seasonKoreanCardDetail(card), receipt: card?.koreanTextVerified ? card : component.sourceReceipt,
       }, [], component.reasons?.length ? component.reasons : ["선택 효과의 계산 연결을 확인할 수 없습니다."]);
     }
     for (const entry of component.calculations ?? []) {
       const path = component.category === "gear" ? `gear.slots.${entry.slotIndex}`
         : `skills.rows.${entry.rowIndex}${component.category === "supports" ? `.supports.${entry.supportIndex}` : ""}`;
       const effectiveCard=corrosionCard(card,{itemId:component.id,corrosion:entry.corrosion,sourcePageSha256:entry.receipt?.sourcePageSha256},'ko');
-      const source = { group: component.category, path, itemId: component.id, name: safe(component.name),
-        detail: effectiveCard?.koreanTextVerified ? safe(effectiveCard.detail) : "", receipt: entry.receipt };
+      const source = { group: component.category, path, itemId: component.id, name,
+        detail: seasonKoreanCardDetail(effectiveCard,entry.tier), receipt: effectiveCard?.koreanTextVerified ? effectiveCard : entry.receipt };
       const effects = component.category === "gear" ? entry.rawEffects ?? [] : component.category === "supports" ? entry.effects ?? []
         : trace.filter(t => t.effectSource?.path === path);
-      add(source, effects, component.category === "gear" ? entry.effectBlockers ?? entry.reasons : entry.blockers, entry.inactive);
+      const blockers=component.category === "gear" ? entry.effectBlockers ?? entry.reasons : entry.blockers;
+      const permafrost=component.category==='supports' && entry.mechanics?.some(m=>m.kind==='ice-lances-permafrost');
+      const frostBlockers=permafrost?report.fullDps?.rows?.find(row=>row.rowIndex===entry.rowIndex)
+        ?.blockers?.filter(reason=>reason.startsWith('동토'))??[]:[];
+      add(source, effects, [...(blockers??[]),...frostBlockers], entry.inactive);
     }
   }
   return rows;

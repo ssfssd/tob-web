@@ -4,6 +4,22 @@ const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const rounded = (v) => finite(v) ? Math.round(v * 1e8) / 1e8 : null;
 const clamp = (v, max) => Math.max(0, Math.min(max, v));
 
+export function observedManaRecoveryBasis(build, report) {
+  const cycle = build.ss14Inputs?.theaCycle;
+  const survival = report.character.survival;
+  const recovery = report.fullDps.manualResources?.recovery ?? survival.manaScenarios;
+  const rate = id => rounded(recovery.find(row=>row.id===id)?.value);
+  return [report.fullDps.scope, cycle?.mode==='automatic' ? cycle.seconds : null,
+    cycle?.mode==='automatic' ? cycle.warmup : null, report.character.values.mana,
+    ...['flat','percent','combined'].map(rate)];
+}
+
+export function validObservedManaRecoveryBasis(value) {
+  return Array.isArray(value) && value.length===7 && typeof value[0]==='string'
+    && /^ss14-[a-z-]{1,56}$/u.test(value[0])
+    && value.slice(1).every(n=>n===null || finite(n) && n>=0);
+}
+
 export function calculateSeasonSurvival({ safe, input, effects, life, mana, shield, evasion, data }) {
   const text = data.pages["en/Character_Build"]?.body ?? "";
   const blockText = (data.pages["en/Block"]?.body ?? "").replaceAll("%%", "%");

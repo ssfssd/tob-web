@@ -89,6 +89,10 @@ export function editNativeSeasonSelection(target, edit) {
     target.heroLevel = edit.value; target.hero = { ...target.hero, level: edit.value }; capture(target, "hero");
   } else if (edit.kind === "skills-reset") {
     const inputs = target.ss14Inputs;
+    if(inputs.dps){
+      delete inputs.dps.periodicBurstUptime;
+      if(inputs.dps.skills?.[0])delete inputs.dps.skills[0].periodicBurstUptime;
+    }
     target.skills = { ...createDefaultSkillState(), energyMax: target.skills?.energyMax ?? 525 };
     target.skillLevels = Array(9).fill(0);
     delete target.skillSeals;

@@ -28,9 +28,10 @@ export function incompatibleNearbyEnemyStates(left, right = left) {
     || right.get(present)?.has(0) && left.get(alone)?.has(1));
 }
 
-export function boundSeasonConditionGroups(projection, bindings) {
+export function boundSeasonConditionGroups(projection, bindings, include = () => true) {
   const groups = new Map();
   for (const row of projection?.rows ?? []) for (const control of row.conditionControls ?? []) {
+    if (!include(row,control)) continue;
     const {key, conditionGroup, sourcePageSha256, value} = control;
     const binding = bindings?.[key];
     if (control.automatic || !sourcePageSha256 || binding?.sourcePageSha256 !== sourcePageSha256

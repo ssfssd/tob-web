@@ -56,3 +56,11 @@ export function presentGameText(
     ? `${safeText}${partialPlaceholder}`
     : `${safeText}${newline}${partialPlaceholder}`;
 }
+
+export function seasonKoreanCardDetail(card, tier) {
+  if (card?.season !== 'SS14' || !card.koreanTextVerified || !card.detail) return '';
+  const selected = card.supportTiers?.find(row => row.tier === tier)?.text;
+  const defaults = card.supportTiers?.filter(row => card.detail.includes(row.text));
+  const detail = selected && defaults?.length === 1 ? card.detail.replace(defaults[0].text, () => selected) : card.detail;
+  return presentGameText(detail).replace(/^요약\r?\n|^상세\r?\n/gmu, '').trim();
+}

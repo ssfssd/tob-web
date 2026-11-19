@@ -53,7 +53,7 @@ const stats = { "damage": "damage", "spell damage": "spell_damage", "attack dama
   "lightning skill critical strike damage": "lightning_skill_critical_strike_damage", "erosion skill critical strike damage": "erosion_skill_critical_strike_damage",
   "physical skill critical strike damage": "physical_skill_critical_strike_damage",
   "projectile critical strike rating": "projectile_critical_strike_rating", "projectile critical strike damage": "projectile_critical_strike_damage",
-  "damage taken": "damage_taken", "life regeneration speed": "life_regeneration_speed",
+  "damage taken": "damage_taken", "elemental damage taken": "elemental_damage_taken", "life regeneration speed": "life_regeneration_speed",
   "mana regeneration speed": "mana_regeneration_speed", "energy shield charge speed": "energy_shield_charge_speed",
   "energy shield charge interval": "energy_shield_charge_interval", "attack block chance": "attack_block_chance",
   "spell block chance": "spell_block_chance", "block chance": "block_chance", "attack and spell block chance": "block_chance", "block ratio": "block_ratio",
@@ -135,6 +135,10 @@ export function parseSeasonComponentLines(text, multiplier = 1, options = {}) {
     const clean = line.replace(/\s*\(Max Active Divinity: \d+\)$/u, "").replace(/^\+(\d+(?:\.\d+)?) to Max Frostbite Rating$/u,'+$1 Max Frostbite Rating')
       .replace(/^Damage Penetrates (\d+(?:\.\d+)?) % Elemental Resistance$/u,'+$1 % Elemental Resistance Penetration')
       .replace(/^You can inflict (\d+) additional Curse$/u,'You can cast $1 additional Curses');
+    if (!conditional && multiplier === 1 && /^Support Skill's Mana Multiplier is fixed at 95\s*%\.?$/u.test(clean)) {
+      effects.push({stat:'support_mana_multiplier_fixed',operation:'set',value:95,unit:'percent',sourceText:line,sourceLineIndex:lineIndex,multiplier});
+      continue;
+    }
     if (!conditional && multiplier === 1 && /^Changes the base effect of Numbed to: \+11\s*% additional Lightning Damage taken$/u.test(clean)) {
       effects.push({stat:'numbed_base_lightning_taken',operation:'set',value:11,unit:'percent',sourceText:line,sourceLineIndex:lineIndex,multiplier});
       continue;
@@ -210,7 +214,8 @@ export function parseSeasonComponentLines(text, multiplier = 1, options = {}) {
           sourceText: line, sourceLineIndex: lineIndex, multiplier })));
         continue;
       }
-      const regen = clause.match(/^Regenerates? (\d+(?:\.\d+)?)\s*(%)? (Life|Mana) per second$/u);
+      const regen = clause.match(/^Regenerates? (\d+(?:\.\d+)?)\s*(%)? (Life|Mana) per second$/u)
+        ?? clause.match(/^\+(\d+(?:\.\d+)?)\s*(%)? (Life|Mana) regeneration per second$/iu);
       if (!conditional && regen && Number.isInteger(multiplier) && multiplier >= 1 && multiplier <= 100) {
         if (conditionalMatch && !validState) { blockers.push({ sourceText: line, reason: "SS14 조건 충족 여부·중첩 수를 지원 범위에서 직접 입력하세요." }); continue; }
         if (conditionalMatch && state === 0) { inactive.push({ sourceText: line, reason: "입력 조건 미충족" }); continue; }

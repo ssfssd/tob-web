@@ -17,7 +17,7 @@ export function theaCombatInputValues(build, report) {
   const { duration, maxStacks, thresholdPercent } = SS14_THEA_COMBAT.numbed;
   return { numbedDuration: duration, numbedLimit: maxStacks, numbedThreshold: thresholdPercent, numbedEffect: 0, ...input };
 }
-export const hasTheaNativeDot = report => report?.fullDps?.rows.some(row => row.combat?.dotWithoutAffliction > 0) ?? false;
+export const hasTheaNativeDot = report => report?.fullDps?.rows.some(row => row.combat?.dotWithoutAffliction > 0 || row.combat?.frostWithoutAffliction > 0) ?? false;
 export function usesTheaDotTrigger(build, mechanics, report) {
   const input = build.ss14Inputs.theaEvents;
   const ignite = input.igniteEnabled === 1;

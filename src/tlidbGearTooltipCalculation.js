@@ -312,6 +312,7 @@ const STAT_ENTRIES = Object.freeze([
   statEntry("empower skill level", "empower_skill_level", "level"),
   statEntry("defensive skill level", "defensive_skill_level", "level"),
   statEntry(["all skills' levels", "all skills' level", "all skill levels"], "all_skill_levels", "level"),
+  statEntry(["support skill level", "support skill levels"], "support_skill_levels", "level"),
   statEntry("projectile skill level", "projectile_skill_level", "level"),
   statEntry("passive skill level", "passive_skill_level", "level"),
   statEntry("beam skill level", "beam_skill_level", "level"),
@@ -899,6 +900,12 @@ function parseFrostboltLine(line) {
   return result([{stat:'elemental_resistance_penetration',operation:'add_percent',unit:'percent',value:null,
     sourceText:line,condition:`against ${match[3]} enemies`,roll:{min:Number(match[1]),max:Number(match[2])}}],[]);
 }
+function parseIAmTruthKoreanLine(line) {
+  const match = /^모든 스킬 레벨 \+\((4)–(5)\)$/u.exec(line) ?? /^모든 스킬 레벨 \+\((7)–(8)\)$/u.exec(line);
+  if (!match) return parseMechanicalLine(line);
+  return result([{stat:'all_skill_levels',operation:'add',unit:'level',value:null,
+    sourceText:line,roll:{min:Number(match[1]),max:Number(match[2])}}],[]);
+}
 
 function rollSignature(effect) {
   const minimum = Number(effect?.roll?.min);
@@ -1039,7 +1046,7 @@ export function parseTlidbGearTooltip(item, { locale = "en", season = "SS13", fl
     season === "SS13" ? verifiedFlavorReceipt(item, verifiedLocale) : seasonalFlavor,
     season==='SS14'&&locale==='en'
       ? ({Thunder_Manipulator:parseThunderManipulatorLine,Frostbolt:parseFrostboltLine}[verifiedLocale.sourceRecordKey]??parseMechanicalLine)
-      : parseMechanicalLine,
+      : season==='SS14'&&locale==='ko'&&verifiedLocale.sourceRecordKey==='I_Am_Truth' ? parseIAmTruthKoreanLine : parseMechanicalLine,
   );
 }
 

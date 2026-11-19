@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, SEASON_DPS_PARTS } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -8,7 +8,7 @@ import { renderTrainingDummyPicker } from './seasonTrainingDummy.js';
 import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { UPGRADE_GROUPS, GEAR_UPGRADE_SOURCES } from './seasonUpgradeRanking.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
-import { SS14_SUPPORTS } from './data/ss14Supports.generated.js';
+import { seasonSupportKoreanCard } from './seasonSupport.js';
 import { normalizeBuild } from './engine.js';
 import { effectSourceLabel, excludedSeasonHitRoutes } from './seasonEffectSources.js';
 import { seasonSkillCalculationLevel, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
@@ -16,6 +16,9 @@ import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { DUAL_WIELD_ATTACK_SOURCE } from './seasonWeaponInputs.js';
 import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
+import { SEASON_STAT_LABELS } from './seasonNumericStats.js';
+import { renderResourceChanges } from './seasonEditorTools.js';
+import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
 const esc = v => String(v ?? '').replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const number = v => Number.isFinite(v) ? v.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : '미지원';
@@ -30,14 +33,14 @@ export function renderReasons(s,reasons,dps=s.report.fullDps) {
     const match=/^(기준|현재): (.*)$/u.exec(text);
     const reason=match?.[2]??text;
     if(!unique.has(reason))unique.set(reason,new Set());
-    if(match)unique.get(reason).add(match[1]);
+    unique.get(reason).add(match?.[1]??'');
   }
-  const inputs=[],rest=[];
+  const inputs=new Map(),rest=[];
   for(const [reason,sides] of unique){
     const links=sides.size===1&&sides.has('기준')?[]:inputDestinations(s.report,reason,dps);
     if(links.some(link=>Number.isInteger(link.supportIndex))&&[...unique].some(([other,scope])=>
       other.endsWith(': '+reason)&&scope.size===sides.size&&[...scope].every(side=>sides.has(side))))continue;
-    const side=sides.size===1?[...sides][0]+' · ':'';
+    const side=sides.size===1&&!sides.has('')?[...sides][0]+' · ':'';
     let message=reason;
     const rollLink=links.find(link=>link.edit==='gear-roll');
     if(rollLink&&reason.startsWith('장비 옵션 수치를 입력하세요: ')){
@@ -47,10 +50,20 @@ export function renderReasons(s,reasons,dps=s.report.fullDps) {
         if(roll){message=roll.label+' 수치를 입력하세요.';break;}
       }
     }
-    const actions=links.map(l=>button(esc(l.label),'requirement',`data-section="${esc(l.section??'hero')}" data-index="${l.index??''}" data-support="${l.supportIndex??''}" data-type="${esc(l.type)}" data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)).join('');
-    (links.length?inputs:rest).push(`<li>${side}${esc(message)} ${actions}</li>`);
+    const text=side+message;
+    if (!links.length) {rest.push(`<li>${esc(text)}</li>`);continue;}
+    const key=JSON.stringify(links.map(l=>JSON.stringify([l.section,l.index,l.supportIndex,l.type,l.role,l.edit,l.key])).sort());
+    if(!inputs.has(key))inputs.set(key,{links,messages:new Set()});
+    inputs.get(key).messages.add(text);
   }
-  return `${inputs.length?`<ul aria-label="입력할 항목">${inputs.join('')}</ul>`:''}${rest.length?`<details><summary>추가 확인 ${rest.length}건</summary><ul>${rest.join('')}</ul></details>`:''}`;
+  const items=[...inputs.values()].map(({links,messages})=>{
+    const [first,...other]=messages;
+    const actions=links.map(l=>l.tab ? button(esc(l.label),'result-tab',`data-tab="${esc(l.tab)}" data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)
+      : button(esc(l.label),'requirement',`data-section="${esc(l.section??'hero')}" data-index="${l.index??''}" data-support="${l.supportIndex??''}" data-type="${esc(l.type)}" data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)).join('');
+    const details=other.length?`<details><summary>같은 입력과 관련된 사유</summary><ul>${other.map(text=>`<li>${esc(text)}</li>`).join('')}</ul></details>`:'';
+    return `<li>${esc(first)} ${actions}${details}</li>`;
+  });
+  return `${items.length?`<ul aria-label="입력할 항목">${items.join('')}</ul>`:''}${rest.length?`<details><summary>추가 확인 ${rest.length}건</summary><ul>${rest.join('')}</ul></details>`:''}`;
 }
 export function renderEditDpsComparison(s, compact = false) {
   const comparison = s.editComparison;
@@ -134,11 +147,7 @@ function effectConditionFields(s) {
       }
     }
   }
-  const inputs = s.document.targetBuild.ss14Inputs;
-  const hasManual = Object.keys(inputs.componentConditions ?? {}).length > 0
-    || Object.values(inputs.supports ?? {}).some(binding => Object.keys(binding.conditions ?? {}).length);
-  return fields.length || automaticFields.length || hasManual ? `<section class="dock-effect-conditions">${fields.length||hasManual?'<h2>효과 조건</h2>':''}${fields.join('')}
-    ${hasManual ? button('수동 효과 조건 해제','clear-effect-conditions') : ''}
+  return fields.length || automaticFields.length ? `<section class="dock-effect-conditions">${fields.length?'<h2>효과 조건</h2>':''}${fields.join('')}
     ${automaticFields.length ? `<details data-role="automatic-effect-conditions"><summary>자동 적용 효과</summary>${automaticFields.join('')}</details>` : ''}</section>` : '';
 }
 
@@ -146,18 +155,41 @@ function skillConditionKeys(s, index, id) {
   if (index >= 5 || !s.report.coupledSkills.rows.some(row => row.rowIndex === index && row.id === id)) return [];
   const entry = seasonSkillSlotCalculation(s.report,index);
   if (!entry || entry.mechanics?.some(m => m.kind === 'utility-skill')) return [];
-  return seasonDpsSkillFieldKeys(entry,id,s.document.targetBuild).filter(key => key!=='periodicBurstUptime' && SEASON_DPS_SKILL_FIELDS[key]);
+  return seasonDpsSkillFieldKeys(entry,id,s.document.targetBuild).filter(key => SEASON_DPS_SKILL_FIELDS[key]);
 }
 
 export function renderResultConditions(s) {
   const inputs = s.document.targetBuild.ss14Inputs;
   const build = s.document.targetBuild;
+  const hasManualConditions = hasSeasonDpsConditionOverrides(inputs.dps)
+    || Object.keys(inputs.componentConditions ?? {}).length > 0
+    || Object.values(inputs.supports ?? {}).some(binding => Object.keys(binding.conditions ?? {}).length > 0);
   const shareOverflow=s.report.fullDps.manualResources?.shareOverflow;
-  const periodicBurst=s.report.components.some(c=>c.category==='supports'&&c.calculations?.some(entry=>
-    entry.mechanics?.some(m=>m.kind==='periodic-burst')));
+  const periodicBurst=hasPeriodicBurstSupport(s.report.components);
+  const sharedDots=s.report.fullDps.dotAllocationGroups??[];
+  const sharedReaping=s.report.fullDps.reapingAllocationGroups??[];
+  const allocations=sharedDots.map(({id,total,slots,overflow})=>{
+    const name=SS14_CARDS.records[id]?.name??'같은 지속 대미지';
+    const applied=slots.filter(slot=>slot.uptime>0);
+    const incomplete=slots.some(slot=>slot.uptime===null);
+    const confirmed=!overflow&&!incomplete&&applied.length>1&&applied.every(slot=>slot.confirmed);
+    return `<fieldset><legend>${esc(name)} · 슬롯별 유지율</legend><p tabindex="-1" data-role="dot-allocation-${esc(id)}">${incomplete?'입력된 ':''}합계 ${number(total)}% / 최대 100%${confirmed?' · 배정 확인됨':''}</p>
+      ${slots.map(({rowIndex,itemId,field,uptime})=>renderSeasonDpsField(`${rowIndex}:${field}`,{...SEASON_DPS_SKILL_FIELDS[field],
+        label:`${rowIndex+1}번 칸 · ${SS14_CARDS.records[itemId]?.name??name} 유지율 (%)`},uptime??'','지속 대미지 배정')).join('')}
+      ${confirmed||applied.length<2?'':button('겹친 시간을 한 칸에만 배정했어요','confirm-dot-allocation',`data-key="${esc(id)}"${overflow||incomplete?' disabled':''}`)}</fieldset>`;
+  }).join('');
+  const reapingAllocations=sharedReaping.map(({id,total,slots})=>{
+    const name=SS14_CARDS.records[id]?.name??'같은 지속 대미지';
+    const incomplete=slots.some(slot=>slot.issue);
+    return `<fieldset><legend>${esc(name)} · 슬롯별 수확 비율</legend><p tabindex="-1" data-role="reaping-allocation-${esc(id)}">${incomplete?'확인된 비율 ':''}합계 ${number(total)}% / 최대 100%</p>
+      ${slots.map(({rowIndex,itemId,overlap})=>renderSeasonDpsField(`${rowIndex}:reapingOverlap`,{...SEASON_DPS_SKILL_FIELDS.reapingOverlap,
+        label:`${rowIndex+1}번 칸 · ${SS14_CARDS.records[itemId]?.name??name} 수확 시 적용 비율 (%)`},overlap??'','수확 배정')).join('')}</fieldset>`;
+  }).join('');
   const skillFields = s.report.coupledSkills.rows.filter(row => row.rowIndex < 5).map(row => {
     const component = s.report.components.find(c => c.category === 'skills' && c.id === row.id);
-    const keys = skillConditionKeys(s,row.rowIndex,row.id);
+    const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!sharedDots.some(group=>
+      group.slots.some(slot=>slot.rowIndex===row.rowIndex&&(key===slot.field||key==='dotExclusive')))
+      && !(key==='reapingOverlap'&&sharedReaping.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex))));
     if (!keys.length) return '';
     const minionMaximum = s.report.fullDps.rows.find(entry => entry.rowIndex === row.rowIndex)?.minionMaximum;
     const sharedCommand = s.report.fullDps.observedCommandRow === row.rowIndex;
@@ -167,11 +199,15 @@ export function renderResultConditions(s) {
       ${button('스킬 계산 보기','result-tab',`data-tab="calculation" data-index="${row.rowIndex}" data-focus-role="calculation-skill"`)}</details>`;
   }).join('');
   return `<section class="native-result-conditions" aria-label="적용 중인 전투 조건">
+    ${hasManualConditions ? button('대상·스킬·효과 조건 초기화','clear-combat-conditions') : ''}
     ${renderTrainingDummyPicker(inputs.dps?.enemy)}
+    ${Number.isFinite(s.report.fullDps.fixedErosionResistance)?`<p>대상 부식 저항 ${number(s.report.fullDps.fixedErosionResistance)}% 고정 적용 중</p>`:''}
     <details data-role="dock-enemy-defense"><summary>아머·저항 직접 입력</summary><dl class="native-condition-values">${Object.entries(SEASON_DPS_ENEMY_FIELDS).filter(([key])=>key!=='numbedStacks').map(([key, def]) =>
       `<div><dt><label for="dock-enemy-${key}">${esc(def.label)}</label></dt><dd><input id="dock-enemy-${key}" type="number" step="any" min="${def.min}" max="${def.max}" data-season-edit="dps-input" data-key="enemy:${key}" value="${esc(inputs.dps?.enemy?.[key])}" placeholder="미입력"></dd></div>`).join('')}</dl></details>
     ${renderFixedNumbedField(build,s.report,inputs.dps?.enemy?.numbedStacks)}
-    ${periodicBurst ? renderSeasonDpsField('0:periodicBurstUptime',SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,inputs.dps?.skills?.[0]?.periodicBurstUptime,'조건 탭') : ''}
+    ${periodicBurst ? renderSeasonDpsField(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(inputs.dps),'조건 탭') : ''}
+    ${allocations}
+    ${reapingAllocations}
     ${skillFields ? `${shareOverflow?`<p role="status">시전 배분 ${number(shareOverflow)}% / 최대 100%</p>`:''}<details data-role="dock-skill-conditions"${shareOverflow?' open':''}><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}
     <details data-role="dock-more-conditions"><summary>추가 전투 조건</summary>
     ${edit('대상·스킬 조건 전체', 'season-dps-input')}${edit('기본 속성', 'season-character-input')}${edit('기본 크리티컬', 'native-critical-input')}${edit('축복 중첩', 'native-blessing-input')}
@@ -191,10 +227,18 @@ function renderUpgradeRanking(s){
   const slots=(selected)=>[['all','전체 부위'],...SEASON_GEAR_SLOT_LABELS.map((n,i)=>[String(i),n])].map(([v,n])=>`<option value="${v}"${v===selected?' selected':''}>${esc(n)}</option>`).join('');
   const active=s.document.targetBuild.skills?.active??[];
   const damageRows=s.report[preferredSeasonDpsMetric(s.report)]?.rows;
+  const skillReplacement=group==='skillReplacement';
+  const skillAnalysis=group==='skills'||skillReplacement;
+  const skillOptions=skillAnalysis?active.flatMap((row,i)=>
+    row?.skillId&&damageRows?.some(d=>d.rowIndex===i&&d.id===row.skillId)
+      ? [{id:String(i),label:`${i===0?'주력':'액티브 '+(i+1)} · ${s.report.components.find(c=>c.category==='skills'&&c.id===row.skillId)?.name??'한국어 이름 미제공'}`}]
+      : []):[];
+  const chosenSkill=skillOptions.some(row=>row.id===s.upgradeSkill);
+  const skillUnavailable=skillReplacement?!chosenSkill:group==='skills'&&s.upgradeSkill!=null&&s.upgradeSkill!=='all'&&!chosenSkill;
   let content='';
   if(job?.busy)content=`<p role="status">계산 중 <span data-upgrade-progress>${job.checked} / ${job.total}</span></p>${button('계산 중지','rank-cancel')}`;
   else if(job?.error)content=`<p role="alert">${esc(job.error)}</p>`;
-  else if(job?.reasons?.length)content='<details data-role="analysis-ranking-blockers"><summary>전체 DPS 비교 보류</summary>'+renderReasons(s,job.reasons)+'</details>';
+  else if(job?.reasons?.length)content=`<details data-role="analysis-ranking-blockers" open><summary>${group==='skills'&&s.upgradeSkill&&s.upgradeSkill!=='all'?'선택 스킬 분석 보류':'전체 DPS 비교 보류'}</summary>${renderReasons(s,job.reasons)}</details>`;
   else if(job?.impacts) {
     const metricLabel=job.metric==='assumedDps'?'방어 전 DPS':'전체 DPS';
     content=job.impacts.length?`<p>장착 중 ${metricLabel} <strong>${number(job.base)}</strong></p><ul class="upgrade-ranking">${job.impacts.map(row=>
@@ -214,13 +258,20 @@ function renderUpgradeRanking(s){
         `<div>${metricLabel} ${number(job.base)} → <b>${number(r.value)}</b></div><strong class="native-comparison-delta">+${number(r.delta)} DPS${r.percent==null?'':' (+'+number(r.percent)+'%)'}</strong>`}
       ${r.hypothetical?'':r.saved?(s.dirty?'사본 저장됨':button('저장된 사본 열기','open',`data-id="${esc(r.saved)}"`)):button('사본에 적용','rank-copy',`data-index="${index}" aria-label="${label} 사본에 적용"`)}`;
     const rows=job.rows.map((r,i)=>`<li>${candidate(r,i,(i+1)+'위')}</li>`).join('');
-    const resources=job.resources?.map(r=>`<li><span>${esc(r.label)} · ${r.from} → ${r.to}</span><b>${r.delta>0?'+':''}${number(r.delta)} DPS</b></li>`).join('');
-    const empty=job.checked===0?'선택한 대상에 비교할 후보 없음':job.checked===job.blocked?'비교 가능한 후보 없음':(job.skillIndex!=null?skillMetricLabel:metricLabel)+'가 오르는 후보 없음';
+    const blockedSkills=job.blockedSkills?.map((row,index)=>`<li data-blocked-skill-name="${esc(row.label)}"><details><summary>${esc(row.label)}</summary>
+      <ul>${row.reasons.map(reason=>`<li>${esc(reason.replace(/^현재: /u,''))}</li>`).join('')}</ul>
+      ${row.canOpen?button('시험 사본 열기','rank-skill-trial',`data-index="${index}" aria-label="${esc(row.label)} 시험 사본 열기"`):''}</details></li>`).join('');
+    const resources=job.resources?.map(r=>`<li><span>${esc(r.label)} · ${r.from} → ${r.to}<br><small>${metricLabel} ${number(r.fromDps)} → ${number(r.toDps)}</small></span><b>${signed(r.delta)} DPS</b></li>`).join('');
+    const empty=equipment&&job.assembled?'한 부위만 바꿔 DPS가 오르는 후보 없음'
+      :job.checked===0?'선택한 대상에 비교할 후보 없음':job.checked===job.blocked?'비교 가능한 후보 없음':(job.skillIndex!=null?skillMetricLabel:metricLabel)+'가 오르는 후보 없음';
     content=`<h3>${UPGRADE_GROUPS[group]} Top 20</h3>
       ${rows?'<ol class="upgrade-ranking">'+rows+'</ol>':`<p>${empty}</p>`}
       ${job.assembled?`<article class="upgrade-combination">${candidate(job.assembled,'assembled','옵션 조합')}</article>`:''}
       ${resources?`<details><summary>자원 1단위당 DPS</summary><ul class="upgrade-resource-list">${resources}</ul></details>`:''}
-      ${job.blockedReasons?.length?`<details data-role="ranking-exclusions"><summary>비교 보류 ${job.blocked}건</summary><ul>${job.blockedReasons.map(r=>`<li>${esc(r.reason)} · ${r.count}건</li>`).join('')}</ul></details>`:''}`;
+      ${job.blockedReasons?.length?`<details data-role="ranking-exclusions"><summary>비교 보류 ${job.blocked}건</summary>
+      ${blockedSkills?`<label>보류 스킬 검색<input type="search" data-blocked-skill-filter></label><p data-blocked-skill-empty role="status" hidden>검색 결과 없음</p>
+      <ul class="upgrade-blocked-skills" aria-label="보류 스킬">${blockedSkills}</ul>`:''}
+      <ul>${job.blockedReasons.map(r=>`<li>${esc(r.reason)} · ${r.count}건</li>`).join('')}</ul></details>`:''}`;
   }
   return `<section aria-label="전체 DPS 추천"><h2>DPS 분석</h2>
     <label>분석 유형<select data-upgrade-group>${Object.entries(UPGRADE_GROUPS).map(([key,label])=>`<option value="${key}"${key===group?' selected':''}>${label}</option>`).join('')}</select></label>
@@ -229,10 +280,10 @@ function renderUpgradeRanking(s){
     ${replacement&&source==='shelf'&&(s.replacementSlot??'all')==='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-equipment${s.assembleEquipment?' checked':''}>보관함 장비 조합도 비교</label>`:''}
     ${group==='gear'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-rolls${s.assembleRolls?' checked':''}>현재 옵션의 범위 조합 비교</label>`:''}
     ${group==='craft'&&s.upgradeSlot&&s.upgradeSlot!=='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-craft${s.assembleCraft?' checked':''}>제작 옵션 조합도 비교</label>`:''}
-    ${group==='skills'?`<label>액티브 스킬<select data-upgrade-skill><option value="all">전체 액티브</option>${active.map((row,i)=>row?.skillId&&damageRows?.some(d=>d.rowIndex===i&&d.id===row.skillId)?`<option value="${i}"${String(i)===s.upgradeSkill?' selected':''}>${i===0?'주력':'액티브 '+(i+1)} · ${esc(s.report.components.find(c=>c.category==='skills'&&c.id===row.skillId)?.name??'한국어 이름 미제공')}</option>`:'').join('')}</select></label>`:''}
-    ${button('분석 시작',replacement?'rank-gear':'rank-options',job?.busy?'disabled':'')}
+    ${skillAnalysis?`<label>액티브 스킬<select data-upgrade-skill><option value="all"${skillReplacement?' disabled':''}${chosenSkill?'':' selected'}>${skillReplacement?'교체할 스킬 칸 선택':'전체 액티브'}</option>${skillOptions.map(({id,label})=>`<option value="${id}"${id===s.upgradeSkill?' selected':''}>${esc(label)}</option>`).join('')}${skillUnavailable&&!skillReplacement?`<option value="" selected disabled>분석할 스킬을 다시 선택하세요</option>`:''}</select></label>`:''}
+    ${button('분석 시작',replacement?'rank-gear':'rank-options',job?.busy||skillUnavailable?'disabled':'')}
     <div data-upgrade-results>${content}</div>
-    <details><summary>분석 기준</summary><p>${group==='unit'?'SS14에서 확인한 옵션을 하나씩 1단위 추가해 계산합니다.':equipment?'도감은 옵션 범위 상한, 보관함은 저장된 수치를 사용합니다.':group==='gearImpact'?'방어구·장신구를 한 부위씩 해제해 장착 중 DPS와 비교합니다.':group==='gear'?'옵션 수치를 한 단위씩 바꿉니다. 범위 조합은 양 끝값을 차례로 비교합니다.':group==='craft'?'제작창의 T1 기본값을 사용합니다. 한 부위의 조합은 가장 큰 상승을 주는 변경부터 한 칸씩 적용해 다시 비교합니다.':'선택한 수치나 레벨을 한 단계 바꿔 DPS를 비교합니다.'}</p></details></section>`;
+    <details><summary>분석 기준</summary><p>${skillReplacement?'같은 칸에서 기본 레벨, 시전 시간 배분, 적중률을 유지하고 전체 빌드 DPS를 비교합니다. 연결할 수 없는 보조는 해제됩니다.':group==='unit'?'SS14에서 확인한 옵션을 하나씩 1단위 추가해 계산합니다.':equipment?'도감은 옵션 범위 상한, 보관함은 저장된 수치를 사용합니다.':group==='gearImpact'?'방어구·장신구를 한 부위씩 해제해 장착 중 DPS와 비교합니다.':group==='gear'?'옵션 수치를 한 단위씩 바꿉니다. 범위 조합은 양 끝값을 차례로 비교합니다.':group==='craft'?'제작창의 T1 기본값을 사용합니다. 한 부위의 조합은 가장 큰 상승을 주는 변경부터 한 칸씩 적용해 다시 비교합니다.':'선택한 수치나 레벨을 한 단계 바꿔 DPS를 비교합니다.'}</p></details></section>`;
 }
 const damageTypes={physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식'};
 
@@ -241,7 +292,7 @@ function calcRows(entries) {
 }
 function conversionSource({path,itemId,name}={}) {
   if(!path)return name??'';
-  const card=SS14_CARDS.records[itemId]??SS14_SUPPORTS.records[itemId];
+  const card=SS14_CARDS.records[itemId]??seasonSupportKoreanCard(itemId);
   const slot=effectSourceLabel(path);
   if(name) return name===slot ? slot : `${slot} · ${name}`;
   return card?.season==='SS14'&&card.koreanTextVerified ? `${slot} · ${card.name}` : slot;
@@ -249,12 +300,44 @@ function conversionSource({path,itemId,name}={}) {
 function calcGroup(label,value,body,role='') {
   return `<details${role?` data-role="${esc(role)}"`:''}><summary><span>${esc(label)}</span>${value?`<b>${esc(value)}</b>`:''}</summary>${body}</details>`;
 }
+function resistanceRows(r) {
+  return r?[[r.fixed?'고정 저항':'대상 저항',number(r.base)+'%'],
+    ...(r.scorch?[['스코치 저항 감소',number(r.scorch)+'%p']]:[]),
+    ...(r.penetration?[['저항 관통',number(r.penetration)+'%p']]:[]),
+    ...(r.spell?[['주술 원소 저항 관통',number(r.spell)+'%p']]:[]),
+    ['유효 저항',number(r.effective)+'%']]:[];
+}
+function renderDotDefense(defense,elapsed) {
+  if(!defense)return '';
+  const body=d=>calcRows([['대상 심화',number(d.affliction)],['심화 대미지 배율','×'+number(d.afflictionMultiplier)]])
+    +d.resistances.map(r=>calcGroup(damageTypes[r.type]??'기타','',calcRows(resistanceRows(r)))).join('');
+  const states=defense.states;
+  if(states&&elapsed?.states?.length!==states.length)return '';
+  const detail=states ? elapsed.states.map(({active,uptime},i)=>calcGroup(
+    active.map((on,j)=>on?elapsed.rows[j].name:'').filter(Boolean).join(' · ')||'영약 비활성',number(uptime)+'%',body(states[i]))).join('') : body(defense);
+  return detail?calcGroup('저항·심화 계산 근거','',detail,'dot-mitigation-breakdown'):'';
+}
+function hitModifierSources(trace, operation) {
+  return (trace??[]).filter(e=>e.stage==='damage-modifier'&&e.appliesToHit&&e.operation===operation
+    && Number.isFinite(e.resolvedValue)&&e.resolvedValue!==0&&!/-damage-taken$/u.test(e.stat)).map(e=>{
+    const stat=e.stat.replace(/^(?:supported-)?skill-/u,'').replaceAll('-','_');
+    const value=operation==='more'?'×'+number(1+e.resolvedValue/100):(e.resolvedValue>0?'+':'')+number(e.resolvedValue)+'%';
+    return [SEASON_STAT_LABELS[e.effectSource?.stat]??SEASON_STAT_LABELS[stat]??'적용 대미지 옵션',value,
+      conversionSource(e.effectSource??undefined)];
+  });
+}
 export function renderSkillConversion(trace,index) {
   const conversions=(trace??[]).filter(e=>e.stage==='conversion'&&e.effectivePercent>0&&damageTypes[e.sourceType]&&damageTypes[e.targetType]);
   const route=e=>`${damageTypes[e.sourceType]} → ${damageTypes[e.targetType]}`;
   const percent=e=>number(e.effectivePercent)+'%';
+  const moved=e=>{
+    const {min,max}=e.movedBaseDamage??{};
+    return Number.isFinite(min)&&Number.isFinite(max)
+      ? ' · 보정 전 전환량 '+number(min)+(min===max?'':'–'+number(max))
+      : '';
+  };
   const converted=conversions.length?calcGroup('대미지 전환',conversions.length===1?`${route(conversions[0])} ${percent(conversions[0])}`:'',
-    calcRows(conversions.map(e=>[[e.actionName,route(e)].filter(Boolean).join(' · '),percent(e)+(Math.abs(e.effectivePercent-e.resolvedValue)>1e-8?` (원래 ${number(e.resolvedValue)}%)`:''),conversionSource(e.effectSource??undefined)])),`skill-conversion-${index}`):'';
+    calcRows(conversions.map(e=>[[e.actionName,route(e)].filter(Boolean).join(' · '),percent(e)+(Math.abs(e.effectivePercent-e.resolvedValue)>1e-8?` (원래 ${number(e.resolvedValue)}%)`:'')+moved(e),conversionSource(e.effectSource??undefined)])),`skill-conversion-${index}`):'';
   const gains=(trace??[]).filter(e=>e.stage==='gained-as-extra'&&e.resolvedValue>0
     && (damageTypes[e.sourceType]||e.sourceType==='non-erosion')&&damageTypes[e.targetType]);
   const gainedLabel=e=>`${damageTypes[e.sourceType]??'부식 이외'} → ${damageTypes[e.targetType]} +${number(e.resolvedValue)}%`;
@@ -277,11 +360,55 @@ function renderExcludedHitRoutes(effects) {
     calcRows([...bySource.values()].map(({kind,source,count})=>[kind,'기준 적중 대미지 없음'+(count>1?' · '+count+'개':''),source])),
     'selected-skill-excluded-hit-routes');
 }
-function renderMoonStrikeForms(build, entry) {
+
+export function renderElixirDamageRoutes(routes,index) {
+  if (!routes) return '';
+  const empty='<p>적용된 전환·추가 획득 없음</p>';
+  const bodies=routes.states.map((state,i)=>state.groups.map(({slotIndex,trace})=>
+    ({slotIndex,body:renderSkillConversion(trace,`${index}-elixir-${i}-${slotIndex??'all'}`)})));
+  if (!bodies.some(state=>state.some(group=>group.body))) return '';
+  return calcGroup('영약 상태별 대미지 전환·추가 획득','',routes.states.map(({active,uptime},i)=>
+    calcGroup(routes.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '),
+      number(uptime)+'%',bodies[i].map(({slotIndex,body})=>slotIndex===undefined?body:
+        `<h4>${slotIndex===0?'메인 무기':'서브 무기'}</h4>${body||empty}`).join('')||empty,
+      `selected-skill-elixir-route-${index}-${i}`)).join(''),
+    `selected-skill-elixir-damage-routes-${index}`);
+}
+export function renderSkillElixirDps(phases,index) {
+  if (!phases?.states.length) return '';
+  const rows=phases.states.map(({active,uptime,dps,weightedDps})=>
+    `<tr><th scope="row">${esc(phases.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '))}</th><td>${number(uptime)}%</td><td>${number(dps)}</td><td>${number(weightedDps)}</td></tr>`).join('');
+  return calcGroup('영약 상태별 스킬 DPS','',
+    `<table class="slot-dps-table"><thead><tr><th scope="col">영약</th><th scope="col">시간 비중</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th></tr></thead><tbody>${rows}</tbody></table>`,
+    `skill-elixir-dps-${index}`);
+}
+function renderMoonStrikeForms(build, entry, row) {
   const forms = entry?.mechanics?.find(m => m.kind === 'moon-strike-forms');
   if (!forms || entry.bindingChanged) return '';
   const rows = [['휘두르기 무기 공격 대미지',number(forms.sweep)+'%'],
     ['슬래시 무기 공격 대미지',number(forms.slash)+'%'], ['스킬 자체 슬래시 확률',`+${number(forms.baseSlashChance)}%`]];
+  const rainbow = row?.supported && row.moonStrike?.rainbowSourceUrl ? row.moonStrike : null;
+  const lunar = row?.supported ? row.moonStrike?.lunarEclipse : null;
+  const ring = row?.supported ? row.moonStrike?.lunarRing : null;
+  const wax = row?.supported ? row.moonStrike?.waxAndWane : null;
+  if (rainbow) rows.push(['무지개로 추가된 슬래시 확률',`+${number(rainbow.rainbowBonus)}%`],
+    ['적용 슬래시 확률',number(rainbow.slashChance)+'%']);
+  if (row?.supported && row.moonStrike) rows.push(['두 형태의 평균 대미지 계수',number(row.moonStrike.averageCoefficient)+'%'],
+    ['최대 MP에 따른 추가 대미지',`+${number(row.moonStrike.manaBonus)}%`]);
+  if (lunar) rows.push(['월식에 적용한 MP 봉인량',number(lunar.sealedMana)],
+    ['월식 레벨에 따른 추가 대미지',`+${number(lunar.fixedBonus)}%`],
+    ['월식 봉인량에 따른 추가 대미지',`+${number(lunar.bonus)}%`]);
+  if (ring) rows.push(['문링 레벨에 따른 추가 대미지',`+${number(ring.fixedBonus)}%`],
+    ['슬래시가 환형 공격으로 바뀔 확률',number(ring.slashChance)+'%'],
+    ['전체 공격 중 환형 공격 비율',number(ring.castChance)+'%'],
+    ['환형 공격 적중률',number(ring.hitChance)+'%']);
+  if (wax) rows.push(['달의 운동 레벨에 따른 추가 대미지',`+${number(wax.fixedBonus)}%`],
+    ['달의 운동 매직 버스트 추가 적중 대미지',row.values?.burstActivationRate>0?`+${number(wax.burstBonus)}%`:'미발동']);
+  if (row?.supported && row.moonStrike?.waxWeaponShares) {
+    const {normal,burst}=row.moonStrike.waxWeaponShares;
+    if (row.values.manualRate>row.values.burstActivationRate) rows.push(['일반 공격의 메인 무기 비중',`${number(normal*100)}%`]);
+    rows.push(['매직 버스트의 메인 무기 비중',`${number(burst*100)}%`]);
+  }
   const record = SS14_CARDS_EN.records[entry.itemId];
   if (record && !seasonWeaponRestrictionIssue(build,record)) {
     const hands = [0,1].map(index => seasonWeaponProfile(build,index,{individual:true}));
@@ -298,8 +425,45 @@ function renderMoonStrikeForms(build, entry) {
       rows.push(['쌍수 기본 초당 공격 횟수',number((hands[0].values.weaponSpeed+hands[1].values.weaponSpeed)/2)]);
   }
   return calcGroup('문 스트라이크 기본 수치',`Lv.${forms.level}`,calcRows(rows)
-    + `<p><a href="${esc(forms.sourceUrl)}" target="_blank" rel="noopener noreferrer">스킬 원문</a> · <a href="https://tlidb.com/ko/Attack" target="_blank" rel="noopener noreferrer">공격 도움말</a></p>`,
+    + (row?.supported && row.manaPerUse===null ? '<p>MP 소모 1%의 기준량 미확인. 보정 전 소모량을 조건에 입력하면 MP 수급을 계산합니다.</p>' : '')
+    + `<p><a href="${esc(forms.sourceUrl)}" target="_blank" rel="noopener noreferrer">스킬 원문</a> · <a href="https://tlidb.com/ko/Attack" target="_blank" rel="noopener noreferrer">공격 도움말</a>${rainbow ? ` · <a href="${esc(rainbow.rainbowSourceUrl)}" target="_blank" rel="noopener noreferrer">무지개 원문</a>` : ''}${lunar ? ` · <a href="${esc(lunar.sourceUrl)}" target="_blank" rel="noopener noreferrer">월식 원문</a>` : ''}${wax ? ` · <a href="${esc(wax.sourceUrl)}" target="_blank" rel="noopener noreferrer">달의 운동 원문</a>` : ''}</p>`,
   'selected-skill-moon-strike');
+}
+
+function renderSkillResourceCosts(row, averaged) {
+  if (!row || (!row.channelCost && !['manaPerUse','lifePerUse','manualManaPerSecond','manualLifePerSecond'].some(key=>Number.isFinite(row[key])))) return '';
+  const costs = [];
+  for (const [label,perUse,perSecond] of [
+    ['MP',row.manaPerUse,row.manualManaPerSecond], ['HP',row.lifePerUse,row.manualLifePerSecond],
+  ]) {
+    if (label==='HP' && !(perUse>0 || perSecond>0)) continue;
+    if (Number.isFinite(perUse)) costs.push([averaged?'시작 시 1회 '+label:'1회 '+label,number(perUse)]);
+    costs.push([averaged?'평균 '+label+'/초':label+'/초',Number.isFinite(perSecond)?number(perSecond):'확인 필요']);
+  }
+  if (row.channelCost?.valid)
+    costs.push(['관측 차감 횟수',number(row.channelCost.rate)+'회/초']);
+  const channel=row.channelCost;
+  const needsRate=channel&&!channel.valid;
+  const channelDetails=needsRate
+    ? `<p>${channel.variable?'상태마다 차감 비용이 달라 평균 횟수만으로는 초당 소모를 확정할 수 없습니다.'
+      : Number.isFinite(channel.max)?`관측한 초당 차감 횟수를 입력하세요. 현재 상한은 ${number(channel.max)}회/초입니다.`:'차감 횟수의 상한을 확인할 수 없습니다.'}</p>`
+      +button('차감 횟수 입력','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostRate"`):'';
+  const total = [row.manualManaPerSecond,row.manualLifePerSecond]
+    .map((value,i)=>Number.isFinite(value)&&(i===0||value>0) ? number(value)+(i===0?' MP/초':' HP/초') : '').filter(Boolean).join(' · ');
+  return calcGroup('수동 시전 소모',total,calcRows(costs)+channelDetails
+    +button('전체 MP 수급 보기','result-tab','data-tab="stats" data-focus-role="numeric-mana-summary"'),'selected-skill-resource-cost');
+}
+
+function renderSkillNumbedContribution(dps,row) {
+  if(!dps?.supported||!row?.supported)return '';
+  const dynamic=dps.scope==='ss14-thea-joint-combat';
+  const prefix=dynamic?'numbed':'fixedNumbed';
+  const entries=[['번개 적중','HitDps'],['번개 지속 대미지','DotDps'],['번개 수확','ReapingDps']]
+    .map(([label,key])=>[label,row.values[prefix+key]]).filter(([,value])=>Number.isFinite(value)&&value>0);
+  if(!entries.length)return '';
+  const total=entries.reduce((sum,[,value])=>sum+value,0);
+  return calcGroup('이 스킬의 마취 기여','+'+number(total)+' DPS',calcRows(entries.map(([label,value])=>[label,'+'+number(value)+' DPS']))
+    +'<p>스킬 DPS에 이미 반영된 수치입니다.</p>','selected-skill-numbed');
 }
 
 export function renderSkillCalculation(s) {
@@ -319,15 +483,16 @@ export function renderSkillCalculation(s) {
   if(!slots.length)return button('주력 스킬 선택','inspect-calculation-skill','data-index="0" data-role="edit-calculation-skill"');
   const selected=slots.find(slot=>slot.index===s.calculationIndex)??slots[0];
   const {id,index,row}=selected;
-  const moonStrike=renderMoonStrikeForms(s.document.targetBuild,seasonSkillSlotCalculation(report,index));
   const displayRow=assumed?report.assumedDps.rows.find(entry=>entry.rowIndex===index):row;
+  const numbed=renderSkillNumbedContribution(assumed?report.assumedDps:report.fullDps,displayRow);
+  const moonStrike=renderMoonStrikeForms(s.document.targetBuild,seasonSkillSlotCalculation(report,index),displayRow);
   const direct=assumed ? null : report.coupledSkills.rows.find(r=>r.rowIndex===index&&r.id===id);
   const detail=assumed ? displayRow?.detail : {
     damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
     critical:report.offense.rows.find(r=>r.rowIndex===index&&r.id===id)?.values, pools:row?.pools, takenMultiplier:row?.takenMultiplier,
-    skillLevel:seasonSkillCalculationLevel(report,index), excludedHitRoutes:excludedSeasonHitRoutes(direct),
+    skillLevel:seasonSkillCalculationLevel(report,index), excludedHitRoutes:excludedSeasonHitRoutes(direct), hitModifierTrace:direct?.trace,
   };
-  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, skillLevel, excludedHitRoutes}=detail??{};
+  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, skillLevel, excludedHitRoutes,hitModifierTrace}=detail??{};
   const v=displayRow?.values??{};
   const averaged=assumed?report.assumedDps.measuredResources:!!report.theaAverage;
   const slotTitle=slot=>`${slot.slotName} · ${esc(slot.name)}${Number.isInteger(slot.row?.minionLevel)?' · Lv.'+slot.row.minionLevel:''}`;
@@ -352,6 +517,7 @@ export function renderSkillCalculation(s) {
   const reap=displayRow?.reaping;
   const fissure=displayRow?.fissure;
   if(displayRow?.supported&&fissure) amounts.push(['파괴 충전 간격',number(fissure.interval)+'초'],['균열 후속 적중',number(fissure.hits)+'/초']);
+  if(v.igniteReapingDps>0) amounts.push(['점화·연소 수확',number(v.igniteReapingDps)+' DPS']);
   if(v.reapingDps>0 && reap) amounts.push(['수확 시간',number(reap.duration)+'초'],['수확 쿨타임',number(reap.cooldown)+'초'],['수확 횟수',number(reap.rate)+'/초']);
   if(v.reapingDps>0 && reap?.beamCount>1) amounts.push(['생성 광선 수',number(reap.beamCount)]);
   const globalIssues=new Set(report.fullDps.blockers);
@@ -359,24 +525,47 @@ export function renderSkillCalculation(s) {
   const dpsLabel=assumed?'스킬 방어 전 DPS':'스킬 DPS';
   const total=amounts.length&&displayRow?.supported?calcGroup(dpsLabel,skillDps,calcRows(amounts),'selected-skill-dps'):
     `<p class="skill-calc-total" data-role="selected-skill-dps"><span>${dpsLabel}</span><b>${skillDps}</b></p>`;
+  const hitOnly=!displayRow?.supported && Number.isFinite(row?.permafrostHitDps)
+    ? calcRows([['얼음 송곳 적중 DPS',number(row.permafrostHitDps)],['동토의 지속 대미지','계산 보류']]) : '';
   const elapsed=assumed?report.assumedDps.elixirUptime:report.elixirUptime;
-  if(elapsed?.supported&&elapsed.rows.some(r=>r.uptime>0&&r.uptime<100))
-    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${levelDetails}${moonStrike}${actions}</section>`;
+  const averagedElixir=elapsed?.supported&&elapsed.rows.some(r=>r.uptime>0&&r.uptime<100);
+  const frost=displayRow?.permafrostBreakdown;
+  const frostDetails=frost?calcGroup('동토 지속 대미지 계산',number(v.permafrostDps)+' DPS',calcRows([
+    [averagedElixir?'활성 중 평균 DPS':'활성 중 DPS',number(frost.active)],['적용 가동률',number(frost.uptime)+'%'],
+    ['소모한 지면 에너지 축적',number(frost.charge)+'회'],
+  ])+(!averaged?renderDotDefense(displayRow.frostDefense,elapsed):''),'permafrost-dps-breakdown'):'';
+  const dot=displayRow?.supported&&(!averaged||averagedElixir)?displayRow.dotBreakdown:null;
+  const dotDetails=dot?calcGroup('지속 대미지 적용',number(v.dotDps)+' DPS',calcRows([
+    [averagedElixir?'활성 중 평균 DPS':'활성 중 DPS',number(dot.active)],
+    ['적용 가동률',number(dot.uptime)+'%'],['가동률 반영 DPS',number(v.dotDps)],
+  ])+(!averaged?renderDotDefense(displayRow.dotDefense,elapsed):''),'skill-dot-breakdown'):'';
+  const costs=renderSkillResourceCosts(index<skills.active.length?displayRow:null,averaged||averagedElixir);
+  if(averagedElixir)
+    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
   const useRate=assumed?displayRow?.useRate:direct?.offenseBasis?.rate;
   const criticalChance=critical?.effectiveCriticalChance;
   const summary=displayRow?.supported?[
-    ...(!averaged&&Number.isFinite(v.averageLandedHit)?[['1회 평균 명중',number(v.averageLandedHit)]]:[]),
+    ...(!averaged&&Number.isFinite(v.averageLandedHit)?[[displayRow.moonStrike?.waxWeaponShares?'기본 교대 적중 평균':'1회 평균 명중',number(v.averageLandedHit)]]:[]),
     ...(useRate>0?[[averaged?'시작 시 사용 속도':'사용 속도',number(useRate)+'/초']]:[]),
     ...(Number.isFinite(criticalChance)&&Number.isFinite(v.averageLandedHit)?[[averaged?'시작 시 크리티컬 확률':'크리티컬 확률',number(criticalChance)+'%']]:[]),
   ]:[];
   let steps='';
+  const minionTypes = Object.entries(displayRow?.minionDamageByType ?? {})
+    .filter(([type, dps]) => damageTypes[type] && Number.isFinite(dps) && dps > 0);
+  let minionDamage = '';
+  if (displayRow?.supported && !averaged && minionTypes.length) {
+    const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
+    minionDamage = calcGroup(assumed ? '소환체 스킬의 유형별 방어 전 DPS' : '소환체 스킬의 유형별 DPS', number(sum),
+      calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
+  }
   if (displayRow?.weaponHands) steps+=calcGroup('쌍수 교대 공격','',displayRow.weaponHands.map(hand=>{
     const label=hand.slotIndex===0?'메인 무기':'서브 무기';
     return calcRows([[`${label} 적중당 평균 대미지`,number(hand.landedHit)],
       [`${label} 크리티컬 확률`,number(hand.effectiveCriticalChance)+'%']])
       + renderSkillConversion(hand.conversionTrace,`${index}-weapon-${hand.slotIndex}`);
   }).join('')+`<p><a href="${DUAL_WIELD_ATTACK_SOURCE}" target="_blank" rel="noopener noreferrer">쌍수 공격 도움말</a></p>`,'selected-skill-dual-wield');
-  const conversion=renderSkillConversion(assumed?displayRow?.conversionTrace:row?.conversionTrace??direct?.trace,index);
+  const trace=assumed?displayRow?.conversionTrace:row?.conversionTrace??direct?.trace;
+  const conversion=renderSkillConversion(trace,index);
   const excluded=renderExcludedHitRoutes(excludedHitRoutes);
   if(stages && hasHitPools) {
     const types=Object.entries(stages.byType??{}).filter(([,v])=>v.base||v.added||v.taken);
@@ -387,8 +576,10 @@ export function renderSkillCalculation(s) {
       const next=stages[key];
       if(!Number.isFinite(next))continue;
       const factor=(before,after)=>before>0?(stage==='increase'?number((after/before-1)*100)+'%':'×'+number(after/before)):'—';
+      const options=hitModifierSources(hitModifierTrace,stage==='increase'?'add':'more');
       steps+=calcGroup(label,factor(prior,next),calcRows([['적용 전 평균',number(prior)],['적용 후 평균',number(next)],
-        ...types.map(([type,v])=>[damageTypes[type]??'기타',factor(previous==='base'?v.base+v.added:v[previous],v[stage])])]));
+        ...types.map(([type,v])=>[damageTypes[type]??'기타',factor(previous==='base'?v.base+v.added:v[previous],v[stage])])])
+        +(options.length?calcGroup('적용 옵션과 출처','',calcRows(options),`hit-${stage}-sources`):''));
       prior=next;
     }
     if(displayRow?.supported && Number.isFinite(takenMultiplier)){
@@ -408,36 +599,58 @@ export function renderSkillCalculation(s) {
         const bound=key=>number(pools.reduce((sum,p)=>sum+p[key],0)*takenMultiplier);
         const bounds=[label,bound('min')+' – '+bound('max')];
         return assumed ? [bounds] : [bounds,[label+' 아머 / 저항 배율','×'+number(pools[0].armorMultiplier)+' / ×'+number(pools[0].resistanceMultiplier)]];
-      })));
+      }))+(!assumed&&received.some(({pools})=>pools[0].defense)?calcGroup('아머·저항 계산 근거','',received.map(({type,pools})=>{
+        const d=pools[0].defense;
+        if(!d)return '';
+        const percent=value=>number(value)+'%';
+        const points=value=>number(value)+'%p';
+        return calcGroup(damageTypes[type]??'기타','',calcRows([
+          ['대상 아머',number(d.armor)],['관통 전 아머 감면',percent(d.armorReduction*100)],
+          ...(d.armorPenetration?[['아머 감면 관통',points(d.armorPenetration)]]:[]),
+          ...(d.projectilePen?[['투사체 아머 관통',points(d.projectilePen)]]:[]),
+          ...resistanceRows(d.resistance),
+        ]));
+      }).join(''),'target-mitigation-breakdown'):''));
     }
     if(Number.isFinite(criticalChance))steps+=calcGroup('크리티컬',number(criticalChance)+'%',calcRows([['크리티컬 수치',number(critical.criticalRating)],['기본 판정 확률',number(critical.criticalChance)+'%'],['유효 확률',number(criticalChance)+'%'],['크리티컬 대미지',number(critical.criticalDamage)+'%']]));
   }
-  const dot=displayRow?.supported && !averaged ? displayRow.dotBreakdown : null;
-  if(dot)steps+=calcGroup('지속 대미지 적용',number(v.dotDps)+' DPS',calcRows([
-    ['활성 중 DPS',number(dot.active)],['적용 가동률',number(dot.uptime)+'%'],['가동률 반영 DPS',number(v.dotDps)],
-  ]),'skill-dot-breakdown');
+  const hit=displayRow?.supported&&!averaged?displayRow.hitBreakdown:null;
+  if(hit&&Number.isFinite(v.averageHit))steps+=calcGroup('적중 판정 1회 기대값',number(v.averageHit),calcRows([
+    [assumed?'방어 전 범위 평균':'대상 보정 후 범위 평균',number(hit.mitigatedMean)],
+    ...(hit.rollMean!==hit.mitigatedMean?[['행운·불운 반영 평균',number(hit.rollMean)]]:[]),
+    ['주 속성 배율','×'+number(hit.attributeMultiplier)],
+    ['명중 시 평균 (크리티컬 포함)',number(v.averageLandedHit)],
+    ['대상 적중률',number(hit.hitChance)+'%'],
+    ['적중률 반영 기대값',number(v.averageHit)],
+  ]),'selected-skill-expected-hit');
+  steps+=dotDetails;
   if(Number.isFinite(useRate)&&useRate>0){
     const rates=[['초당 사용 가능 횟수',number(useRate)]];
     if(displayRow?.supported&&Number.isFinite(v.manualRate))rates.push(['초당 일반 시전',number(v.manualRate)]);
     steps+=calcGroup('사용 속도',number(useRate)+'/초',calcRows(rates));
   }
   if(steps)steps=calcGroup(averaged?'전투 시작 상태의 계산 단계':assumed?'방어 전 계산 단계':'대미지 계산 단계','',steps);
-  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${conversion||excluded||steps?calcGroup('세부 계산','',conversion+excluded+steps,'selected-skill-details'):''}</section>`;
+  const details = conversion + minionDamage + excluded + steps;
+  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
 }
 
 export function renderNumbedCalculation(s) {
   const report=s.report;
   const assumed=preferredSeasonDpsMetric(report)==='assumedDps';
+  const dps=assumed?report.assumedDps:report.fullDps;
+  const contribution=key=>dps?.supported ? dps.rows.reduce((sum,row)=>sum+(row.values[key]??0),0) : 0;
+  const dotContributions=(dot,reaping)=>[
+    ...(dot>0?[['플레이어 번개 지속 대미지의 마취 기여','+'+number(dot)+' DPS']]:[]),
+    ...(reaping>0?[['플레이어 번개 수확의 마취 기여','+'+number(reaping)+' DPS']]:[]),
+  ];
   const fixed=(assumed?report.assumedDps:report.componentProjection).fixedNumbed;
   if(fixed) {
-    const dps=assumed?report.assumedDps:report.fullDps;
-    const contribution=key=>dps?.supported&&['ss14-fixed-scenario-full-dps','ss14-observed-elixir-uptime'].includes(dps.scope)
-      ? dps.rows.reduce((sum,row)=>sum+(row.values[key]??0),0) : 0;
-    const hit=contribution('fixedNumbedHitDps'), dot=contribution('fixedNumbedDotDps');
+    const fixedContribution=key=>dps?.scope==='ss14-thea-joint-combat'?0:contribution(key);
+    const hit=fixedContribution('fixedNumbedHitDps');
     return calcGroup('마취',number(fixed.stacks)+'중첩',calcRows([
       ['입력한 중첩',number(fixed.stacks)],['번개 대미지 보정','+'+number(fixed.bonus)+'%'],
       ...(hit>0?[['플레이어 번개 적중의 마취 기여','+'+number(hit)+' DPS']]:[]),
-      ...(dot>0?[['플레이어 번개 지속 대미지의 마취 기여','+'+number(dot)+' DPS']]:[]),
+      ...dotContributions(fixedContribution('fixedNumbedDotDps'),fixedContribution('fixedNumbedReapingDps')),
     ])+(report.coupledSkills.rows.some(row=>row.voltageJolt)?'<p class="native-stat-note">혼비백산을 사용한 전투에서 관측한 대상 중첩을 적용합니다.</p>':'')
       +button('마취 조건 편집','requirement',`data-section="combat" data-field="${fixed.sourceKey?'component-condition':'dps-input'}" data-field-key="${esc(fixed.sourceKey??'enemy:numbedStacks')}"`),'numeric-numbed');
   }
@@ -455,7 +668,8 @@ export function renderNumbedCalculation(s) {
       ['마취가 적용된 플레이어 번개 적중',`${number(stats.playerHits.boostedHits)} / ${number(stats.playerHits.lightningHits)}회`],
       ['플레이어 번개 적중의 마취 기여',`+${number(stats.playerHits.bonusDps)} DPS`],
     ]:[]),
-  ])+'<p class="native-stat-note">번개 적중 시점의 마취 중첩을 적용합니다.</p>'+
+    ...dotContributions(contribution('numbedDotDps'),contribution('numbedReapingDps')),
+  ])+
     button('마취 조건 편집','requirement','data-section="combat" data-field="thea-event" data-field-key="numbedEnabled"'),'numeric-numbed');
 }
 
@@ -464,28 +678,34 @@ function skillContributions(s) {
   const dps=s.report[metric];
   const metricLabel=metric==='assumedDps'?'방어 전 DPS':'전체 DPS';
   const rows=dps?.rows??[];
-  if(s.pending.size||!rows.length)return '';
+  const {active,passive}=s.document.targetBuild.skills;
+  const bySlot=new Map(rows.map(row=>[row.rowIndex,row]));
+  const slots=[...active,...passive].flatMap(({skillId,supports},index)=>{
+    const row=bySlot.get(index),hasSupport=supports?.some(support=>support?.supportId);
+    return row||skillId&&hasSupport?[{index,id:row?.id??skillId,row,hasSupport}]:[];
+  });
+  if(s.pending.size||!slots.length)return '';
   const total=dps.dps;
   const reconciled=dps.supported && total>0 && rows.every(r=>r.supported&&Number.isFinite(r.values.dps)&&r.values.dps>=0)
     && Math.abs(rows.reduce((sum,r)=>sum+r.values.dps,0)-total)<Math.max(0.000001,total*1e-8);
-  const build=s.document.targetBuild;
-  const skills=[...build.skills.active,...build.skills.passive];
   const nameFor=card=>card?.season==='SS14'&&card.koreanTextVerified?esc(card.name):'한국어 이름 미제공';
-  return `<section class="skill-contributions" aria-label="스킬별 DPS"><h2>스킬별 DPS</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${rows.map(r=>{
-    const index=r.rowIndex;
-    const label=nameFor(SS14_CARDS.records[r.id]);
+  return `<section class="skill-contributions" aria-label="스킬별 DPS"><h2>스킬별 DPS</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${slots.map(({index,id,row,hasSupport})=>{
+    const label=nameFor(SS14_CARDS.records[id]);
+    const slotName=index===0?'주력':index<active.length?'액티브 '+(index+1):'패시브 '+(index-active.length+1);
     const expanded=s.supportImpact?.rowIndex===index;
-    const supports=skills[index]?.supports.some(support=>support?.supportId);
-    const share=reconciled?100*r.values.dps/total:null;
-    const actions=button(`${label} <small>· ${index+1}칸</small>`,'inspect-contribution-skill',`data-index="${index}" class="contribution-skill"`);
-    const compare=supports?button('보조 비교','compare-support-impact',`data-index="${index}" data-role="support-impact-${index}" aria-label="${label} ${index+1}칸 보조 비교" aria-expanded="${expanded}"`):'';
-    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison})=>{
+    const share=reconciled&&row?100*row.values.dps/total:null;
+    const actions=button(`${label} <small>· ${slotName}</small>`,row?'inspect-contribution-skill':'inspect-skill',`data-index="${index}" class="contribution-skill"`);
+    const compare=hasSupport?button('보조 비교','compare-support-impact',`data-index="${index}" data-role="support-impact-${index}" aria-label="${label} ${slotName} 보조 비교" aria-expanded="${expanded}"`):'';
+    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,resources})=>{
       const {supported,value,delta,reasons}=comparison;
-      const result=supported?`<strong>${number(value)}</strong><small>${delta>0?'+':''}${number(delta)}</small>`
+      const result=supported?`<strong>${number(value)}</strong><small>${delta>0?'+':''}${number(delta)} DPS</small>`
         :`<details><summary>비교 보류</summary>${renderReasons(s,reasons)}</details>`;
-      return `<li><span>${supportIndex+1} · ${nameFor(SS14_SUPPORTS.records[id])}</span><div>${result}</div></li>`;
+      const edit=button(`${supportIndex+1} · ${nameFor(seasonSupportKoreanCard(id))}`,'inspect-support-impact',
+        `data-row="${index}" data-index="${supportIndex}" data-role="support-impact-edit-${index}-${supportIndex}" class="contribution-skill"`);
+      const cost=resources?renderResourceChanges(resources,esc):'';
+      return `<li>${edit}<div>${result}</div>${cost?`<section class="support-impact-cost">${cost}</section>`:''}</li>`;
     }).join(''):'';
-    return `<tr><th scope="row">${actions}${compare}</th><td>${r.supported?number(r.values.dps):'보류'}</td>${reconciled?`<td>${number(share)}%<meter aria-label="${label} 비중" min="0" max="100" value="${Math.min(100,share)}"></meter></td>`:''}</tr>${linkRows?`<tr class="support-impact"><td colspan="${reconciled?3:2}"><strong>보조 해제 시 ${metricLabel}</strong><ul>${linkRows}</ul></td></tr>`:''}`;
+    return `<tr><th scope="row">${actions}${compare}</th><td>${row?.supported?number(row.values.dps):row?'보류':'—'}</td>${reconciled?`<td>${share===null?'—':`${number(share)}%<meter aria-label="${label} 비중" min="0" max="100" value="${Math.min(100,share)}"></meter>`}</td>`:''}</tr>${linkRows?`<tr class="support-impact"><td colspan="${reconciled?3:2}"><strong>보조 해제 시 ${metricLabel}</strong><ul>${linkRows}</ul></td></tr>`:''}`;
   }).join('')}</tbody></table></section>`;
 }
 export function renderResultAnalysis(s) {

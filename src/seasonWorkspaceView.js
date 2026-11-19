@@ -2,7 +2,6 @@ import { calculateSeasonBuild } from "./seasonBuild.js";
 import { renderTrainingDummyPicker } from "./seasonTrainingDummy.js";
 import { seasonCalculationIssues, seasonDpsStatusLabel } from './seasonCalculationIssues.js';
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
-import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { SS14_GEAR_EN } from "./data/ss14Gear.en.generated.js";
 import { corrosionCard,corrosionOptions,corrosionBasePool } from './seasonCorrosion.js';
 import { parseTlidbGearTooltip } from "./tlidbGearTooltipCalculation.js";
@@ -11,12 +10,13 @@ import { findItemById } from "./catalog.js";
 import { getSeasonPickerOptions, getSeasonSelectionRecord, SEASON_GEAR_SLOT_LABELS } from "./seasonSelections.js";
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { SEASON_CONFIGURATION_GROUPS, compareSeasonConfigurations } from "./seasonConfiguration.js";
-import { seasonSupportOptions } from "./seasonSupport.js";
+import { seasonSupportOptions, seasonSupportKoreanCard } from "./seasonSupport.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
 import { SEASON_COMPONENT_LABELS } from "./seasonComponents.js";
 import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
-import { SEASON_DPS_ENEMY_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
+import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { SEASON_HERO_COMBAT_FIELDS } from "./seasonMechanicInputs.js";
@@ -36,7 +36,7 @@ const number = (value) => Number.isFinite(value) ? value.toLocaleString("ko-KR",
 const sourceLink = (receipt) => /^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(receipt?.sourceUrl ?? "")
   ? `<a href="${escape(receipt.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문</a>` : "";
 const koreanRecord = (id) => {
-  const record = SS14_CARDS.records[id] ?? SS14_SUPPORTS.records[id];
+  const record = SS14_CARDS.records[id] ?? seasonSupportKoreanCard(id);
   return record?.season === "SS14" && record.koreanTextVerified ? record : null;
 };
 const name = (id) => koreanRecord(id)?.name ?? "한국어 이름 미제공";
@@ -250,19 +250,49 @@ export function renderNearbyEnemyField(controls) {
       `<option value="${group[0]}"${selected===group?' selected':''}>${labels[group.join(',')]}</option>`).join('')}</select></label>`;
 }
 
+export function observedManaInputState(document, report) {
+  const value = document.targetBuild.ss14Inputs.character?.observedManaRecovery;
+  return report.character.survival?.manaObservationStale
+    ? {value:'',hint:`이전 관측값 ${value} MP/초. 현재 조건에서 측정한 값을 입력하세요.`}
+    : {value:value ?? '',hint:'같은 전투 조건에서 확인한 초당 자연 회복량입니다.'};
+}
+
+export function renderBuffActivation(control,value,{binding,slot=false}={}) {
+  const label=control.label.replace(/ 효과 적용 중 여부$/u,' 적용 여부');
+  const attributes=binding??`data-season-edit="component-condition" data-key="${escape(control.key)}"`;
+  return `<label${slot?' data-role="skill-buff-activation"':''}>${escape(label)}<select ${attributes} aria-label="${escape(label)}">${[['','선택'],[0,'끔'],[1,'켬']].map(([option,text])=>
+    `<option value="${option}"${String(value)===String(option)?' selected':''}>${text}</option>`).join('')}</select></label>`;
+}
+
 function characterControls(document, report, formValues) {
   const allConditions = report.componentProjection.rows.flatMap((row) => row.conditionControls.map((c) => ({ ...c, name: row.name, detail: row.detail })));
   const targetNumbed=usesTargetNumbedInput(document.targetBuild,report);
   const nearby = renderNearbyEnemyField(allConditions.filter(c=>!c.automatic && nearbyEnemyGroups.includes(c.conditionGroup)));
-  const conditions = allConditions.filter(c => !c.automatic && !nearbyEnemyGroups.includes(c.conditionGroup) && !(targetNumbed&&c.numbedMinimum>0&&c.value==='')).filter((c, i, list) => list.findIndex((other) => other.conditionGroup === c.conditionGroup) === i)
-    .filter((c) => !report.blessings.enabled || blessingConditionValue(c, { Focus: 0, Agility: 0, Tenacity: 0 }) === undefined);
+  const conditionGroups = new Map();
+  for (const c of allConditions) {
+    if (c.automatic || nearbyEnemyGroups.includes(c.conditionGroup) || (targetNumbed&&c.numbedMinimum>0&&c.value==='')) continue;
+    if (report.blessings.enabled && blessingConditionValue(c, { Focus: 0, Agility: 0, Tenacity: 0 }) !== undefined) continue;
+    const group = c.conditionGroup ?? c.key;
+    if (!conditionGroups.has(group)) conditionGroups.set(group, []);
+    conditionGroups.get(group).push(c);
+  }
+  const conditions = [...conditionGroups.values()];
   return `<fieldset><legend>SS14 자원·방어 기본 입력</legend><details><summary>기본 속성 입력 기준</summary><p>선택 장비·재능 등의 효과를 더하기 전 힘·민첩·지혜를 입력하세요. 게임 기본값으로 자동 추정하지 않습니다. 기존 SS13 전투 조건은 보존하되 이 입력과 섞지 않습니다.</p></details>
-    ${Object.entries(SEASON_CHARACTER_INPUTS).map(([key, field]) => `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(formValues[`character-input:${key}`] ?? document.targetBuild.ss14Inputs.character?.[key] ?? "")}" />${key==='observedManaRecovery'?'<small>같은 전투 조건에서 확인한 초당 자연 회복량입니다.</small>':''}</label>`).join("")}</fieldset>
-    ${conditions.length || nearby ? `<fieldset><legend>SS14 선택 효과의 조건 확인</legend><details><summary>조건 적용 기준</summary><p>아래 원문의 조건이 현재 상황에서 충족되는지 직접 선택하세요. 미입력은 미지원이며 자동 발동·유지 시간·전체 전투 평균을 가정하지 않습니다. 같은 상태의 입력은 함께 반영됩니다.</p><p id="season-stack-scope">아래 축복 조건만 입력하면 선택 옵션의 기여만 계산합니다. 축복 자체의 기본 효과까지 연결하려면 별도의 축복 현재 중첩 입력 3종을 확인하세요. 몰락은 해당 원문의 0~60 범위입니다. 낮은 HP 여부는 자동 추정하지 않습니다.</p></details>${nearby}${conditions.map((c, index) => {
+    ${Object.entries(SEASON_CHARACTER_INPUTS).map(([key, field]) => {
+      const observation = key==='observedManaRecovery' ? observedManaInputState(document,report) : null;
+      const saved = observation?.value ?? document.targetBuild.ss14Inputs.character?.[key] ?? '';
+      const value = formValues[`character-input:${key}`] ?? saved;
+      return `<label>${field.label}<input type="number" min="${field.min}" max="${field.max}" step="${key === "enemyLevel" ? 1 : "any"}" data-season-edit="character-input" data-key="${key}" aria-label="SS14 ${field.label}" value="${escape(value)}" />${observation?`<small data-role="mana-observation-hint">${escape(observation.hint)}</small>`:''}</label>`;
+    }).join("")}</fieldset>
+    ${conditions.length || nearby ? `<fieldset><legend>효과 조건</legend><details><summary>조건 적용 기준</summary><p>같은 조건을 쓰는 효과에는 한 번만 입력하면 됩니다.</p><p id="season-stack-scope">축복 자체의 기본 효과까지 연결하려면 별도의 축복 현재 중첩 입력 3종을 확인하세요.</p></details>${nearby}${conditions.map(([c,...shared], index) => {
       const value = formValues[`component-condition:${c.key}`] ?? c.value;
       const description=c.label?`<details><summary>${escape(c.name)} 원문</summary><p>${escape(c.detail)}</p></details>`:`<p>${escape(c.name)} · ${escape(c.detail)}</p>`;
-      if (c.kind === "count") return `${description}<label>${escape(c.label??`조건 ${index + 1} 중첩 수`)}${c.allowZero?'':` (${c.min??0}~${c.max})`}<input type="number" min="${c.allowZero?0:c.min??0}" max="${c.max}" step="1" data-season-edit="component-condition" data-key="${escape(c.key)}" aria-label="${escape(c.allowZero?c.label:`SS14 조건 ${index + 1} 중첩 수`)}" aria-describedby="season-stack-scope" value="${escape(value)}" /></label>`;
-      return `${description}<label>${escape(c.label??`조건 ${index + 1}`)}<select data-season-edit="component-condition" data-key="${escape(c.key)}" aria-label="SS14 조건 ${index + 1} 충족 여부">${[["", "확인 필요"], [0, "미충족"], [1, "충족"]].map(([n, text]) => `<option value="${n}"${String(value) === String(n) ? " selected" : ""}>${text}</option>`).join("")}</select></label>`;
+      const binding = `data-season-edit="component-condition" data-key="${escape(c.key)}"`
+        + (shared.length ? ` data-field-aliases="${escape(JSON.stringify(shared.map(other=>other.key)))}"` : '');
+      if (c.kind === "count") return `${description}<label>${escape(c.label??`조건 ${index + 1} 중첩 수`)}${c.allowZero?'':` (${c.min??0}~${c.max})`}<input type="number" min="${c.allowZero?0:c.min??0}" max="${c.max}" step="1" ${binding} aria-label="${escape(c.allowZero?c.label:`SS14 조건 ${index + 1} 중첩 수`)}" aria-describedby="season-stack-scope" value="${escape(value)}" /></label>`;
+      if (c.conditionGroup?.startsWith('nether-buff-') && /효과 적용 중 여부$/u.test(c.label??''))
+        return description+renderBuffActivation(c,value,{binding});
+      return `${description}<label>${escape(c.label??`조건 ${index + 1}`)}<select ${binding} aria-label="SS14 조건 ${index + 1} 충족 여부">${[["", "선택"], [0, "미충족"], [1, "충족"]].map(([n,text]) => `<option value="${n}"${String(value) === String(n) ? " selected" : ""}>${text}</option>`).join("")}</select></label>`;
     }).join("")}</fieldset>` : ""}`;
 }
 
@@ -333,7 +363,7 @@ function gameCriticalControl(document, row) {
   return `<div><button type="button" data-action="advisor-apply-game-critical" data-row="${row.rowIndex}">${escape(name(row.id))} 게임 기본값 ${data.baseCriticalRating} 적용</button>
     <p>${applied ? "설치 게임 근거로 적용됨" : "설치 게임에서 확인한 기본 크리티컬 수치"}: ${data.baseCriticalRating} · SS14 · 패치 ${data.patchVersion}.</p>
     <details><summary>설치 게임 수치 근거</summary><p>스킬 기본값만 적용합니다. 캐릭터 힘·민첩·지혜와 특성 단계·전투 조건은 별도 확인이 필요합니다.</p>
-      <p>REA 정적 확인 · 아이템 ${data.itemBaseId} · 스킬 ${data.skillStoneId} · ${escape(data.table)}</p>
+      <p>설치 데이터 확인 · 아이템 ${data.itemBaseId} · 스킬 ${data.skillStoneId} · ${escape(data.table)}</p>
       <p>파일 SHA-256: ${data.tableSha256}</p><p>보존 근거: ${data.receiptSha256}</p></details></div>`;
 }
 
@@ -394,8 +424,8 @@ export function renderSeasonDpsField(key, definition, selected = "", prefix = "S
     }
     if (key.endsWith(":command") && sharedCommand) definition = {...definition,label:"현재 통솔 수치 (스마트 웨폰 공통)"};
     const attributes = `data-season-edit="dps-input" data-key="${escape(key)}" aria-label="${escape(prefix)} ${definition.shared || key.startsWith("enemy:") ? "" : `스킬 칸 ${Number(key.split(":")[0]) + 1} `}${escape(definition.label)}"`;
-    if (definition.windows) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="0-2, 4-5"><small>전투 시작 0초 기준. 구간을 입력하면 해당 시간에만 적용됩니다.</small></label>`;
-    if (definition.times) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="3.2, 4.5 또는 없음"><small>전투 시작 기준. 적중 시점의 효과로 계산합니다.</small></label>`;
+    if (definition.windows) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="0-2, 4-5 또는 없음"><small>${escape(definition.hint)}</small></label>`;
+    if (definition.times) return `<label>${escape(definition.label)}<input type="text" maxlength="4096" ${attributes} value="${escape(selected)}" placeholder="3.2, 4.5 또는 없음"><small>${escape(definition.hint ?? "전투 시작 기준. 적중 시점의 효과로 계산합니다.")}</small></label>`;
     return `<label>${escape(definition.label)}${definition.choices
       ? `<select ${attributes}>${definition.defaultValue === undefined ? '<option value="">미정</option>' : ''}${definition.choices.map(([v, label]) => `<option value="${v}"${selected !== "" && Number(selected) === v ? " selected" : ""}>${escape(label)}</option>`).join("")}</select>`
       : `<input type="number" min="${definition.min}" max="${definition.max}" step="${definition.integer ? 1 : "any"}" ${attributes} value="${escape(selected)}" />`}
@@ -423,6 +453,7 @@ function dpsControls(document, report, formValues, showDummy = false) {
     ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><details><summary>구성 확인 기준</summary><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p></details>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
     <fieldset><legend>대상</legend>${Object.entries(SEASON_DPS_ENEMY_FIELDS).filter(([key])=>key!=='numbedStacks').map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}
       ${renderFixedNumbedField(build,report,formValues['dps-input:enemy:numbedStacks']??input?.enemy?.numbedStacks)}</fieldset>
+    ${hasPeriodicBurstSupport(report.components)?field(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(input)):''}
     ${report.componentProjection.rows.filter(r => r.slateControls?.length).map(r => `<fieldset><legend>${escape(r.name)} · SS14 석판 옵션</legend>
       ${r.slateControls.map(c => `<label>${c.index + 1}번째 옵션<select data-season-edit="slate-affix" data-key="${escape(c.key)}" aria-label="SS14 ${escape(r.name)} 옵션 ${c.index + 1}"><option value="">옵션 선택 필요</option>
         ${seasonSlateOptions(c.type).map(o => `<option value="${escape(o.id)}"${(formValues[`slate-affix:${c.key}`] ?? c.value) === o.id ? " selected" : ""}>${escape(o.name)} · ${escape(o.detail)}</option>`).join("")}</select></label>`).join("")}</fieldset>`).join("")}
@@ -456,7 +487,8 @@ function dpsControls(document, report, formValues, showDummy = false) {
 export const SEASON_DPS_PARTS = [
   ["manualDps", "일반 시전"], ["spellBurstDps", "매직 버스트"], ["repeatDps", "추가 발동"],
   ["heroDps", "히어로 발동"], ["netherDps", "명왕 발동"],
-  ["dotDps", "지속"], ["reapingDps", "수확"], ["minionDps", "소환체"], ["omenDps", "오멘"], ["playerDeteriorationDps", "악화"],
+  ["dotDps", "지속"], ["permafrostDps", "동토 지속 대미지"], ["reapingDps", "수확"],
+  ["minionDps", "소환체"], ["omenDps", "오멘"], ["playerDeteriorationDps", "악화"],
 ];
 
 function dpsResults(report, { embedded = false } = {}) {

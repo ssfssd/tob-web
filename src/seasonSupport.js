@@ -6,7 +6,8 @@ import { getCurrentTlidbSupportCompatibility, isCurrentTlidbSupportCompatible, m
 import { resolveSeasonSkillLevel } from "./seasonSkillLevels.js";
 import { SS14_LOG_COMPLETION } from "./data/ss14LogCompletion.generated.js";
 import "./seasonCurrentDatabase.js";
-import { resolveSeasonSupportRolls } from "./seasonSupportRolls.js";
+import { MOON_LUNAR_RING_ID, resolveSeasonSupportRolls } from "./seasonSupportRolls.js";
+export { MOON_LUNAR_RING_ID } from "./seasonSupportRolls.js";
 import { seasonConditionalExpression, scaleSeasonConditionalEffects } from './seasonEffectConditions.js';
 import { boundBlessingStacks } from './seasonBlessings.js';
 import { ICE_LANCES_REBOUND_TEXT } from './seasonIceLancesShotgun.js';
@@ -16,6 +17,8 @@ export const MANIACAL_ARMY_ID = "supports-tlidb-com-cn-maniacal-army";
 export const VOLTAGE_TURMOIL_ID = 'supports-ss14-current-voltaic-ripple-turmoil-noble';
 export const VOLTAGE_AFTERWAVE_ID = 'supports-ss14-current-voltaic-ripple-afterwave-noble';
 export const LUNAR_ECLIPSE_ID = 'supports-ss14-current-moon-strike-lunar-eclipse-noble';
+const MOON_RAINBOW_ID = 'supports-ss14-current-moon-strike-rainbow-magnificent';
+export const MOON_WAX_AND_WANE_ID = 'supports-ss14-current-moon-strike-wax-and-wane-noble';
 const moonStrikeId = 'skills-tlidb-com-cn-moon-strike';
 export function validLunarEclipseLink(build,rowIndex,supportIndex){
   const slot=build.skills?.active?.[rowIndex];
@@ -29,6 +32,36 @@ const wiltingReflectionLine = "Additionally generates a Beam that shoots in the 
 const costConversionLine='Replace Mana Cost from the supported skill with Life cost';
 const lunarNoMana='The supported skill no longer costs Mana';
 const lunarSeal='When the supported skill is installed, seal 10 % Max Mana';
+const supportLevelFiveDamage='+20 % additional damage for the supported skill';
+// SS14 skill stone table 6173858, affix 825739 at level 5. Card icons identify each stone.
+const verifiedLevelFiveDamage = new Set([
+  'Blizzard_Avalanche_Noble',                   // 10003667
+  'Fallen_Star_Gravity_Noble',                  // 10003841
+  'Flame_Slash_Inverted_Blaze_Noble',           // 10003562
+  'Frost_Impact_Frozen_Trajectory_Magnificent', // 10003580
+  'Ice_Focus_Solemn_Chill_Noble',               // 10003805
+  'Ice_Lances_Bounce_Noble',                   // 10003653
+  'Ice_Lances_Ice_Corrosion_Magnificent',      // 10003652
+  'Ice_Lances_Permafrost_Noble',               // 10003654
+  'Ice_Lances_Rebound_Magnificent',            // 10003651
+  'Lightning_Beam_Aftershock_Magnificent',     // 10003775
+  'Lightning_Storm_Boundless_Noble',           // 10003670
+  'Lightning_Storm_Raging_Storm_Noble',        // 10003671
+  'Moon_Strike_Rainbow_Magnificent',           // 10003609
+  'Voltaic_Ripple_Afterwave_Noble',            // 10003855
+  'Voltaic_Ripple_Turmoil_Noble',              // 10003854
+  'Wilting_Beam_Rapid_Completion_Noble',       // 10003782
+  'Wilting_Beam_Reflection_Magnificent',       // 10003780
+  'Wilting_Beam_Set_Course_Noble',              // 10003781
+]);
+const iceCorrosionSlow = 'When the supported skill hits a unit on a Frost Terra , inflicts 1 stack(s) of Slow';
+const iceCorrosionDamage = /^The supported skill deals \+([\d.]+) % additional damage to enemies on a Frost Terra$/u;
+export const ICE_CORROSION_ID = 'supports-ss14-current-ice-lances-ice-corrosion-magnificent';
+export const ICE_PERMAFROST_ID = 'supports-ss14-current-ice-lances-permafrost-noble';
+export const iceCorrosionConditionMissing = '대상이 프로스트 그라운드 위에 있는지 선택하세요.';
+export const iceCorrosionCountMissing = '대상에게 적용된 프로스트 그라운드 수를 입력하세요.';
+const icePermafrostTrigger = 'Every 1.5 s, the next supported skill triggers a Lv. 20 Frost Terra on hit\\n+87.5% base radius for the Terra triggered by this effect and +66% additional Duration';
+const icePermafrostStack = "The supported skill's additional damage bonus against enemies on a Frost Terra can be stacked, with the number of stacks equal to the Frost Terra Quantity";
 const costClause=/\b(?:mana|life) (?:cost|consumption)|\b(?:costs?|consumes?) (?:mana|life)\b|\b(?:mana|life) (?:consumed|spent)\b/iu;
 const recentDamageTypes = Object.entries({ fire: '화염', cold: '냉기', lightning: '번개', erosion: '부식' });
 const recentPhysicalBonus = /^\+?([\d.]+) % additional Physical Damage for the supported skill for each type of Non-Physical Damage dealt recently$/u;
@@ -45,6 +78,21 @@ for (const [id, r] of Object.entries(SS14_LOG_COMPLETION.records).filter(([, r])
   SS14_SUPPORTS_EN.records[id] = r.en; SS14_SUPPORTS.records[id] = r.ko;
 }
 for (const data of [SS14_SUPPORTS_EN, SS14_SUPPORTS]) data.collected = Object.values(data.records).filter(r => r.status === 'collected-preview').length;
+
+export function seasonSupportKoreanCard(id) {
+  const direct = SS14_SUPPORTS.records[id];
+  if (direct?.season === "SS14" && direct.koreanTextVerified) return direct;
+  if (direct?.status !== "unavailable") return null;
+  const previous = findItemById(id)?.tlidbText;
+  const parts = previous?.en?.sourceRecordKey?.match(/^([\w]+):_([\w]+)_\((Magnificent|Noble)\)$/u);
+  if (!parts) return null;
+  const key = parts.slice(1).join("_");
+  const currentId = "supports-ss14-current-" + key.toLowerCase().replaceAll("_", "-");
+  const current = SS14_SUPPORTS.records[currentId];
+  if (current?.season !== "SS14" || !current.koreanTextVerified || current.sourceRecordKey !== key
+    || !previous.ko?.name || previous.ko.name !== current.name) return null;
+  return current;
+}
 
 export function seasonSupportItem(id, records = SS14_SUPPORTS_EN.records) {
   const record = records?.[id];
@@ -132,6 +180,16 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
     }
   }
   const verified = record.sourceSeasonEvidence?.actualSeason === 14 && record.sourceSeasonEvidence.verificationComplete;
+  const corrosion = verified && item.id===ICE_CORROSION_ID && record.sourceRecordKey === 'Ice_Lances_Ice_Corrosion_Magnificent'
+    && support.level===5 && selected.tlidbText.en.detail.split('\n').includes(iceCorrosionSlow);
+  const permafrost = verified && item.id===ICE_PERMAFROST_ID && support.level===5
+    && selected.tlidbText.en.detail.includes(icePermafrostTrigger) && selected.tlidbText.en.detail.includes(icePermafrostStack);
+  const stacking = corrosion && build?.skills?.active?.[rowIndex]?.supports?.[4]?.supportId===ICE_PERMAFROST_ID;
+  const groundCount = binding?.conditions?.[stacking?'frostTerraCount':'frostTerra'];
+  const validGrounds = Number.isInteger(groundCount) && groundCount>=0 && groundCount<=(stacking?100:1);
+  if (corrosion) base.conditionControls.push({key:stacking?'frostTerraCount':'frostTerra',
+    label:stacking?'대상에게 적용된 프로스트 그라운드 수':'대상이 프로스트 그라운드 위에 있음',
+    min:0,max:stacking?100:1,integer:true,...(!stacking&&{choices:[[0,'아니요'],[1,'예']]}),value:validGrounds?groundCount:''});
   const reflection = verified && record.sourceRecordKey === "Wilting_Beam_Reflection_Magnificent"
     && selected.tlidbText.en.detail.split("\n").includes(wiltingReflectionLine);
   if (reflection) base.conditionControls.push({ key:"beamTargetCount", label:"같은 대상에 적용된 부식 광선 수", min:1, max:2,
@@ -159,6 +217,25 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
   const mechanics = [];
   const handled = new Set();
   const conditionBlockers = [];
+  const hasLevelFiveDamage = support.level===5 && record.detail.split('\n').includes(supportLevelFiveDamage);
+  const addLevelFiveDamage = () => {
+    if (!parsed.effects.some(effect => effect.stat==='supported-skill-damage' && effect.operation==='more'
+      && effect.value===20 && effect.sourceText===supportLevelFiveDamage))
+      parsed.effects.push({stat:'supported-skill-damage',operation:'more',unit:'percent',value:20,sourceText:supportLevelFiveDamage});
+  };
+  if (verified && hasLevelFiveDamage && verifiedLevelFiveDamage.has(record.sourceRecordKey)) addLevelFiveDamage();
+  if (verified && item.id===LUNAR_ECLIPSE_ID && support.level===5 && base.castCost?.noMana && base.sealedManaPercent===10
+    && hasLevelFiveDamage) {
+    const scale = [...new Set(parsed.blockers.map(b=>b.sourceText))]
+      .map(text=>/^For every 100 Mana sealed, \+1 % additional damage for the supported skill, up to \+(\d+) % additional damage$/u.exec(text))
+      .filter(Boolean);
+    if (scale.length===1 && (!build || validLunarEclipseLink(build,rowIndex,supportIndex))) {
+      // Installed 6173858 stone 10003611 binds level-5 affix 825739 separately from the tier modifier.
+      addLevelFiveDamage();
+      mechanics.push({kind:'moon-lunar-eclipse',maxBonus:Number(scale[0][1]),fixedBonus:20,sourceText:scale[0][0],sourceUrl:record.sourceUrl});
+      [lunarNoMana,lunarSeal,scale[0][0]].forEach(text=>handled.add(text));
+    }
+  }
   if (verified && record.sourceRecordKey === 'Elemental_Conversion') {
     const lines=parsed.blockers.map(b=>b.sourceText);
     const physical=lines.find(line=>recentPhysicalBonus.test(line));
@@ -188,7 +265,39 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
     const text = blocker.sourceText;
     if (handled.has(text)) continue;
     let m;
-    if ((m = text.match(/^\+([\d.]+) % additional Hit Damage \(multiplies\) for the supported skill for every Jump$/u))) {
+    if (corrosion && (m=iceCorrosionDamage.exec(text))) {
+      handled.add(text);
+      handled.add(iceCorrosionSlow);
+      if (!validGrounds) conditionBlockers.push(stacking?iceCorrosionCountMissing:iceCorrosionConditionMissing);
+      else if (groundCount>0) {
+        // Affix 666890432 uses one more modifier with P1 times the target's buff 10200 stack count.
+        parsed.effects.push({stat:'supported-skill-damage',operation:'more',unit:'percent',value:Number(m[1])*groundCount,sourceText:text});
+        mechanics.push({kind:'ice-lances-slow',stacksPerEligibleHit:1,sourceText:iceCorrosionSlow,sourceUrl:record.sourceUrl});
+      }
+    } else if (permafrost && text===icePermafrostTrigger) {
+      // Affix 888393792 invokes stone 1551. Action 619202 uses buff 10200 and damage curve 271.
+      // The level-20 curve is 484 cold DPS. Stone 1551 passes 40 to charge affix 974028.
+      mechanics.push({kind:'ice-lances-permafrost',level:20,interval:1.5,baseColdDps:484,damagePerCharge:40,
+        sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+      handled.add(icePermafrostStack);
+    } else if (verified && item.id===MOON_LUNAR_RING_ID && hasLevelFiveDamage
+      && (m = /^When the supported skill casts a Steep Strike, there is a (\d+(?:\.\d+)?) % chance to launch a circular attack\. For every 150 Max Mana, \+1% to the trigger chance of this effect, up to \+\1 %$/u.exec(text))) {
+      // Installed SS14 stone 10003610 binds level-5 affix 825739 separately from the tier roll.
+      addLevelFiveDamage();
+      mechanics.push({kind:'moon-lunar-ring',baseChance:Number(m[1]),fixedBonus:20,sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+    } else if (verified && item.id===MOON_WAX_AND_WANE_ID && hasLevelFiveDamage
+      && (m = /^The supported skill can activate Spell Burst\s*\. \+(\d+) % additional Hit Damage for skills cast by Spell Burst when Spell Burst is activated by the supported skill$/u.exec(text))) {
+      // Installed stone 10003612 also binds the separate level-5 affix 825739.
+      addLevelFiveDamage();
+      mechanics.push({kind:'moon-wax-and-wane',burstBonus:Number(m[1]),fixedBonus:20,sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+    } else if (verified && item.id===MOON_RAINBOW_ID
+      && (m = /^\+1 % Steep Strike chance for the supported skill for every 100 Max Mana, up to \+(\d+) %$/u.exec(text))) {
+      mechanics.push({kind:'moon-rainbow',maxBonus:Number(m[1]),sourceText:text,sourceUrl:record.sourceUrl});
+      handled.add(text);
+    } else if ((m = text.match(/^\+([\d.]+) % additional Hit Damage \(multiplies\) for the supported skill for every Jump$/u))) {
       const count = binding?.conditions?.jumpsBeforeHit;
       if (!Number.isInteger(count) || count < 0 || count > 100) conditionBlockers.push("계산 대상에 적중하기 전 점프 횟수를 선택하세요.");
       else parsed.effects.push({stat:"supported-skill-hit-damage",operation:"more",unit:"percent",value:((1 + +m[1] / 100) ** count - 1) * 100,sourceText:text});
@@ -317,6 +426,21 @@ export function supportFitsSocket(id, hostRecord, rowIndex, supportIndex) {
   if (position !== null && (position !== supportIndex || record.detail.includes("Slot of each Passive Skill") !== (rowIndex >= 5))) return false;
   const rules = getCurrentTlidbSupportCompatibility(item, {season:"SS14"});
   return !!rules && matchesSupportHostType(rules, supportHostType(hostRecord, rowIndex));
+}
+
+export function seasonExclusiveSupportSlots(hostRecord, rowIndex) {
+  if (!hostRecord) return [];
+  const slots = new Map();
+  for (const {id,name} of seasonSupportOptions()) {
+    const grade = name.match(/\((부귀|숭고)\)$/u)?.[1];
+    if (!grade) continue;
+    const index = seasonSupportRequiredSlot(SS14_SUPPORTS_EN.records[id]);
+    if (index === null || !supportFitsSocket(id,hostRecord,rowIndex,index)) continue;
+    const grades = slots.get(index) ?? new Set();
+    grades.add(grade);
+    slots.set(index,grades);
+  }
+  return [...slots].sort(([a],[b])=>a-b).map(([index,grades])=>({index,grades:[...grades]}));
 }
 
 function supportHostType(hostRecord, rowIndex) {

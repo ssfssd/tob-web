@@ -49,6 +49,7 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
   const parsed = parseSeasonSkillMechanics({ id: itemId, categoryId: "skills", tlidbText: { en: locale } }, { season, level });
   result.mechanics = parsed.mechanics;
   result.progressionReceipt = parsed.progressionReceipt ?? null;
+  if (parsed.missingAddedDamageEffectiveness) result.missingAddedDamageEffectiveness = true;
   result.scope = "unmodified-skill-at-selected-level";
   if (parsed.blockers.some(b => b.reason === 'ss14-level-row-unavailable')) return { ...result, levelUnavailable: true, blockers: ['선택 레벨의 수치가 없어 확인된 20레벨 카드만 계산합니다.'], evidenceBlockers: parsed.blockers };
   for (const [key, stat] of [["manaCost", "mana-cost"], ["castTime", "cast-time"], ["cooldown", "cooldown"]]) {
@@ -64,7 +65,8 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
     context: { addedDamage: 0, criticalStrikeRating: 0, criticalStrikeDamage: 100,
       enemyArmor: 0, enemyResistances: {}, damageTags: [], target: "self", ...context, weaponDamage,
       ...(parsed.mechanics.some(m => m.kind === "wilting-beam-reaping") ? { reapingEventsPerSecond: 0 } : {}),
-      actionRateCap: seasonActionRateCap(season), damageConversion: season === 'SS14' ? 'ss14' : undefined } });
+      actionRateCap: seasonActionRateCap(season), damageConversion: season === 'SS14' ? 'ss14' : undefined,
+      missingAddedDamageEffectiveness: parsed.missingAddedDamageEffectiveness } });
   const evaluations = weaponHands ? weaponHands.map(hand=>evaluate(hand.weaponDamage)) : [evaluate(context.weaponDamage)];
   result.damageCapabilities = { hit: evaluations.every(e=>e.complete) && evaluations.some(e=>e.hit?.average > 0),
     dot: evaluations.every(e=>e.complete) && evaluations.some(e=>e.dot?.dps > 0) };
@@ -73,8 +75,10 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
     result.values.baseDps = average(e=>e.totalDps);
     if (evaluations.every(e=>Number.isFinite(e.hit?.average))) result.values.averageHit = average(e=>e.hit.average);
   } else {
-    result.blockers.push("스킬 자체 대미지 계산 미지원: 무기·조건·추가 효과 입력이 필요하거나 해석이 미완료입니다.");
     result.evidenceBlockers = evaluations.flatMap(e=>e.excluded.filter(entry=>entry.affectsCompletion));
+    result.blockers.push(result.evidenceBlockers.some(e=>e.reason==='added-damage-effectiveness-unavailable')
+      ? '이 레벨의 추가 대미지 효율을 확인할 수 없습니다.'
+      : '스킬 자체 대미지 계산 미지원: 무기·조건·추가 효과 입력이 필요하거나 해석이 미완료입니다.');
   }
   return result;
 }

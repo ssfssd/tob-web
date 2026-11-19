@@ -7,7 +7,7 @@ import {inverseGeometry} from './seasonInverseImage.js';
 // shapes or paths whose season-specific topology has not been published.
 export function inspectSeasonAllocation(build, { rules = SS14_RULES, components = SS14_COMPONENTS } = {}) {
   const issues = []; const checks = [];
-  const issue = (path, reason) => issues.push({ path, reason });
+  const issue = (path, reason, nodeId) => issues.push({ path, reason, ...(nodeId ? {nodeId} : {}) });
   for (const [index, board] of (build?.talents?.boards ?? []).entries()) {
     const path = `talents.boards.${index}`;
     const selected = Object.entries(board.nodePoints ?? {}).filter(([, n]) => n !== 0);
@@ -44,7 +44,8 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
     const occupied=new Set();
     for (const id of cores) {
       const rule = authority.nodes[id.replace(/^talents-/u, "")];
-      if (!rule || available < rule.requiredPoints) issue(path, "핵심 재능의 SS14 해금 포인트가 부족하거나 규칙이 없습니다.");
+      if (!rule) issue(path, "핵심 재능의 SS14 해금 조건을 확인할 수 없습니다.",id);
+      else if (available < rule.requiredPoints) issue(path, `핵심 재능 해금에 필요한 포인트 ${rule.requiredPoints}개가 부족합니다.`,id);
       if (rule && occupied.has(rule.requiredPoints)) issue(path,"같은 단계의 핵심 재능은 하나만 선택할 수 있습니다.");
       if (rule) occupied.add(rule.requiredPoints);
     }

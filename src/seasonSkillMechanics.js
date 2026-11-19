@@ -3,6 +3,7 @@ import { SS14_ICE_LANCES_CADENCE } from "./data/ss14IceLancesCadence.generated.j
 import { resolveSeasonSkillLevel } from "./seasonSkillLevels.js";
 
 export const VOLTAIC_RIPPLE_ID='skills-ss14-current-voltaic-ripple';
+export const MOON_STRIKE_ID='skills-tlidb-com-cn-moon-strike';
 export const VOLTAGE_AFTERWAVE_CHARGES=3;
 export const voltageAverageFields = {
   voltageAverage:{label:'전광의 물결 관측 평균 대미지 배율 (%)',min:50,max:150},
@@ -17,6 +18,7 @@ export function parseSeasonSkillMechanics(item, options) {
   item = resolved?.item ?? item;
   const parsed = parseTlidbSkillTooltipCalculation(item, { ...options, level: resolved?.parserLevel ?? options.level });
   if (resolved?.receipt) parsed.progressionReceipt = resolved.receipt;
+  if (resolved?.missingAddedDamageEffectiveness) parsed.missingAddedDamageEffectiveness = true;
   const locale = item.tlidbText?.en;
   const mechanics = [];
   if (options.season === 'SS14' && locale?.sourceRecordKey === 'Moon_Strike'
@@ -24,8 +26,30 @@ export function parseSeasonSkillMechanics(item, options) {
     const forms = /(?:^|\n)Sweep Slash:\nDeals ([\d.]+)% Weapon Attack Damage\.\nSteep Strike:\nDeals ([\d.]+)% Weapon Attack Damage\./u.exec(locale.detail);
     const chance = /^This skill \+([\d.]+) % Steep Strike chance\.$/mu.exec(locale.detail);
     const growth = resolved?.extraEffects?.find(e=>e.stat==='skill-damage'&&e.operation==='more');
-    if (forms && chance) mechanics.push({kind:'moon-strike-forms', level:options.level, sweep:Number(forms[1]), slash:Number(forms[2]),
-      baseSlashChance:Number(chance[1]), growthMultiplier:growth ? 1+growth.value/100 : null, sourceUrl:locale.sourceUrl});
+    const spellLine = "Spell Damage bonus and additional bonus also apply to the skill's Attack Damage";
+    const manaLine = '+1 % additional damage for the skill for every 100 Max Mana, up to +70 %';
+    const coefficients = parsed.effects.filter(e=>e.stat==='weapon-attack-damage-coefficient');
+    const added = parsed.effects.find(e=>e.stat==='added-damage-effectiveness');
+    const mana = parsed.effects.find(e=>e.sourceText===manaLine && e.per?.path==='stats.mana' && e.per.divisor===100 && e.per.cap===70);
+    const baseChance = parsed.effects.find(e=>e.stat==='skill-steep-strike-chance' && e.sourceText===chance?.[0]);
+    if (forms && baseChance && baseChance.value>=0 && baseChance.value<=100 && mana && parsed.blockers.some(b=>b.sourceText===spellLine)
+      && coefficients.length===2 && coefficients.every((e,i)=>e.value===Number(forms[i+1]))
+      && added?.value===coefficients[0].value && resolved.secondaryEffectiveness===coefficients[1].value) {
+      const baseSlashChance=baseChance.value;
+      const knownMana=Number.isFinite(options.maxMana)&&options.maxMana>=0;
+      const manaBonus=knownMana ? Math.min(70,Math.floor(options.maxMana/100)) : null;
+      const rainbowBonus=knownMana && options.moonRainbow ? Math.min(options.moonRainbow.maxBonus,Math.floor(options.maxMana/100)) : 0;
+      const slashChance=Math.min(100,baseSlashChance+rainbowBonus);
+      const averageCoefficient=coefficients[0].value+(coefficients[1].value-coefficients[0].value)*slashChance/100;
+      parsed.effects=parsed.effects.filter(e=>e!==coefficients[1]&&e!==mana&&e!==baseChance)
+        .map(e=>e===added||e===coefficients[0] ? {...e,value:averageCoefficient,sourceText:forms[0].trim()+'\n'+chance[0]} : e);
+      if (knownMana) parsed.effects.push({stat:'skill-damage',operation:'more',unit:'percent',value:manaBonus,sourceText:manaLine});
+      const consumed = new Set([spellLine,`Effectiveness of added damage ${coefficients[1].value}%`]);
+      parsed.blockers=parsed.blockers.filter(b=>!consumed.has(b.sourceText));
+      mechanics.push({kind:'moon-strike-forms', level:options.level, sweep:coefficients[0].value, slash:coefficients[1].value,
+        baseSlashChance,slashChance,rainbowBonus,rainbowSourceUrl:options.moonRainbow?.sourceUrl,
+        averageCoefficient,manaBonus,growthMultiplier:growth ? 1+growth.value/100 : null,sourceUrl:locale.sourceUrl});
+    }
   }
   if (options.season === 'SS14' && locale?.sourceRecordKey === 'Groundshaker'
     && locale.sourceSeasonEvidence?.actualSeason === 14 && locale.sourceSeasonEvidence.verificationComplete) {
@@ -136,7 +160,9 @@ export function parseSeasonSkillMechanics(item, options) {
         add(line, "swamp-moved", { field: "swampMoved" });
       }
       else if (line === "When the skill deals Damage Over Time, it inflicts 100 Affliction on the enemy. Effect Cooldown: 1 s") add(line, "affliction-infliction", { value: 100 });
-      else if (line === "You deal + 3.5 % additional Damage Over Time to enemies in the Black Hole for every 10 Affliction they have for 4 s.") add(line, "black-hole-euphoria", { field: "euphoria", per: 3.5 });
+      else if (locale.sourceRecordKey === 'Black_Hole'
+        && (m = line.match(/^You deal \+ ([\d.]+) % additional Damage Over Time to enemies in the Black Hole for every 10 Affliction they have for 4 s\.$/u)))
+        add(line, "black-hole-euphoria", { field: "euphoria", per: Number(m[1]) });
       else if (line === "Deals 249-249 Persistent Erosion Damage.") {
         add(line, "persistent-base");
         parsed.effects.push({ stat: "persistent-erosion-damage-per-second", operation: "set", value: 249, unit: "flat", sourceText: line });

@@ -7,6 +7,8 @@ import {customOptionEditorText} from './seasonCustomOptions.js';
 import { spriteKeys, columns, rows as spriteRows } from "./data/heroTraitArtwork.generated.js";
 import { SS14_CARDS } from "./data/ss14Cards.generated.js";
 import { ss14GearIcons } from "./data/ss14GearIcons.generated.js";
+import { ss14SkillIcons } from "./data/ss14SkillIcons.generated.js";
+import { SS14_KOREAN_SKILL_LEVELS } from "./data/ss14KoreanSkillLevels.generated.js";
 import { SS14_SUPPORTS } from "./data/ss14Supports.generated.js";
 import { seasonHeroOptions, seasonHeroTraitOptions, EMPTY_TRAIT_MEMORY, canMarkTraitMemoryEmpty, traitSlotCount, buildTraitSlots } from "./seasonHeroSelection.js";
 import { seasonMemoryOptions, seasonTalentBoards, seasonTalentNodes, seasonSpiritOptions, selectedSeasonSpirit } from "./seasonNativeSelections.js";
@@ -17,7 +19,7 @@ import { getSeasonPickerOptions, getSeasonSelectionOptions, SEASON_GEAR_SLOT_LAB
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { getSkillEnergyUsage, SUPPORT_SLOT_ENERGY_COSTS, PASSIVE_SUPPORT_SLOT_ENERGY_COSTS } from "./skillRuntimeModel.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
-import { seasonSupportOptions, seasonSupportItem, supportFitsSocket } from "./seasonSupport.js";
+import { seasonExclusiveSupportSlots, seasonSupportOptions, seasonSupportItem, seasonSupportKoreanCard, supportFitsSocket } from "./seasonSupport.js";
 import { seasonDestinyOptions, pactNodeActive } from './seasonDestiny.js';
 import { nativeElixirOptions, nativeModuleOptions, nativeModuleAffixes } from "./seasonNativeExtensions.js";
 import { seasonDpsStatusLabel } from './seasonCalculationIssues.js';
@@ -25,35 +27,44 @@ import { seasonEffectSources, effectSourceLabel } from "./seasonEffectSources.js
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
-import { gearFilters, previewSlotEdit } from './seasonGearPicker.js';
+import { compareSeasonResourceCosts, gearFilters, previewSlotEdit, skillDpsChanges } from './seasonGearPicker.js';
 import { seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
+import { auraActivationControl } from './seasonNetherModifiers.js';
 import { craftFamilySlots, craftOptions, itemGearKind } from './seasonItemCraft.js';
 import { corrosionCard, corrosionOptions,corrosionBasePool } from './seasonCorrosion.js';
 import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
-import { renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
+import { renderResourceChanges, renderSkillDpsChanges, renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
 import { renderSlateEditor,slateEditorBoard } from './seasonSlateEditor.js';
 import { regularSlateFamilies } from './seasonDivinity.js';
 import { nativeSlateOptions } from './seasonNativeDivinity.js';
 import { compareSeasonDpsSnapshots, SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
-import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion } from './seasonResultPanels.js';
+import { RESULT_TABS, renderResultConditions, renderResultAnalysis, renderEditDpsComparison, renderNumbedCalculation, renderSkillCalculation, renderSkillConversion, renderElixirDamageRoutes, renderSkillElixirDps } from './seasonResultPanels.js';
 import {renderSeasonSupportMatrix} from './seasonSupportMatrix.js';
 import {isOfflineEdition} from './offlinePresentation.js';
 import {screenshotGroups,seasonScreenshotTargets} from './seasonScreenshotImport.js';
 import { RUNTIME_POLICY, LOCAL_LOG_ONLY_MESSAGE } from "./runtimePolicy.js";
 import { canLookUpIngameBuild } from './seasonIngameBuildCode.js';
-import { labeledGearRolls,rollControls, destinyControls, extensionControls, characterControls,
+import { presentGameText, seasonKoreanCardDetail } from './gameTextPresentation.js';
+import { MOON_LUNAR_RING_ID } from './seasonSupportRolls.js';
+import { labeledGearRolls,rollControls, destinyControls, extensionControls, characterControls,renderBuffActivation,
   offenseControls, blessingControls, theaControls, dpsControls, dpsResults, componentResults, characterResults, weaponSummary } from "./seasonWorkspaceView.js";
 
 const esc = v => String(v ?? "").replace(/[&<>"']/gu, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const tabs = [["overview", "빌드"], ["hero", "히어로·추억"], ["skills", "스킬"], ["gear", "장비"], ["talents", "재능"], ["divinity", "신격"], ["pact", "정령"], ["combat", "전투 조건"], ["support-matrix", "특성 지원표"]];
 const title = id => {
-  const record = SS14_CARDS.records[id] ?? SS14_SUPPORTS.records[id];
+  const record = SS14_CARDS.records[id] ?? seasonSupportKoreanCard(id);
   return record?.season === "SS14" && record.koreanTextVerified ? record.name : "한국어 이름 미제공";
 };
 const icon = id => {
-  const item = findItemById(id), src = item?.localIconPath || ss14GearIcons[id] || item?.iconUrl || nativeElixirOptions().find(o => o.itemId === id)?.iconUrl;
-  return src && /^(?:\.?\/?assets\/|https:\/\/cdn\.tlidb\.com\/)/u.test(src) ? `<img src="${esc(src)}" alt="" loading="lazy" />` : `<span aria-hidden="true">＋</span>`;
+  const item = findItemById(id);
+  const current = ss14SkillIcons[id] ?? ss14SkillIcons[seasonSupportKoreanCard(id)?.itemId];
+  const src = item?.localIconPath || ss14GearIcons[id] || item?.iconUrl || current || nativeElixirOptions().find(o => o.itemId === id)?.iconUrl;
+  const relative = src?.startsWith('/assets/') ? '.' + src : src;
+  const fallback = id ? esc(title(id).slice(0,2)) : '＋';
+  return relative && /^(?:\.?\/?assets\/|https:\/\/cdn\.tlidb\.com\/)/u.test(relative)
+    ? `<img src="${esc(relative)}" alt="" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false" /><span aria-hidden="true" hidden>${fallback}</span>`
+    : `<span aria-hidden="true">${fallback}</span>`;
 };
 const button = (text, action, attrs = "") => `<button type="button" data-ss14-action="${action}" ${attrs}>${text}</button>`;
 const field = (label, kind, value, attrs = "") => `<label>${esc(label)}<input type="number" data-season-edit="${kind}" value="${esc(value)}" ${attrs} /></label>`;
@@ -100,20 +111,38 @@ function skillCardText(card) {
   const lines = (card.detail ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   const simple = lines.indexOf('Simple');
   const details = lines.indexOf('Details');
-  const paragraph = rows => rows.length ? '<p>'+esc([...new Set(rows)].join('\n'))+'</p>' : '';
+  const paragraph = rows => rows.length ? '<p>'+esc(presentGameText([...new Set(rows)].join('\n')))+'</p>' : '';
   if (simple < 0 || (details >= 0 && details < simple)) return paragraph(lines);
   const description = paragraph(lines.slice(simple + 1, details >= 0 ? details : undefined));
   const extra = paragraph(lines.slice(0, simple))+(details >= 0 ? paragraph(lines.slice(details + 1)) : '');
   return description+(extra ? '<details><summary>스킬 상세</summary>'+extra+'</details>' : '');
 }
-function itemSource(id, binding) {
-  const r = corrosionCard(SS14_CARDS.records[id] ?? SS14_SUPPORTS.records[id],binding,'ko');
+function skillLevelEffects(id, entry, support, fallbackLevel = 20) {
+  const card = support ? seasonSupportKoreanCard(id) : SS14_CARDS.records[id];
+  const source = SS14_KOREAN_SKILL_LEVELS[id];
+  const level = entry?.level ?? fallbackLevel;
+  const baseLevel = support ? seasonSupportItem(id)?.tlidbText.en.cardLevel ?? 20 : 20;
+  const exact = source && card?.season === 'SS14' && card.koreanTextVerified && card.sourceUrl === source.url
+    && !(entry?.tier != null && card.supportTiers?.length)
+    ? source.groups.find(([, levels]) => levels.includes(level)) : null;
+  if (exact) {
+    const detail = exact[0].split(',').map(index => source.lines[Number(index)]).join('\n');
+    return `<small>Lv.${level} 원문</small><p>${esc(presentGameText(detail))}</p>`;
+  }
+  if (entry?.tier != null && card?.supportTiers?.length) {
+    const detail = seasonKoreanCardDetail(card,entry.tier);
+    if (detail) return `<small>Lv.${baseLevel} 원문</small><p>${esc(detail)}</p>`;
+  }
+  return `${card?.koreanTextVerified ? `<small>Lv.${baseLevel} 원문</small>` : ''}${skillCardText(card)}`;
+}
+function itemSource(id, binding, tier) {
+  const r = corrosionCard(SS14_CARDS.records[id] ?? seasonSupportKoreanCard(id),binding,'ko');
   if (!r || r.season !== "SS14") return "";
   const link = /^https:\/\/tlidb\.com\/(?:ko|en)\//u.test(r.sourceUrl ?? "")
     ? `<a href="${esc(r.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>` : "";
   const pool=binding?.corrosion?.implicit&&corrosionBasePool(id);
   const baseLink=pool?` <a href="https://tlidb.com/ko/${encodeURIComponent(pool.slug)}" target="_blank" rel="noreferrer">침식 기본 원문</a>`:'';
-  return `<details class="native-option-source" data-role="slot-source-${esc(id)}"><summary>옵션 원문</summary>${r.koreanTextVerified ? `<p>${esc(r.detail)}</p>` : "<p>한국어 원문 미제공</p>"}${link}${baseLink}</details>`;
+  return `<details class="native-option-source" data-role="slot-source-${esc(id)}"><summary>옵션 원문</summary><p>${esc(seasonKoreanCardDetail(r,tier) || '한국어 원문 미제공')}</p>${link}${baseLink}</details>`;
 }
 const sourceStats = {
   damage: "대미지", hit_damage: "적중 대미지", spell_damage: "주술 대미지", attack_damage: "공격 대미지",
@@ -152,7 +181,7 @@ export function renderEffectSources(s, path = null) {
         ${/^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(r.receipt?.sourceUrl ?? "") ? `<a href="${esc(r.receipt.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>` : ""}</details>`;
     }).join("") || "<p>이 슬롯에서 확인된 효과가 없습니다.</p>"}</div></section>`;
 }
-function drawerDps(s, comparison, action, status='', assumedComparison) {
+function drawerDps(s, comparison, action, status='', assumedComparison, energyChange) {
   const format=n=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:2}):'미확정';
   const current=s.report.fullDps.supported?s.report.fullDps.dps:null;
   const estimate=s.report.assumedDps?.supported?s.report.assumedDps.dps:null;
@@ -176,22 +205,32 @@ function drawerDps(s, comparison, action, status='', assumedComparison) {
   }
   const change=compareAssumed?assumedComparison.delta:hasDelta?comparison.delta:0;
   const delta=Math.abs(change)>=.005?(change>0?'+':'')+format(change):'';
-  return `<div class="drawer-dps" aria-label="${compareAssumed||showEstimate?'방어 전':'전체'} DPS와 적용"><div aria-live="polite"><small>${label} ${delta?'<b>'+delta+'</b>':''}</small><strong>${status||values}</strong></div>${action}</div>`;
+  const energy=energyChange?`<small data-role="candidate-energy">에너지 ${energyChange.before.used}/${energyChange.before.maximum} → ${energyChange.after.used}/${energyChange.after.maximum}</small>`:'';
+  return `<div class="drawer-dps" aria-label="${compareAssumed||showEstimate?'방어 전':'전체'} DPS와 적용"><div aria-live="polite"><small>${label} ${delta?'<b>'+delta+'</b>':''}</small><strong>${status||values}</strong>${energy}</div>${action}</div>`;
 }
 export function renderSkillPickerFooter(s, id=s.picker?.candidate, status='', disabled=false) {
   const support=Number.isInteger(s.supportIndex);
   const kind=support?'support-selection':'skill-selection';
   const attrs=`data-kind="${kind}" data-index="${s.skillIndex}" data-support="${support?s.supportIndex:''}" data-id="${esc(id)}"`;
-  const action=id?button('이 슬롯에 장착','equip-item',`${attrs}${disabled?' disabled':''}`):button('후보 선택','equip-item','disabled');
+  const label=support&&s.picker?.unlockSupportSlot?'칸 열고 장착':'이 슬롯에 장착';
+  const action=id?button(label,'equip-item',`${attrs}${disabled?' disabled':''}`):button('후보 선택','equip-item','disabled');
   const preview=status?null:s.picker?.preview;
-  return drawerDps(s,preview?.comparison,action,status,preview?.assumedComparison);
+  return drawerDps(s,preview?.comparison,action,status,preview?.assumedComparison,preview?.skill?.energyChange);
 }
 export function renderSkillCandidateResult(s) {
   const preview=s.picker?.preview;
   const removed=preview?.skill?.removedSupports;
-  return appliedSkillLevel(preview?.skill?.entry)
+  const entry=preview?.skill?.entry;
+  const activation=preview?.skill?.activation;
+  const id=s.picker?.candidate;
+  const support=Number.isInteger(s.supportIndex);
+  return (support?appliedSkillLevel(entry):renderSkillLevelStats(entry))
+    +(activation?renderBuffActivation(activation,activation.value,{binding:'data-role="candidate-aura-activation" data-candidate-aura-activation'}):'')
+    +(id?`<div class="skill-candidate-effect" aria-label="스킬 효과">${skillLevelEffects(id,entry,support,s.picker.levels?.[id])}</div>`:'')
     +(removed?.length?`<p data-role="skill-removed-supports">보조 해제 예정 · ${removed.map(id=>esc(title(id))).join(' · ')}</p>`:'')
-    +(preview?renderSlotPreview(preview,esc,{showDps:false,extraDetails:renderSkillConversion(preview.skill?.conversion,'candidate')}):'');
+    +(preview?renderSlotPreview(preview,esc,{showDps:false,showResourcesInline:true,extraDetails:
+      renderSkillElixirDps(preview.skill?.elixirDpsStates,'candidate')
+      +(renderElixirDamageRoutes(preview.skill?.elixirDamageRoutes,'candidate')||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
 }
 function renderGearSkillChanges(preview) {
   const levels=preview?.skillLevels;
@@ -203,8 +242,10 @@ function renderGearSkillChanges(preview) {
   }).join('')}</ul></details>`:'';
   const rows=preview?.damageRoutes;
   if(!rows?.length)return levelsHtml;
-  return levelsHtml+`<details data-role="gear-damage-routes"><summary>대미지 전환·추가 획득</summary>${rows.map(({index,id,previous,current})=>
-    `<section><h4>${esc(title(id))} · ${index+1}번 칸</h4><div><b>장착 전</b>${renderSkillConversion(previous,'before-'+index)||' · —'}</div><div><b>장착 후</b>${renderSkillConversion(current,'after-'+index)||' · —'}</div></section>`).join('')}</details>`;
+  return levelsHtml+`<details data-role="gear-damage-routes"><summary>대미지 전환·추가 획득</summary>${rows.map(({index,id,previous,current,previousStates,currentStates})=>
+    `<section><h4>${esc(title(id))} · ${index+1}번 칸</h4>
+      <div><b>장착 전</b>${(previousStates?renderElixirDamageRoutes(previousStates,'before-'+index):renderSkillConversion(previous,'before-'+index))||' · —'}</div>
+      <div><b>장착 후</b>${(currentStates?renderElixirDamageRoutes(currentStates,'after-'+index):renderSkillConversion(current,'after-'+index))||' · —'}</div></section>`).join('')}</details>`;
 }
 function gearEffectLines(card,id,index) {
   if (!card?.koreanTextVerified) return [];
@@ -281,11 +322,12 @@ function itemPicker(s, category, index, supportIndex, current) {
   const query = s.picker?.query ?? "";
   const key = value => String(value).normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
   const match = option => key(`${option.name} ${(SS14_CARDS.records[option.id] ?? SS14_SUPPORTS.records[option.id])?.detail ?? ""}`).includes(key(query));
-  const card = SS14_CARDS.records[selected] ?? SS14_SUPPORTS.records[selected];
+  const card = SS14_CARDS.records[selected] ?? seasonSupportKoreanCard(selected);
+  const supportsPreview = !support || Boolean(seasonSupportItem(selected));
   const equip = button("이 슬롯에 장착", "equip-item", `data-kind="${kind}" data-index="${index}" data-support="${support ? supportIndex : ""}" data-id="${esc(selected)}"`);
   if(s.drawer) s.drawer.bar=category==='gear'
     ?drawerDps(s,s.picker?.preview?.comparison,card?equip:button('후보 선택','equip-item','disabled'),'',s.picker?.preview?.assumedComparison)
-    :renderSkillPickerFooter(s,card?selected:'');
+    :renderSkillPickerFooter(s,card?selected:'','',!supportsPreview);
   const gearLines = category==='gear' ? gearEffectLines(card,selected,index) : [];
   const localizedLines = gearLines.filter(line=>/[가-힣]/u.test(line)&&!/\p{Script=Han}/u.test(line));
   const detail = gearEffectList(localizedLines) + (card&&category==='gear'&&(!card.koreanTextVerified||localizedLines.length<gearLines.length)
@@ -319,8 +361,7 @@ function itemPicker(s, category, index, supportIndex, current) {
   const candidateLevel=id=>s.picker?.levels?.[id]??(id===current
     ?support?skillRows[index].supports[supportIndex].level:skillRows[index].level
     :support?seasonSupportItem(id)?.tlidbText.en.cardLevel??20:20);
-  const levelInput=card&&!gear?`<label class="skill-candidate-level">레벨<input type="number" min="1" max="100" step="1" data-skill-candidate-level data-id="${esc(selected)}" data-role="candidate-level-${esc(selected)}" aria-label="${esc(title(selected))} 후보 레벨" value="${candidateLevel(selected)}"></label>`:'';
-  const sourceSkillLevel=card&&!gear?(support?seasonSupportItem(selected)?.tlidbText.en.cardLevel??20:20):null;
+  const levelInput=card&&!gear&&supportsPreview?`<label class="skill-candidate-level">레벨<input type="number" min="1" max="100" step="1" data-skill-candidate-level data-id="${esc(selected)}" data-role="candidate-level-${esc(selected)}" aria-label="${esc(title(selected))} 후보 레벨" value="${candidateLevel(selected)}"></label>`:'';
   const optionButton=o=>button(`${icon(o.id)}<span>${esc(o.name)}</span>`, "preview-item",
     `data-id="${esc(o.id)}" data-picker-option data-search="${esc(`${o.name} ${(SS14_CARDS.records[o.id] ?? SS14_SUPPORTS.records[o.id])?.detail ?? ""}`)}" aria-pressed="${selected===o.id}"${gear?' data-role="gear-option-'+esc(o.id)+'"':''}${match(o)?"":" hidden"}`);
   const gearKinds = [['base','제작 장비'],['legendary','레전드 장비'],['','기타 장비']];
@@ -335,7 +376,7 @@ function itemPicker(s, category, index, supportIndex, current) {
     <div class="native-picker-columns"><div class="native-picker-list" aria-label="아이템 후보">${resultGroups}</div>
     ${card ? `<article class="native-picker-card" aria-label="아이템 미리보기" data-role="candidate-detail" tabindex="-1">${gear
       ? `<h3>${esc(title(selected))}</h3><div class="gear-comparison-body" data-candidate="${esc(selected)}" tabindex="0" aria-label="옵션 및 수치 비교">${detail}${preview}${oldOptions}</div>`
-      : `<h3>${esc(title(selected))}</h3>${levelInput}<div class="skill-candidate-effect" aria-label="스킬 효과"><small>Lv.${sourceSkillLevel} 기준</small>${skillCardText(card)}</div><div data-role="skill-candidate-result">${renderSkillCandidateResult(s)}</div>`}</article>` : ''}</div></div>`;
+      : `<header class="skill-candidate-identity">${icon(selected)}<h3>${esc(title(selected))}</h3></header>${levelInput}<div data-role="skill-candidate-result">${s.picker?.candidate?renderSkillCandidateResult(s):`<div class="skill-candidate-effect" aria-label="스킬 효과">${skillLevelEffects(selected,null,support,candidateLevel(selected))}</div>`}</div>`}</article>` : ''}</div></div>`;
 }
 function skillEnergy(skills) {
   const energy = getSkillEnergyUsage(skills);
@@ -347,6 +388,61 @@ function appliedSkillLevel(entry) {
   const adjustment=bonus===0?'':` (${bonus>0?'+':''}${bonus})`;
   return `<small data-role="applied-skill-level">${confirmed?'적용 레벨':'계산 확인이 필요한 레벨'} ${level}${adjustment}</small>`;
 }
+function renderSkillLevelStats(entry) {
+  const {base,level,bonus,confirmed}=seasonSkillLevelState(entry);
+  if (!Number.isInteger(level)) return '';
+  if (!confirmed)
+    return `<section data-role="skill-level-stats" aria-label="레벨별 스킬 수치">${appliedSkillLevel(entry) || `<strong>Lv.${level} 수치 확인 필요</strong>`}</section>`;
+  const values = entry?.values ?? {};
+  const showHit = Number.isFinite(values.averageHit) && (values.averageHit>0 || !entry.damageCapabilities?.dot);
+  const stats = [
+    showHit?['스킬 자체 평균 적중',values.averageHit]:['스킬 자체 DPS',values.baseDps],
+    ['기본 MP 소모',values.manaCost], ['기본 시전 시간',values.castTime,'초'], ['기본 쿨타임',values.cooldown,'초'],
+  ].filter(([, value])=>Number.isFinite(value));
+  const number = value => value.toLocaleString('ko-KR',{maximumFractionDigits:3});
+  return `<section data-role="skill-level-stats" aria-label="레벨별 스킬 수치"><strong>Lv.${level} 스킬 수치</strong>${bonus?` <small>기본 ${base} ${bonus>0?'+':''}${bonus}</small>`:''}
+    ${stats.length?`<dl class="native-stat-list">${stats.map(([label,value,unit])=>
+      `<div class="native-stat-cell"><dt>${label}</dt><dd>${number(value)}${unit??''}</dd></div>`).join('')}</dl>`:''}
+    ${entry?.missingAddedDamageEffectiveness?'<small>이 레벨의 추가 대미지 효율 미확인</small>':''}</section>`;
+}
+
+function equippedSkillResourceCost(report,index) {
+  const number=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const row=report.fullDps.rows.find(r=>r.rowIndex===index);
+  const reservations=report.character.manaReservations?.filter(r=>r.rowIndex===index)??[];
+  const values=[];
+  if (Number.isFinite(row?.manaPerUse)) values.push([row.channelCost?'시작 시 MP':'시전당 MP',number(row.manaPerUse)]);
+  if (row?.lifePerUse>0) values.push([row.channelCost?'시작 시 HP':'시전당 HP',number(row.lifePerUse)]);
+  if (reservations.length) {
+    const known=reservations.every(r=>!r.blocked&&(r.active===false||Number.isFinite(r.applied)));
+    const percent=known?reservations.reduce((sum,r)=>sum+(r.active===false?0:r.applied),0):null;
+    values.push(['이 스킬의 봉인 MP',known?`${number(percent)}%`:'확인 필요']);
+  }
+  return values.length?`<dl class="native-stat-list" data-role="equipped-skill-resource-cost" aria-label="보조와 장비가 반영된 자원 소모">${values.map(([label,value])=>
+    `<div class="native-stat-cell"><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>`:'';
+}
+
+export function renderEquippedSkillStats(s) {
+  const support = Number.isInteger(s.supportIndex);
+  const entry = seasonSkillSlotCalculation(s.report,s.skillIndex,s.supportIndex);
+  const slots = s.document?.targetBuild?.skills;
+  const slot = s.skillIndex < 5 ? slots?.active[s.skillIndex] : slots?.passive[s.skillIndex - 5];
+  const id = support ? slot?.supports[s.supportIndex]?.supportId : entry?.itemId;
+  const stats = support ? appliedSkillLevel(entry) : renderSkillLevelStats(entry);
+  const base = support ? slot?.supports[s.supportIndex]?.level : slot?.level;
+  const activation=auraActivationControl(s.report.componentProjection,s.skillIndex);
+  return stats+(activation?renderBuffActivation(activation,activation.value,{slot:true}):'')+equippedSkillResourceCost(s.report,s.skillIndex)
+    +(id?`<details class="skill-candidate-effect" data-role="equipped-skill-source"><summary>스킬 효과</summary>${skillLevelEffects(id,entry,support,base)}</details>`:'');
+}
+
+function exclusiveSupportLinks(s, row) {
+  const index = s.skillIndex;
+  const links = seasonExclusiveSupportSlots(SS14_CARDS_EN.records[row?.skillId],index);
+  return links.length?`<nav class="skill-calc-actions" aria-label="부귀·숭고 보조 칸">${links.map(({index:socket,grades})=>
+    button(`${grades.join('·')} · 보조 ${socket+1}${socket>=row.unlockedSupportCount?' 미리보기':''}`,
+      'open-exclusive-support',`data-row="${index}" data-index="${socket}"`)).join('')}</nav>`:'';
+}
+
 function equipmentPanel(s, category) {
   const b = normalizeBuild(s.document.targetBuild), gear = category === "gear";
   const rows = [...b.skills.active, ...b.skills.passive];
@@ -539,9 +635,9 @@ function slotEditor(s) {
       const calculation = s.report.components.filter(component => component.category === "supports")
         .flatMap(component => component.calculations ?? []).find(entry => entry.rowIndex === index && entry.supportIndex === c);
       return `${actions}<fieldset><legend class="panel-heading-accessible">보조 ${c + 1}</legend>${field(`보조 ${c + 1} 레벨`, "support-level", row.supports[c].level, `data-row="${index}" data-support="${c}" min="1" max="100" step="1"`)}
-        ${appliedSkillLevel(calculation)}
+        <div data-role="equipped-skill-level-stats">${renderEquippedSkillStats(s)}</div>
         ${calculation?.tiers?.length ? `<label>옵션 등급<select data-season-edit="support-tier" data-row="${index}" data-support="${c}">${calculation.tier == null ? '<option value="" selected disabled>등급 선택</option>' : ""}${calculation.tiers.map(t => `<option value="${t.tier}"${t.tier === calculation.tier ? " selected" : ""}>T${t.tier}</option>`).join("")}</select></label>` : ""}
-        ${(calculation?.controls ?? []).map((control, n) => field(`보조 옵션 ${n + 1} (${control.min}~${control.max})`, "support-roll", control.value,
+        ${(calculation?.controls ?? []).map((control, n) => field(`${current===MOON_LUNAR_RING_ID?'환형 공격 발동 확률':`보조 옵션 ${n + 1}`} (${control.min}~${control.max})`, "support-roll", control.value,
           `data-row="${index}" data-support="${c}" data-key="${esc(control.key)}" min="${control.min}" max="${control.max}" step="any"`)).join("")}
         ${(calculation?.conditionControls ?? []).map(control => {
           const attrs=`data-row="${index}" data-support="${c}" data-key="${esc(control.key)}" ${control.automatic?'disabled':''}`;
@@ -552,7 +648,7 @@ function slotEditor(s) {
         }).join("")}</fieldset>`;
     }
     return `${actions}${isGear && index < 2 ? weaponSummary(s.document.targetBuild, index) : ''}
-      ${isGear ? (entry ? rollControls(component, entry, {}) : "") + s.report.componentProjection.rows.filter(r=>r.path.startsWith(`gear.slots.${index}.crafts.`)).map(r=>`<fieldset><legend>${esc(r.detail??r.name)}</legend>${craftRollInputs(r)}</fieldset>`).join('') : id ? `${field("스킬 레벨", "skill-level", row.level, `data-row="${index}" min="1" max="100" step="1"`)}${appliedSkillLevel(entry)}${field("보조 칸 수", "support-count", row.unlockedSupportCount, `data-row="${index}" min="0" max="5" step="1"`)}` : ""}`;
+      ${isGear ? (entry ? rollControls(component, entry, {}) : "") + s.report.componentProjection.rows.filter(r=>r.path.startsWith(`gear.slots.${index}.crafts.`)).map(r=>`<fieldset><legend>${esc(r.detail??r.name)}</legend>${craftRollInputs(r)}</fieldset>`).join('') : id ? `${field("스킬 레벨", "skill-level", row.level, `data-row="${index}" min="1" max="100" step="1"`)}<div data-role="equipped-skill-level-stats">${renderEquippedSkillStats(s)}</div>${field("보조 칸 수", "support-count", row.unlockedSupportCount, `data-row="${index}" min="0" max="5" step="1"`)}` : ""}`;
   }
   if (type === "talents") {
     const board = b.talents.boards[index];
@@ -833,6 +929,11 @@ export function renderBoardComparison(s){
   const after={...s,document:draft.document,report:draft.report,boardOverview:false,slateInspectorSeparated:section==='divinity'};
   if(draft.document===s.document)return '';
   const result=compareSeasonDpsSnapshots(s,after);
+  const basis=result.supported?'fullDps':'assumedDps';
+  const comparable=result.supported||compareSeasonDpsSnapshots(s,after,basis).supported;
+  const dpsChanges=comparable?renderSkillDpsChanges(skillDpsChanges(s.report[basis],after.report[basis]),basis,esc,{board:true}):'';
+  const dpsBasis=comparable?basis:'fullDps';
+  const resources=compareSeasonResourceCosts(s.report,after.report,dpsBasis,{allActive:true});
   const beforeRows=boardOptions(s,section),afterRows=boardOptions(after,section);
   const changed=[];
   for(const key of new Set([...beforeRows.keys(),...afterRows.keys()])){
@@ -847,7 +948,7 @@ export function renderBoardComparison(s){
     return other!==reason&&result.reasons.includes(other)?reason.slice(4):reason;
   }));
   const reasons=uniqueReasons.size?`<details data-role="board-dps-reasons"><summary>전체 DPS 보류 사유</summary><ul>${[...uniqueReasons].map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></details>`:'';
-  return `${changed.length?`<details data-role="board-option-changes" class="board-option-changes"><summary>변경 옵션 ${changed.length}개</summary><ul class="board-option-diff">${changed.join('')}</ul></details>`:''}${reasons}`;
+  return `${changed.length?`<details data-role="board-option-changes" class="board-option-changes"><summary>변경 옵션 ${changed.length}개</summary><ul class="board-option-diff">${changed.join('')}</ul></details>`:''}${dpsChanges}${renderResourceChanges({...resources,dpsBasis},esc,{board:true})}${reasons}`;
 }
 function boardDrawer(s){
   const draft=s.overlay,section=draft.section;
@@ -896,9 +997,11 @@ function overlay(s) {
     const index=s.overlay.index,skill=type==='skills',b=normalizeBuild(s.document.targetBuild),row=[...b.skills.active,...b.skills.passive][index];
     const name=skill?(index===0?'주력 스킬':index<5?'액티브 '+(index+1):'패시브 '+(index-4)):s.overlay.kind==='gear'?SEASON_GEAR_SLOT_LABELS[index]+' 제작':seasonMemoryOptions(index).name;
     const id=skill&&(Number.isInteger(s.supportIndex)?row.supports[s.supportIndex]?.supportId:row.skillId);
+    const supportTier=Number.isInteger(s.supportIndex)?s.report.components.find(c=>c.category==='supports'&&c.id===id)
+      ?.calculations?.find(c=>c.rowIndex===index&&c.supportIndex===s.supportIndex)?.tier:undefined;
     return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="편집창 닫기"></button>
       <section role="dialog" aria-modal="true" aria-label="SS14 ${esc(name)}" class="season-native-modal gear-drawer slot-side-editor${skill?' skill-workspace':' workshop-workspace'}"><header><h2 data-role="${skill?'slot-detail-heading':'memory-drawer-heading'}" tabindex="-1">${esc(name)}${skill&&Number.isInteger(s.supportIndex)?' · 보조 '+(s.supportIndex+1):''}</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
-      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?`<div id="skill-selection-pane" class="skill-selection-pane"${s.overlay.boardOnly?' hidden':''}>${s.overlay.boardOnly?'':slotEditor(s)+(id&&!s.picker?`<details class="editor-details"><summary>스킬 상세</summary>${itemSource(id)}${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:'')}</div>${skillLinkBoard(s,b.skills)}`:workshopView(s)}</div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
+      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?`<div id="skill-selection-pane" class="skill-selection-pane"${s.overlay.boardOnly?' hidden':''}>${s.overlay.boardOnly?'':exclusiveSupportLinks(s,row)+slotEditor(s)+(id&&!s.picker?`<details class="editor-details"><summary>스킬 상세</summary>${itemSource(id,undefined,supportTier)}${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:'')}</div>${skillLinkBoard(s,b.skills)}`:workshopView(s)}</div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
   }
   if (type === "gear") {
     const index=s.overlay.index, id=normalizeBuild(s.document.targetBuild).gear.slots[index]?.itemId;
@@ -991,13 +1094,17 @@ export function renderNativeDps(s) {
     ${renderEditDpsComparison(s, true)}
     ${dpsLink}
     ${s.pending.size ? `<div class="native-result-actions">${button('계산 적용', 'apply')}</div>` : ''}</div>
-    <nav class="native-result-tabs" aria-label="계산 결과 보기">${RESULT_TABS.map(([key,label]) => button(label, 'result-tab', `data-tab="${key}" aria-pressed="${active === key}" aria-controls="native-result-panel"`)).join('')}</nav>
+    <nav class="native-result-tabs" aria-label="계산 결과 보기">${RESULT_TABS.map(([key,label]) => button(label, 'result-tab', `data-tab="${key}" data-role="result-tab-${key}" aria-pressed="${active === key}" aria-controls="native-result-panel"`)).join('')}</nav>
     <section id="native-result-panel" class="native-result-panel" aria-label="${RESULT_TABS.find(([key]) => key === active)?.[1] ?? '수치'}">${(panels[active] ?? panels.stats)()}</section></aside>`;
 }
 function renderDpsRequirements(s) {
   const blockers=s.report.fullDps.blockers;
-  return blockers.length ? `<details class="native-calculation-notes" data-role="calculation-requirements"${s.showDpsNotes?' open':''}><summary>전체 DPS 보류 이유</summary>
-    <div class="native-requirements" data-role="numeric-dps-requirements" aria-label="계산에 필요한 입력">${renderReasons(s,blockers)}</div></details>` : '';
+  const estimate=s.report.assumedDps;
+  const exactReasons=new Set(blockers);
+  const estimateReasons=estimate?.supported===false?estimate.blockers.filter(reason=>!exactReasons.has(reason)):[];
+  return blockers.length || estimateReasons.length ? `<details class="native-calculation-notes" data-role="calculation-requirements"${s.showDpsNotes?' open':''}><summary>전체 DPS 보류 이유</summary>
+    <div class="native-requirements" data-role="numeric-dps-requirements" aria-label="계산에 필요한 입력">${renderReasons(s,blockers)}
+    ${estimateReasons.length?`<section data-role="assumed-dps-reasons" aria-label="방어 전 DPS 보류 이유"><h3>방어 전 DPS</h3>${renderReasons(s,estimateReasons,estimate)}</section>`:''}</div></details>` : '';
 }
 function renderCalculationNotes(s) {
   const dps=s.report.fullDps;
@@ -1016,11 +1123,14 @@ function renderObservedElixirUptime(s) {
   const uptime=assumed?s.report.assumedDps.elixirUptime:s.report.elixirUptime;
   if(!uptime?.supported)return '';
   const fmt=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:2});
-  return `<details data-role="observed-elixir-uptime"><summary>영약 유지율</summary>
+  const mp=value=>Number.isFinite(value)?fmt(value):'확인 필요';
+  const basis=assumed?'방어 전 DPS':'전체 DPS';
+  const result=assumed?s.report.assumedDps:s.report.fullDps;
+  return `<details data-role="observed-elixir-uptime"><summary>영약 유지율 · ${basis}</summary>
     <ul>${uptime.rows.map(row=>`<li>${esc(row.name)} · ${fmt(row.uptime)}%</li>`).join('')}</ul>
-    ${Number.isFinite(uptime.activeDps)?`<p>활성 ${fmt(uptime.activeDps)} DPS · 비활성 ${fmt(uptime.inactiveDps)} DPS</p>`:''}
-    ${uptime.states?`<table aria-label="영약 상태별 DPS와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">DPS</th><th scope="col">MP/초</th></tr></thead>
-      <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${Number.isFinite(row.manaPerSecond)?fmt(row.manaPerSecond):'확인 필요'}</td></tr>`).join('')}</tbody></table>`:''}
+    <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">MP/초</th></tr></thead>
+      <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${fmt(row.weightedDps)}</td><td>${mp(row.manaPerSecond)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th scope="row" colspan="3">${basis}</th><td>${fmt(result.dps)}</td><td>${mp(result.manualResources?.manaPerSecond)}</td></tr></tfoot></table>
     ${button('영약 조건 편집','requirement','data-section="combat" data-focus-role="native-extension-input"')}</details>`;
 }
 function renderAssumedDps(s, primary = false) {
@@ -1031,8 +1141,6 @@ function renderAssumedDps(s, primary = false) {
 function renderAssumedDpsDetails(s) {
   const estimate=s.report.assumedDps;
   const fmt=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:2});
-  const exactBlockers=new Set(s.report.fullDps.blockers);
-  const separateBlockers=estimate.blockers.filter(reason=>!exactBlockers.has(reason));
   return `${!s.pending.size?`<details data-role="native-uptime-details"><summary>가동률과 DPS 적용 내역</summary>
       <p>적 아머·저항·관통 제외${estimate.defaults.length?' · '+esc(estimate.defaults.join(' · ')):''}</p>
       ${estimate.uptimeDetails?.length?`<ul>${estimate.uptimeDetails.map(row=>{
@@ -1040,8 +1148,7 @@ function renderAssumedDpsDetails(s) {
           .filter(([,value])=>Number.isFinite(value)).map(([label,value])=>`${label} ${fmt(value)} DPS`);
         return `<li><b>${esc(row.name)}</b><br>${row.setting===row.assumed?`적용 ${esc(row.assumed)}`:`입력 ${esc(row.setting)} → 방어 전 ${esc(row.assumed)}`}${amounts.length?`<br>${amounts.join(' · ')}`:''}<br>${esc(row.method)}</li>`;
       }).join('')}</ul>`:''}
-      ${button('전투 조건 보기','result-tab','data-tab="conditions"')}</details>`:''}
-    ${!s.pending.size&&!estimate.supported&&separateBlockers.length?`<details data-role="assumed-dps-reasons"><summary>방어 전 DPS 추가 확인</summary>${renderReasons(s,separateBlockers,estimate)}</details>`:''}`;
+      ${button('전투 조건 보기','result-tab','data-tab="conditions"')}</details>`:''}`;
 }
 export function nativeSaveStatus(s) {
   return s.draftError||s.notice||(s.dirty?(s.draftSaved?'임시 저장됨':'저장하지 않은 변경'):s.document.revision?'저장됨':'새 SS14 사본');
@@ -1056,7 +1163,7 @@ export function renderSeasonPlanner(s) {
     : boardTitles[s.section] ? boardOverview(s) : s.section==='support-matrix'?renderSeasonSupportMatrix(s):combatPanel(s);
   return `<div class="season-native" data-role="ss14-main-editor"><header class="planner-header"${s.overlay?' inert':''}><strong class="native-brand">TOB <small>SS14</small></strong><label class="build-chip"><input id="ss14BuildName" aria-label="빌드 이름" data-season-edit="name" value="${esc(s.document.targetBuild.name)}" maxlength="160" /></label>${renderEditHistory(s)}<div class="header-primary-actions">${button("저장", "save")}${button("불러오기", "saves", 'data-role="open-saves"')}${button("공유", "share", 'data-role="open-share"')}${button("빌드 파일", "files", 'data-role="open-files"')}${button('초기화','reset-build','data-role="reset-build" aria-label="빌드 초기화"')}</div><span role="status" data-role="native-save-status">${esc(nativeSaveStatus(s))}</span></header>
     <nav class="quick-category-menu${s.navCollapsed?' is-folded':''}"${s.overlay?' inert':''} aria-label="빌드 편집 메뉴">${button(s.navCollapsed?'☰':'‹','toggle-navigation',`class="nav-toggle" data-role="nav-toggle" aria-label="메뉴 ${s.navCollapsed?'펼치기':'접기'}" aria-expanded="${!s.navCollapsed}"`)}${tabs.filter(([id])=>id!=='support-matrix').map(([id, label]) => button(label, "section", `data-section="${id}" aria-pressed="${scene.section === id}"`)).join("")}</nav>
-    <div class="native-content"${s.overlay?' inert':''}><main class="season-native-scroll"><section class="planner-section ${scene.section === "hero" ? "hero-section" : ""}"><h1${hasPanelHeading?' class="panel-heading-accessible"':''}>${esc(tabs.find(([id]) => id === scene.section)?.[1])}</h1>${s.error ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>
+    <div class="native-content"${s.overlay?' inert':''}><main class="season-native-scroll"><section class="planner-section ${scene.section === "hero" ? "hero-section" : ""}"><h1${hasPanelHeading?' class="panel-heading-accessible"':''}>${esc(tabs.find(([id]) => id === scene.section)?.[1])}</h1>${s.error&&s.overlay?.type!=='board' ? `<p role="alert">${esc(s.error)}</p>` : ""}${body}</section></main>
     ${renderNativeDps(s)}</div>
     ${overlay(s)}</div>`;
 }

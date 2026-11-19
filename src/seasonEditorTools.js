@@ -1,8 +1,11 @@
 import { describeSeasonOptionChange } from './seasonNumericStatsView.js';
 import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
+import { SS14_CARDS } from './data/ss14Cards.generated.js';
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
+const amount=n=>Number.isFinite(n)?fmt(n):'미확정';
+const dpsRow=(label,from,to,comparable)=>`<tr><th scope="row">${label}</th><td>${amount(from)}</td><td>${amount(to)}</td><td>${comparable?signed(to-from):'—'}</td></tr>`;
 function comparisonReasons(reasons,esc) {
   const issues=new Map();
   for (const reason of reasons) {
@@ -18,14 +21,40 @@ function comparisonReasons(reasons,esc) {
   }).join('');
 }
 
-export function renderSlotPreview(p,esc,{showDps=true,extraDetails=''}={}){
+export function renderSkillDpsChanges(rows,basis,esc,{board=false}={}){
+  if(!rows.length)return '';
+  const skillName=id=>{
+    const card=SS14_CARDS.records[id];
+    return card?.season==='SS14'&&card.koreanTextVerified ? card.name : '한국어 이름 미제공';
+  };
+  const skillRows=rows.map(({index,beforeId,afterId,from,to})=>{
+    const slot=index===0?'주력':index<5?`액티브 ${index+1}`:`패시브 ${index-4}`;
+    const name=beforeId&&afterId&&beforeId!==afterId ? `${skillName(beforeId)} → ${skillName(afterId)}` : skillName(afterId??beforeId);
+    return dpsRow(esc(`${slot} · ${name}`),from,to,true);
+  }).join('');
+  return `<table class="slot-dps-table"><caption>${basis==='assumedDps'?'스킬별 방어 전 DPS':'스킬별 DPS 변화'}</caption><thead><tr><th scope="col">스킬</th><th scope="col">${board?'적용':'장착'} 전</th><th scope="col">${board?'적용':'장착'} 후</th><th scope="col">변화</th></tr></thead><tbody>${skillRows}</tbody></table>`;
+}
+
+export function renderResourceChanges(p,esc,{board=false,skill=false}={}){
+  const resourceValue=(value,unit)=>amount(value)+(Number.isFinite(value)?unit:'');
+  const resourceText=({label,a,b,unit=''})=>`${label} ${resourceValue(a,unit)} → ${resourceValue(b,unit)}`;
+  const rows=[...(p.resourceChanges??[]),...(p.resourceCosts??[]),...(p.resourceRecovery??[])];
+  const castCosts=skill?rows.filter(row=>row.label==='시전당 MP'||row.label==='시전당 HP'):[];
+  const [first,...rest]=castCosts.length?rows.filter(row=>!castCosts.includes(row)):rows;
+  const manaNote=p.manaObservationStale?`<p>MP 회복 조건이 바뀌었습니다. ${board?'적용':'교체'} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
+  if(!first&&!castCosts.length)return manaNote;
+  const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
+  const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
+  const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
+  return detailRows.length||manaNote||basisNote
+    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}</details>`
+    : `<p data-role="slot-resource-preview">${esc(summary)}</p>`;
+}
+
+export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,extraDetails=''}={}){
   const line=(label,a,b)=>`<li>${label} · ${fmt(a)} → ${fmt(b)} (${signed(b-a)})</li>`;
   const contributions=p.options.map(describeSeasonOptionChange).filter(Boolean).map(change=>`<li>${esc(change)}</li>`).join('');
   const {supported,baseValue,value,reasons,encounterMatches}=p.comparison;
-  const amount=n=>Number.isFinite(n)?fmt(n):'미확정';
-  const resourceValue=(value,unit)=>amount(value)+(Number.isFinite(value)?unit:'');
-  const resourceText=({label,a,b,unit=''})=>`${label} ${resourceValue(a,unit)} → ${resourceValue(b,unit)}`;
-  const dpsRow=(label,from,to,comparable)=>`<tr><th scope="row">${label}</th><td>${amount(from)}</td><td>${amount(to)}</td><td>${comparable?signed(to-from):'—'}</td></tr>`;
   const blocked=!supported&&reasons.length?`<details><summary>${encounterMatches===false?'전투 조건 변경':'전체 DPS 비교 보류'}</summary><ul>${comparisonReasons(reasons,esc)}</ul></details>`:'';
   const {baseValue:assumedBefore,value:assumedAfter,supported:assumedSupported}=p.assumedComparison??{};
   const repeated=supported && Number.isFinite(assumedBefore) && Number.isFinite(assumedAfter)
@@ -35,13 +64,11 @@ export function renderSlotPreview(p,esc,{showDps=true,extraDetails=''}={}){
     ? dpsRow('방어 전',assumedBefore,assumedAfter,assumedSupported):'';
   const overall=showDps&&(Number.isFinite(baseValue)||Number.isFinite(value))?dpsRow('전체',baseValue,value,supported):'';
   const table=overall||assumed?`<table class="slot-dps-table" aria-label="장착 전후 DPS"><thead><tr><th scope="col">DPS</th><th scope="col">장착 전</th><th scope="col">장착 후</th><th scope="col">변화</th></tr></thead><tbody>${overall}${assumed}</tbody></table>`:'';
-  const [firstResource,...moreResources]=[...(p.resourceChanges??[]),...(p.resourceCosts??[])];
-  const resources=firstResource?(moreResources.length
-    ? `<details data-role="slot-resource-preview"><summary>${esc(resourceText(firstResource))}</summary><ul>${moreResources.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul></details>`
-    : `<p data-role="slot-resource-preview">${esc(resourceText(firstResource))}</p>`):'';
-  const changes=`${showDps?'':table}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${contributions?'<h4>옵션</h4><ul>'+contributions+'</ul>':''}${resources}${extraDetails}`;
+  const skillTable=renderSkillDpsChanges(p.skillDpsChanges??[],p.dpsBasis,esc);
+  const resources=renderResourceChanges(p,esc,{skill:showResourcesInline});
+  const changes=`${showDps?'':table}${skillTable}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${contributions?'<h4>옵션</h4><ul>'+contributions+'</ul>':''}${showResourcesInline?'':resources}${extraDetails}`;
   const details=changes?`<details><summary>변경 수치</summary>${changes}${showDps?'':blocked}</details>`:blocked;
-  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${showDps?table:''}${details}${showDps&&changes?blocked:''}`;
+  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${showDps?table:''}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
   return body?`<section aria-label="장착 전 수치 비교">${body}</section>`:'';
 }
 export function shelfTools(kind,index,filled,button,candidate=false){

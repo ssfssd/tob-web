@@ -10,7 +10,7 @@ export const SEASON_LOCAL_WEAPON_STATS = new Set(["weapon_critical_strike_rating
 export const SEASON_SPELL_FLAT_STATS = new Set(["physical", "fire", "cold", "lightning", "erosion"].flatMap(type =>
   ["min", "max"].map(side => `spell_${type}_damage_${side}`)));
 export const SEASON_GLOBAL_FLAT_STATS = new Set([...SEASON_SPELL_FLAT_STATS,...[...SEASON_SPELL_FLAT_STATS].map(s=>s.replace(/^spell_/u,'attack_'))]);
-export const SEASON_GEAR_LEVEL_STATS = new Set(['all_skill_levels', 'main_skill_levels', 'active_skill_levels', 'passive_skill_levels',
+export const SEASON_GEAR_LEVEL_STATS = new Set(['all_skill_levels', 'support_skill_levels', 'main_skill_levels', 'active_skill_levels', 'passive_skill_levels',
   'spell_projectile_skill_levels', 'attack_projectile_skill_levels', 'horizontal_projectile_skill_levels', ...['physical','cold','fire','lightning','erosion','minion','spell','attack','beam','mobility','defensive','projectile','aura','curse','restoration','empower','focus'].map(t=>`${t}_skill_levels`)]);
 const conversionTypes = ['physical', 'lightning', 'cold', 'fire', 'erosion'];
 const outgoingConversions = new Map(conversionTypes.flatMap((source, index) =>
@@ -30,6 +30,19 @@ export const SEASON_MINION_STATS = new Set(['minion_damage','minion_fire_damage'
 // These are consumed by the SS14 character/offense engines from rawEffects.
 // The legacy display mapper is not the authority for their SS14 support.
 export const SEASON_GEAR_COST_STATS = new Set(['attack_skill_mana_cost','mana_cost_to_life_cost','spell_mana_cost_to_life_cost']);
+export function isSeasonTargetDamageTaken(stat, type) {
+  // Unqualified physical mitigation belongs to the player, even when a skill
+  // or a summon still has a physical pool after outgoing conversion.
+  return stat === `enemy_${type}_damage_taken` || type !== 'physical' && stat === `${type}_damage_taken`;
+}
+
+export function fixedSeasonErosionResistance(effects) {
+  const overrides=effects.filter(e=>e.stat==='enemy_erosion_resistance_fixed');
+  if(!overrides.length)return undefined;
+  const value=overrides[0].value;
+  return Number.isFinite(value)&&overrides.every(e=>e.operation==='set'&&e.value===value
+    && !e.condition&&!e.conditionRequirements&&!e.per&&!e.target)?value:null;
+}
 export const SEASON_GEAR_NUMBED_STATS = new Set(['gear_numbed_additional_stacks','gear_numbed_critical_bonus']);
 export const SEASON_GEAR_NUMBED_MODIFIERS = new Set(['numbed_duration','numbed_effect']);
 export const SEASON_REAPING_STATS = new Set(['reaping_duration','reaping_recovery_speed']);

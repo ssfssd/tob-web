@@ -1,9 +1,9 @@
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
-import { resolveSeasonSkillLevel } from './seasonSkillLevels.js';
+import { resolveSeasonSkillLevel, seasonSupportManaMultiplier } from './seasonSkillLevels.js';
 import { netherSum, netherRule } from './seasonNetherRemaining.js';
 import { theaCombatEnabled, fixedNumbedStacks } from './seasonTheaCombatInputs.js';
-import { inspectSeasonSupport, checkSeasonSupportHost } from './seasonSupport.js';
+import { inspectSeasonSupport, checkSeasonSupportHost, supportFitsSocket } from './seasonSupport.js';
 import { SS14_THEA_COMBAT } from './data/ss14TheaCombat.generated.js';
 
 export function netherCondition(row,build,key,label,max=1) {
@@ -15,6 +15,11 @@ export function netherCondition(row,build,key,label,max=1) {
     kind:max===1?'boolean':'count',max,conditionGroup:`nether-${key}`,value:valid?value:''});
   if(!valid){row.blockers.push({reason:`${label}: 값을 선택하세요.`});row.status='partial';}
   return valid?value:null;
+}
+export const isAuraActivationControl=(row,control)=>row.isAura && control.conditionGroup===`nether-buff-${row.buffSkill}`;
+export function auraActivationControl(projection,index) {
+  const row=projection.rows.find(row=>row.isAura&&row.buffSkill===index);
+  return row?.conditionControls.find(control=>isAuraActivationControl(row,control));
 }
 const push=(row,stat,value,operation='add_percent',sourceText=row.detail)=>row.effects.push({stat,value,operation,
   unit:operation==='add'?'flat':'percent',path:row.path,group:row.group,receipt:row.receipt,sourceText});
@@ -54,6 +59,7 @@ const demolisherRecovery = /^\+[\d.]+ % Demolisher Charge Recovery Speed for eac
 export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,levelBonus) {
   const originals=rows.flatMap(r=>r.effects),sources=stat=>rows.filter(r=>r.effects.some(e=>e.stat===stat));
   const amount=stat=>netherSum(originals,stat);
+  const fixedSupportMultiplier=seasonSupportManaMultiplier(originals);
   const hasNether=rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
   const slots=[...(build.skills?.active??[]),...(build.skills?.passive??[])];
   const hasSkillTag=tag=>slots.some(slot=>SS14_CARDS_EN.records[slot?.skillId]?.tags?.includes(tag));
@@ -68,12 +74,19 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
     const row={path:`skills.netherBuff.${index}`,itemId:slot.skillId,group:'divinity',buffSkill:index,isAura:aura,
       name:SS14_CARDS.records[slot.skillId]?.name??'한국어 원문 미제공',detail:SS14_CARDS.records[slot.skillId]?.koreanTextVerified?SS14_CARDS.records[slot.skillId].detail:'한국어 원문 미제공',receipt:card,
       level,baseLevel,levelBonus:bonus,progressionReceipt:resolved.receipt,
-      effects:[],blockers:resolved.blockers.map(blocker=>({reason:blocker.sourceText??blocker.reason})),conditionControls:[],inactive:[],mechanics:[],status:resolved.blockers.length?'partial':'mapped'};
-    rows.push(row);if(row.blockers.length)continue;
+      levelUnavailable:resolved.blockers.length>0,
+      effects:[],blockers:[],conditionControls:[],inactive:[],mechanics:[],status:'mapped'};
+    rows.push(row);
+    const auraState=aura?netherCondition(row,build,`buff-${index}`,`${row.name} 효과 적용 중 여부`):null;
     const binding=build.ss14Inputs?.skills?.[index];
     if(binding?.itemId!==slot.skillId||binding.sourcePageSha256!==card.sourcePageSha256)fail(row,'선택 버프의 SS14 원문 연결을 다시 확인하세요.');
     if(slots.filter(s=>s?.skillId===slot.skillId).length>1)fail(row,'같은 오라·함성을 여러 칸에서 중복 적용할 수 없습니다.');
-    const resolvedText=resolved.item.tlidbText.en.detail;
+    row.inactiveAura=aura&&auraState===0&&!row.blockers.length;
+    if(row.levelUnavailable&&!row.inactiveAura){
+      for(const blocker of resolved.blockers)fail(row,blocker.sourceText??blocker.reason);
+      continue;
+    }
+    const resolvedText=row.levelUnavailable?'':resolved.item.tlidbText.en.detail;
     const lines=resolvedText.split('\nDetails\n').at(-1).split('\n');
     const effectLines=lines.filter(l=>!/^Activates the Aura,|^Casts the skill and lets out a Warcry:|^Taunts Nearby enemies\.|^Weakens Nearby enemies\.|^Lasts/u.test(l));
     if(!aura && effectLines.length && effectLines.every(line=>{
@@ -83,12 +96,14 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
       row.inactive.push({reason:'함성의 효과가 적용되는 스킬이 장착되어 있지 않습니다.'});
       continue;
     }
-    const active=netherCondition(row,build,`buff-${index}`,`${row.name} 효과 적용 중 여부`);
+    const active=aura?auraState:netherCondition(row,build,`buff-${index}`,`${row.name} 효과 적용 중 여부`);
     const supports=[];
     for(const [supportIndex,support] of (slot.supports??[]).entries()) {
       if(!support?.supportId)continue;
       const linked=inspectSeasonSupport({...support,level:support.level+levelBonus(null,index,true)},{rowIndex:index,supportIndex,isTarget:true,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`],build});
-      for(const reason of linked.blockers)fail(row,reason);
+      const deferredLevel=row.inactiveAura&&linked.levelUnavailable&&supportIndex<slot.unlockedSupportCount
+        &&supportFitsSocket(support.supportId,card,index,supportIndex);
+      if(!deferredLevel)for(const reason of linked.blockers)fail(row,reason);
       if(checkSeasonSupportHost(support.supportId,card,{values:{}},index)!==true)fail(row,'버프와 보조 스킬의 호환 조건을 확인하세요.');
       for(const effect of linked.effects) {
         if(!['mana-cost-multiplier','supported-skill-area','supported-skill-aura-effect','supported-skill-sealed-mana-compensation'].includes(effect.stat)
@@ -130,7 +145,7 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
     const sealed=Number(resolvedText.match(/^Sealed Mana\n([\d.]+)%/u)?.[1]);
     if(aura&&Number.isFinite(sealed)&&netherRule('Sealed_Mana_Compensation').body.includes('Initial Sealed Mana/(1+ Sealed Mana Compensation)')) {
       const compensation=gearSealCompensation+amount('sealed_mana_compensation')+supportAmount('supported-skill-sealed-mana-compensation');
-      const cost=supports.filter(e=>e.stat==='mana-cost-multiplier').reduce((n,e)=>n*e.value/100,1);
+      const cost=supports.filter(e=>e.stat==='mana-cost-multiplier').reduce((n,e)=>n*(fixedSupportMultiplier ?? e.value)/100,1);
       if(compensation<=-100||cost<0)fail(row,'봉인 MP 보상·소모 배율 범위를 확인하세요.');
       else push(row,'sealed_mana_percent',sealed*cost/(1+compensation/100),'add');
       row.mechanics.push({kind:'nether-reservation',base:sealed,compensation,cost,receipt:netherRule('Sealed_Mana_Compensation'),supports:supports.map(e=>e.receipt)});

@@ -20,7 +20,8 @@ import { calculateSeasonCharacter } from "./seasonCharacter.js";
 import { calculateElixirAverage, applyObservedElixirUptime } from "./seasonElixirAverage.js";
 
 import { projectSeasonBlessings } from "./seasonBlessings.js";
-import { calculateSeasonDps } from "./seasonDps.js";
+import { calculateSeasonDps, manualResourceBalance } from "./seasonDps.js";
+import { observedManaRecoveryBasis } from "./seasonSurvival.js";
 import { calculateTheaAverage } from "./seasonTheaCycle.js";
 import { seasonDamageContext } from "./seasonWeaponInputs.js";
 import { inspectLogGear } from "./seasonLogGear.js";
@@ -173,10 +174,29 @@ export function seasonGearSlotRollEntry(build, slotIndex) {
 // The full-build boundary remains fail-closed until every selected dependency
 // AND base-stat/level/combat rules have season-specific authority. Partial
 // component values are never summed and presented as full build performance.
-export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true, includeElixirUptime = true, beforeDefense = false } = {}) {
+export function calculateSeasonBuild(build, options) {
+  const report = projectSeasonBuild(build, options);
+  const inputs = build.ss14Inputs;
+  if (Number.isFinite(inputs?.character?.observedManaRecovery) && inputs.observedManaRecoveryBasis
+    && JSON.stringify(inputs.observedManaRecoveryBasis)!==JSON.stringify(observedManaRecoveryBasis(build,report))) {
+    // A stale measurement is still part of the document, but must not drive
+    // the resource budget of the current loadout.
+    const survival = report.character.survival;
+    const formulasOnly = rows => rows.filter(row=>row.id!=='observed');
+    survival.manaObservationStale = true;
+    survival.manaScenarios = formulasOnly(survival.manaScenarios);
+    survival.values.manaRegeneration = null;
+    const dps = report.fullDps;
+    if (dps.manualResources)
+      dps.manualResources = manualResourceBalance(dps.rows,formulasOnly(dps.manualResources.recovery),inputs.dps?.skills);
+  }
+  return report;
+}
+
+function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN, supports = SS14_SUPPORTS_EN, sourceBuild = build, includeAverage = true, includeTheaAverage = true, includeElixirUptime = true, beforeDefense = false } = {}) {
   if (includeTheaAverage && build.ss14Inputs?.theaCycle?.mode === "automatic") {
     const average=calculateTheaAverage(build,
-      state => calculateSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false, includeElixirUptime:false, beforeDefense }));
+      state => projectSeasonBuild(state, { skills, gear, supports, sourceBuild, includeAverage: false, includeTheaAverage: false, includeElixirUptime:false, beforeDefense }));
     average.numericStats=calculateSeasonNumericStats(average);
     return average;
   }
@@ -289,6 +309,7 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
     component.calculations=component.calculations.map(c=>{
       const buff=buffs.find(r=>r.buffSkill===c.rowIndex);if(!buff)return c;
       return {...c,level:buff.level,baseLevel:buff.baseLevel,levelBonus:buff.levelBonus,progressionReceipt:buff.progressionReceipt,
+        ...(buff.levelUnavailable&&{levelUnavailable:true}),
         blockers:buff.blockers.map(b=>b.reason),effects:[],values:{},mechanics:[{kind:'utility-skill',sourceText:buff.detail}]};
     });
     component.reasons=buffs.flatMap(r=>r.blockers.map(b=>b.reason));component.status=component.reasons.length?'partial':'mapped';
@@ -332,7 +353,7 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
     character.blockers.push(...blessings.blockers);
     blockers.push(...blessings.blockers.map((reason) => ({ path: "blessings", label: "축복 기본 효과", reason })));
   }
-  const coupledSkills = calculateSeasonCoupledSkills(components, skills, componentProjection, build);
+  const coupledSkills = calculateSeasonCoupledSkills(components, skills, componentProjection, build, character.values);
   const report = { schemaVersion: 1, season: "SS14", model: SS14_BUILD_MODEL, status: "partial", fullBuildSupported: false,
     summary: { dps: null, life: null, mana: null, shield: null }, components, blockers,
     counts: { total: components.length, mapped: components.filter((row) => row.status === "mapped").length, blocked: blockers.length },
@@ -340,7 +361,7 @@ export function calculateSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS1
     componentProjection, coupledSkills, character, blessings, beforeDefense, energy,
     offense: calculateSeasonOffense(build, components, skills, componentProjection, character, coupledSkills),
     limitation: "개별 카드 해석 성공은 전체 빌드 계산 지원이 아닙니다. 구성과 설정은 모두 보존하며, 연결되지 않은 효과를 0으로 합산하지 않습니다." };
-  const calculateState=input=>calculateSeasonBuild(input,{skills,gear,supports,sourceBuild,
+  const calculateState=input=>projectSeasonBuild(input,{skills,gear,supports,sourceBuild,
     includeAverage:false,includeElixirUptime:false,beforeDefense});
   if (includeAverage) report.elixirAverage = calculateElixirAverage(build, componentProjection, calculateState);
   report.fullDps = calculateSeasonDps(build, report);

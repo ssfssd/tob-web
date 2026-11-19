@@ -4,13 +4,15 @@ import { combatNumbedEnabled } from './seasonTheaCombatInputs.js';
 export const uptimeFields = {
   dotUptime: ['지속 대미지', '효과가 끝나기 전에 같은 대상에게 다시 적용하면 100%를 유지할 수 있습니다. 지속 대미지 DPS에 유지율을 곱합니다.'],
   moduleDotUptime: ['모듈 지속 대미지', '대상이 지대 안에서 지속 대미지를 받는 시간 비율을 적용합니다. 여러 소환체는 대미지가 따로 적용되는 수만큼 반영합니다.'],
-  minionUptime: ['소환체 공격', '대상을 소환체의 공격 범위 안에 유지하세요. 측정 시간 중 소환체가 공격할 수 있는 비율을 소환체 DPS에 반영합니다.'],
+  minionUptime: ['소환체 공격', '대상을 소환체의 공격 범위 안에 유지하세요. 이 비율은 소환체의 직접 공격에 적용됩니다.'],
   moduleIgniteUptime: ['모듈 점화', '대상에게 소환체의 점화가 남아 있는 시간을 잽니다. 모듈 점화 DPS에 유지율을 곱합니다.'],
   coreUptime: ['클락워크 코어', '코어가 작동하는 시간을 잽니다. 초당 코어 발동 횟수에 유지율을 곱합니다.'],
   periodicBurstUptime: ['간헐적 폭발', '보조 대상 이동 스킬로 버프를 얻고 다음 이동 스킬을 쓰면 2초 동안 공격·시전 속도가 증가합니다. 활성 상태의 속도를 계산에 적용합니다.'],
 };
+const permafrostUptime = ['동토 지속 대미지', '동토가 대상에게 대미지를 준 시간의 비율을 적용합니다. 직접 시전한 한빙 지면과 겹친 시간은 한 번만 계산합니다.'];
 
 const percent = v => Number.isFinite(v) ? v.toLocaleString('ko-KR',{maximumFractionDigits:2})+'%' : '미입력';
+const count = v => v.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const onOff = v => v === 1 ? '활성' : v === 0 ? '비활성' : '미입력';
 const korean = v => typeof v === 'string' && /[가-힣]/u.test(v) && !/\p{Script=Han}/u.test(v);
 function damageContribution(report, field) {
@@ -19,7 +21,7 @@ function damageContribution(report, field) {
   return values.length ? ' 방어 전 DPS 중 '+values.reduce((sum,value)=>sum+value,0).toLocaleString('ko-KR',{maximumFractionDigits:2})+' DPS.' : '';
 }
 
-export function describeUptime(build, report, estimate, skills) {
+export function describeUptime(build, report, estimate, skills, scenarioHeroCombat) {
   const windowUptime = (row, fallback) => {
     if (!row?.dotWindows) return fallback;
     const {warmup,seconds}=build.ss14Inputs.theaCycle;
@@ -30,28 +32,55 @@ export function describeUptime(build, report, estimate, skills) {
     const row = estimate.fullDps.rows.find(r=>r.rowIndex===rowIndex);
     const original = report.fullDps.rows.find(r=>r.rowIndex===rowIndex);
     const dot = field==='dotUptime';
-    const reaping = field==='reapingOverlap';
-    const windowed = dot && !!row?.dotWindows;
+    const permafrost = field==='permafrostUptime';
+    const windowed = (dot || permafrost) && !!row?.dotWindows;
+    const details = permafrost ? permafrostUptime : uptimeFields[field];
     const contribution = (scenario, entry) => {
       if (!scenario.fullDps.supported || !entry) return null;
       const {values}=entry;
-      if (reaping) return values.reapingDps ?? null;
+      if (permafrost) return values.permafrostDps ?? null;
       if (dot && Number.isFinite(values.dotDps))
         return Math.max(0,values.dotDps-(values.igniteDps??0)-(values.scorchDps??0));
+      if (field==='minionUptime') return values.minionHitDps ?? null;
+      if (field==='moduleIgniteUptime') return values.moduleIgniteDps ?? null;
       if (scenario.fullDps.scope!=='ss14-fixed-scenario-full-dps') return null;
       if (field==='moduleDotUptime') return entry.minionSkills?.[actionIndex]?.dps ?? null;
-      if (field==='moduleIgniteUptime') return entry.ailmentDps ?? null;
       return null;
     };
     return {
-      name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+(reaping?'수확 시 지속 대미지 적용':uptimeFields[field][0]),
+      name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
       setting:percent(windowed?windowUptime(original?.dotWindows?original:row,saved):saved),
       assumed:percent(windowed?windowUptime(row,assumed):assumed),
-      method:reaping?'지속 대미지가 유지되는 동안 모든 수확에 해당 효과를 반영합니다.':windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':assumed===0?'같은 지속 스킬의 중복 슬롯이므로 지정한 0%를 유지합니다.':uptimeFields[field][1],
+      method:windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':duplicate&&assumed===undefined?'이 칸이 대미지를 준 시간의 비율을 입력하세요. 적용되지 않는 칸은 0%입니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':!permafrost&&assumed===0?'같은 지속 스킬의 중복 슬롯이므로 지정한 0%를 유지합니다.':details[1],
       contribution:contribution(estimate,row),
       inputContribution:contribution(report,original),
     };
   });
+  for (const row of estimate.fullDps.rows) {
+    const original=report.fullDps.rows.find(item=>item.rowIndex===row.rowIndex);
+    const timed=row.timedReaping||original?.timedReaping;
+    if (!timed && row.reapingOverlap===undefined && original?.reapingOverlap===undefined) continue;
+    const name=estimate.coupledSkills.rows.find(item=>item.rowIndex===row.rowIndex)?.name;
+    if (!name) continue;
+    const setting = entry => {
+      const usage=entry?.timedReaping;
+      if (usage) return `${count(usage.applied)}/${count(usage.events)}회`;
+      return timed ? '확인 필요' : percent(entry?.reapingOverlap);
+    };
+    const contribution = (scenario,entry) => {
+      if (!scenario.fullDps.supported || !Number.isFinite(entry?.values.reapingDps)) return null;
+      return entry.values.reapingDps-(timed ? entry.values.igniteReapingDps??0 : 0);
+    };
+    lines.push({
+      name:`${name} · ${row.rowIndex+1}번 칸 · 수확 시 지속 대미지 적용`,
+      setting:setting(original),
+      assumed:setting(row),
+      method:timed?'각 수확 시각에 적용 중인 스킬의 지속 대미지를 정산합니다. 횟수는 모의 계산 평균이며 점화·연소는 별도로 집계합니다.'
+        :'수확에 성공한 횟수 중 이 지속 대미지도 적용 중이었던 비율입니다. 해당 효과의 수확 DPS에 이 비율을 곱합니다.',
+      contribution:contribution(estimate,row),
+      inputContribution:contribution(report,original),
+    });
+  }
   const originals = new Map(report.componentProjection.rows.flatMap(row=>(row.conditionControls??[]).map(c=>[c.key,c])));
   const heroes = new Set();
   for (const row of estimate.componentProjection.rows) {
@@ -70,8 +99,17 @@ export function describeUptime(build, report, estimate, skills) {
         method:method+' · 조건이 충족된 동안 이 옵션을 계산합니다.'});
     }
     if (row.elixirState) {
+      if(build.ss14Inputs.theaCycle?.mode==='automatic'){
+        const timing=estimate.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
+        const original=report.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
+        lines.push({name:row.name,setting:original?percent(original.uptime):'계산 보류',assumed:timing?percent(timing.uptime):'계산 보류',
+          method:(original?`${count(original.start)}초에 처음 사용하고 ${count(original.interval)}초마다 갱신합니다. 한 번 사용하면 ${count(original.duration)}초 동안 유지되며, 준비 시간을 뺀 측정 구간에서 활성 ${count(original.activeSeconds)}초를 반영합니다.`
+            :'입력 조건의 사용 시간표로 가동률을 계산할 수 없습니다.')
+            +(timing?' 방어 전 DPS에는 측정 구간 내내 영약을 적용합니다.':'')});
+        continue;
+      }
       const saved=report.componentProjection.rows.find(r=>r.path===row.path)?.elixirState;
-      lines.push({name:row.name, setting:report.theaAverage?.combat?'전투 시간표':Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
+      lines.push({name:row.name, setting:Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
         method:'영약 효과가 끝나기 전에 갱신하면 유지됩니다. 방어 전 계산은 활성 상태의 효과 배율을 사용합니다.'});
     }
     for (const key of row.heroControls ?? []) {
@@ -79,9 +117,11 @@ export function describeUptime(build, report, estimate, skills) {
       const method={signal:'대상에게 기발 시그널이 적용된 동안 해당 특성 효과를 반영합니다.',
         boonActive:'첫 은총이 유지되는 동안 소모한 축복에 따른 효과를 반영합니다.',
         boonActiveSecond:'두 번째 은총이 유지되는 동안 소모한 축복에 따른 효과를 반영합니다.'}[key];
-      if (!method || key !== 'signal' && estimate.theaAverage) continue;
+      if (!method || key !== 'signal' && build.ss14Inputs.theaCycle?.mode === 'automatic') continue;
       heroes.add(key);
-      lines.push({name:row.name, setting:onOff(build.ss14Inputs.heroCombat?.[key]), assumed:'활성 가정', method});
+      const active = scenarioHeroCombat?.[key];
+      const name = key === 'signal' ? row.name : `신의 은총 · ${key === 'boonActive' ? '첫 번째' : '두 번째'}`;
+      lines.push({name, setting:onOff(build.ss14Inputs.heroCombat?.[key]), assumed:active === 1 ? '활성 가정' : onOff(active), method});
     }
   }
   const cycle=estimate.theaAverage;

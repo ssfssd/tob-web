@@ -7,6 +7,8 @@ import { itemGearKind } from './seasonItemCraft.js';
 import { normalizeBuild } from './engine.js';
 import { summarizeSeasonOptionSources } from './seasonNumericStats.js';
 import { seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
+import { getSkillEnergyUsage } from './skillRuntimeModel.js';
+import { auraActivationControl } from './seasonNetherModifiers.js';
 
 const indexes = new Map(SS14_CURRENT_DATABASE.inventory.filter(r=>r.category==='gear').map(r=>[r.runtimeId,r.indexes]));
 const labels = {Claw:'클로',Dagger:'단검',Sword:'검',Axe:'도끼',Hammer:'해머',Wand:'마법 지팡이',Rod:'지팡이',Scepter:'지팡이',Cane:'지팡이',Pistol:'권총',Bow:'활',Crossbow:'석궁',Musket:'머스킷',Fire_Cannon:'화포',Tin_Staff:'주석 지팡이',Cudgel:'무사의 스틱',STR:'힘',DEX:'민첩',INT:'지혜',Legendary_Gear:'레전드',Craft:'제작'};
@@ -59,16 +61,23 @@ function skillDamageRoutes(report, dps, rowIndex) {
   const direct=report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
   return direct?.supported ? direct.trace : undefined;
 }
+const elixirDamageRoutes = (dps,index) => dps.rows.find(row=>row.rowIndex===index)?.elixirDamageRoutes;
 
 function gearDamageRouteChanges(before,after,beforeDps,afterDps) {
   const changes=[];
   const slots=new Map([...beforeDps.rows,...afterDps.rows].map(row=>[row.rowIndex,row.id]));
   const routes=(report,dps,index)=>skillDamageRoutes(report,dps,index)
     ?.filter(e=>e.stage==='conversion'||e.stage==='gained-as-extra')
-    .map(({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource})=>({
-      stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,
+    .map(({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage})=>({
+      stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource,movedBaseDamage,
     }));
   for(const [index,id] of slots){
+    const previousStates=elixirDamageRoutes(beforeDps,index),currentStates=elixirDamageRoutes(afterDps,index);
+    if(previousStates||currentStates){
+      if(previousStates&&currentStates&&JSON.stringify(previousStates)!==JSON.stringify(currentStates))
+        changes.push({index,id,previousStates,currentStates});
+      continue;
+    }
     const previous=routes(before,beforeDps,index),current=routes(after,afterDps,index);
     if(previous&&current&&JSON.stringify(previous)!==JSON.stringify(current))changes.push({index,id,previous,current});
   }
@@ -92,6 +101,75 @@ function gearSkillLevelChanges(before,after) {
   return changes.sort((a,b)=>a.rowIndex-b.rowIndex||(a.supportIndex??-1)-(b.supportIndex??-1));
 }
 
+export function skillDpsChanges(before,after) {
+  const contributions = ({rows,dps,supported}) => {
+    if (!supported || !Number.isFinite(dps) || !rows.every(row=>row.supported && Number.isFinite(row.values.dps) && row.values.dps>=0)) return null;
+    const bySlot = new Map(rows.map(row=>[row.rowIndex,row]));
+    const total = rows.reduce((sum,row)=>sum+row.values.dps,0);
+    return bySlot.size===rows.length && Math.abs(total-dps)<Math.max(0.000001,dps*1e-8) ? bySlot : null;
+  };
+  const previous=contributions(before), current=contributions(after);
+  if (!previous || !current) return [];
+  const indices=[...new Set([...previous.keys(),...current.keys()])].sort((a,b)=>a-b);
+  return indices.flatMap(index=>{
+    const a=previous.get(index), b=current.get(index);
+    const from=a?.values.dps??0, to=b?.values.dps??0;
+    return Math.abs(to-from)<0.005 ? [] : [{index,beforeId:a?.id,afterId:b?.id,from,to}];
+  });
+}
+
+export function compareSeasonResourceCosts(report,after,basis,{allActive=false,rowIndex}={}) {
+  const beforeDps=report[basis],afterDps=after[basis];
+  const beforeMana = beforeDps.manaReservation ?? report.character.values;
+  const afterMana = afterDps.manaReservation ?? after.character.values;
+  const resourceChanges = [
+    {label:'사용 가능 MP',a:beforeMana.unreservedMana,b:afterMana.unreservedMana},
+    {label:'MP 봉인',a:beforeMana.reservedManaPercent,b:afterMana.reservedManaPercent,unit:'%'},
+  ];
+  const beforeResources=beforeDps.manualResources, afterResources=afterDps.manualResources;
+  const recovery = (resources, fallback) => resources?.recovery ?? fallback ?? [];
+  const beforeRecovery = recovery(beforeResources,report.character.survival?.manaScenarios);
+  const afterRecovery = recovery(afterResources,after.character.survival?.manaScenarios);
+  const recoveryRows = new Map(afterRecovery.map(row=>[row.id,row]));
+  const formulas = beforeRecovery.filter(row=>row.id!=='observed');
+  const observedRecovery = report => recovery(report.fullDps.manualResources,report.character.survival?.manaScenarios)
+    .find(row=>row.id==='observed');
+  const previousObserved = observedRecovery(report);
+  const nextObserved = observedRecovery(after);
+  const manaObservationStale = Boolean(after.character.survival?.manaObservationStale);
+  const resourceRecovery = formulas.flatMap(row=>{
+    const next = recoveryRows.get(row.id);
+    return [
+      {label:'MP 회복 · '+row.label,a:row.value,b:next?.value,unit:'/초'},
+      {label:'MP 수지 · '+row.label,a:row.balance,b:next?.balance,unit:'/초'},
+    ];
+  });
+  if (previousObserved || nextObserved)
+    resourceRecovery.unshift({label:basis==='assumedDps'?'입력 조건 · 관측 MP 수지':'관측 MP 수지',a:previousObserved?.balance,
+      b:manaObservationStale?null:nextObserved?.balance,unit:'/초'});
+  const resourceCosts=[
+    {label:'수동 시전 MP/초',a:beforeResources?.manaPerSecond,b:afterResources?.manaPerSecond},
+    {label:'수동 시전 HP/초',a:beforeResources?.lifePerSecond,b:afterResources?.lifePerSecond},
+  ];
+  if (allActive || Number.isInteger(rowIndex)) {
+    const indices=allActive?afterDps.rows.map(row=>row.rowIndex).filter(index=>index<5):[rowIndex];
+    const perUse=indices.flatMap(index=>{
+      const beforeRow=beforeDps.rows.find(row=>row.rowIndex===index);
+      const afterRow=afterDps.rows.find(row=>row.rowIndex===index);
+      const label=allActive?(index===0?'주력':'액티브 '+(index+1))+' · ':'';
+      return [
+        {label:label+'시전당 MP',a:beforeRow?.manaPerUse,b:afterRow?.manaPerUse},
+        {label:label+'시전당 HP',a:beforeRow?.lifePerUse,b:afterRow?.lifePerUse},
+      ];
+    });
+    resourceCosts.unshift(...perUse);
+  }
+  const changed=({a,b})=>Number.isFinite(a)&&Number.isFinite(b)
+    ? Math.abs(a-b)>=0.005 : Number.isFinite(a)||Number.isFinite(b);
+  return {resourceChanges:resourceChanges.filter(changed),resourceCosts:resourceCosts.filter(changed),
+    resourceRecovery:resourceRecovery.filter(changed),manaObservationStale};
+}
+
 export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metric='fullDps'}={}) {
   const next=editSeasonWorkspace(document,edit);
   const after=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
@@ -109,52 +187,33 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
   const options = gearOptionComparisons(report,after,slots);
   let skill;
   const useAssumed = assumedComparison.supported && (metric==='assumedDps' || !comparison.supported);
-  const beforeDps = useAssumed ? report.assumedDps : report.fullDps;
-  const afterDps = useAssumed ? after.assumedDps : after.fullDps;
-  const beforeMana = beforeDps.manaReservation ?? report.character.values;
-  const afterMana = afterDps.manaReservation ?? after.character.values;
-  const resourceChanges = [
-    {label:'사용 가능 MP',a:beforeMana.unreservedMana,b:afterMana.unreservedMana},
-    {label:'MP 봉인',a:beforeMana.reservedManaPercent,b:afterMana.reservedManaPercent,unit:'%'},
-  ];
-  const beforeResources=beforeDps.manualResources, afterResources=afterDps.manualResources;
-  const resourceCosts=[
-    {label:'수동 시전 MP/초',a:beforeResources?.manaPerSecond,b:afterResources?.manaPerSecond},
-    {label:'수동 시전 HP/초',a:beforeResources?.lifePerSecond,b:afterResources?.lifePerSecond},
-  ];
+  const dpsBasis = useAssumed ? 'assumedDps' : 'fullDps';
+  const beforeDps=report[dpsBasis],afterDps=after[dpsBasis];
+  const comparable = useAssumed ? assumedComparison.supported : metric==='fullDps' && comparison.supported;
   const skillEdit=edit.kind==='skill-selection' || edit.kind==='support-selection';
-  if (gear || skillEdit) {
-    const indices=gear?afterDps.rows.map(row=>row.rowIndex).filter(index=>index<5):[edit.rowIndex];
-    const perUse=indices.flatMap(index=>{
-      const beforeRow=beforeDps.rows.find(row=>row.rowIndex===index);
-      const afterRow=afterDps.rows.find(row=>row.rowIndex===index);
-      const label=gear?(index===0?'주력':'액티브 '+(index+1))+' · ':'';
-      return [
-        {label:label+'시전당 MP',a:beforeRow?.manaPerUse,b:afterRow?.manaPerUse},
-        {label:label+'시전당 HP',a:beforeRow?.lifePerUse,b:afterRow?.lifePerUse},
-      ];
-    });
-    resourceCosts.unshift(...perUse);
-  }
   if (skillEdit) {
     const entry=seasonSkillSlotCalculation(after,edit.rowIndex,edit.kind==='support-selection'?edit.supportIndex:undefined);
+    const beforeSkills=normalizeBuild(document.targetBuild).skills;
+    const afterSkills=normalizeBuild(next.targetBuild).skills;
+    const beforeEnergy=getSkillEnergyUsage(beforeSkills), afterEnergy=getSkillEnergyUsage(afterSkills);
+    const energyChanged=beforeEnergy.used!==afterEnergy.used||beforeEnergy.maximum!==afterEnergy.maximum;
     const removedSupports = [];
     if (edit.kind==='skill-selection') {
-      const supports = build => {
-        const {active,passive}=normalizeBuild(build).skills;
-        return [...active,...passive][edit.rowIndex]?.supports ?? [];
-      };
-      const remaining=supports(next.targetBuild);
-      supports(document.targetBuild).forEach((support,index)=>{
+      const supports = ({active,passive}) => [...active,...passive][edit.rowIndex]?.supports ?? [];
+      const remaining=supports(afterSkills);
+      supports(beforeSkills).forEach((support,index)=>{
         if(support&&!remaining[index])removedSupports.push(support.supportId);
       });
     }
-    skill={entry,conversion:skillDamageRoutes(after,afterDps,edit.rowIndex),removedSupports};
+    const states=elixirDamageRoutes(afterDps,edit.rowIndex);
+    const elixirDpsStates=afterDps.rows.find(row=>row.rowIndex===edit.rowIndex)?.elixirDpsStates;
+    const activation=edit.kind==='skill-selection'?auraActivationControl(after.componentProjection,edit.rowIndex):undefined;
+    skill={entry,activation,conversion:states?undefined:skillDamageRoutes(after,afterDps,edit.rowIndex),elixirDamageRoutes:states,elixirDpsStates,removedSupports,
+      ...(energyChanged?{energyChange:{before:beforeEnergy,after:afterEnergy}}:{})};
   }
-  const changedResource = ({a,b}) => Number.isFinite(a) && Number.isFinite(b)
-    ? Math.abs(a-b)>=0.005 : Number.isFinite(a) || Number.isFinite(b);
-  return {comparison,offhandRemoved,assumedComparison,stats,options,
-    resourceChanges:resourceChanges.filter(changedResource), resourceCosts:resourceCosts.filter(changedResource),
+  return {comparison,offhandRemoved,assumedComparison,stats,options,dpsBasis,
+    skillDpsChanges:comparable?skillDpsChanges(beforeDps,afterDps):[],
+    ...compareSeasonResourceCosts(report,after,dpsBasis,{allActive:gear,rowIndex:skillEdit?edit.rowIndex:undefined}),
     ...(gear?{damageRoutes:gearDamageRouteChanges(report,after,beforeDps,afterDps),skillLevels:gearSkillLevelChanges(report,after)}:{}),
     ...(skill?{skill}:{}),
     ...(includeSnapshot?{candidate}:{})};

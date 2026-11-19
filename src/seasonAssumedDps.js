@@ -1,6 +1,6 @@
 import { calculateSeasonBuild } from './seasonBuild.js';
-import { seasonDpsRulePins, seasonDpsSkillFieldKeys } from './seasonDps.js';
-import { seasonMechanicPins } from './seasonMechanicInputs.js';
+import { frostTerraUptimeField, seasonDpsRulePins, seasonDpsSkillFieldKeys } from './seasonDps.js';
+import { SEASON_HERO_COMBAT_FIELDS, seasonMechanicPins, validCombatValue } from './seasonMechanicInputs.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { seasonEquippedPredicateValue } from './seasonGearConditions.js';
 import { exclusiveResourceStates, nearbyEnemyConditionValue, nearbyEnemyGroups, nearbyEnemyState } from './seasonEffectConditions.js';
@@ -8,6 +8,8 @@ import { describeUptime, uptimeFields } from './seasonUptimeDetails.js';
 import { isPersistentModuleAction, seasonModuleProfile } from './seasonModules.js';
 import { seasonSkillCalculationLevel } from './seasonSkillLevels.js';
 import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
+import { hasPeriodicBurstSupport, readPeriodicBurstUptime, writePeriodicBurstUptime } from './seasonSkillInputs.js';
+import { isAuraActivationControl } from './seasonNetherModifiers.js';
 
 export const ASSUMED_DPS_IGNORED_DEFENSE_FIELDS = ['armor','fire','cold','lightning','erosion'];
 
@@ -28,6 +30,10 @@ export function buildUptimeScenario(build, report) {
   const rows = report.coupledSkills.rows;
   const defaults = [];
   const skillUptimes = [];
+  if(hasPeriodicBurstSupport(report.components)){
+    skillUptimes.push({name:'전투 버프',field:'periodicBurstUptime',saved:readPeriodicBurstUptime(dps),assumed:100});
+    writePeriodicBurstUptime(dps,100);
+  }
   for (const {id,rowIndex,name} of rows) {
     const record = SS14_CARDS_EN.records[id];
     if (!record?.sourcePageSha256) continue;
@@ -43,19 +49,34 @@ export function buildUptimeScenario(build, report) {
     }
     const entry = report.components.find(c => c.category === 'skills' && c.id === id)?.calculations?.find(c => c.rowIndex === rowIndex);
     const keys = seasonDpsSkillFieldKeys(entry,id,next);
+    const frostField = frostTerraUptimeField(build.skills.active[rowIndex]);
+    if (frostField === 'permafrostUptime' && (keys.includes(frostField) || keys.includes('dotWindows'))) {
+      const observed = binding.permafrostUptime;
+      const duplicate = rows.some(other => other.rowIndex !== rowIndex && frostTerraUptimeField(build.skills.active[other.rowIndex]));
+      skillUptimes.push({name,rowIndex,field:frostField,saved:observed,assumed:observed,duplicate});
+    }
     for (const field of Object.keys(uptimeFields)) {
       if (!keys.includes(field)) continue;
-      const peers = field === 'dotUptime' ? rows.filter(other => other.id === id && other.rowIndex !== rowIndex) : [];
-      const excludedDuplicate = peers.length > 0 && binding[field] === 0;
-      const exclusive = binding[field] > 0 && peers.some(other => build.ss14Inputs.dps?.skills[other.rowIndex]?.dotUptime > 0);
-      const assumed = excludedDuplicate || exclusive ? binding[field] : 100;
-      skillUptimes.push({name, rowIndex, field, saved:binding[field], assumed, exclusive, duplicate:peers.length>0});
-      binding[field] = assumed;
+      const saved = binding[field];
+      // Shared persistent effects must retain the observed allocation, including
+      // an explicitly excluded or missing slot, before defense is applied.
+      const peers = field === 'dotUptime' ? rows.flatMap(other => {
+        if (other.rowIndex === rowIndex) return [];
+        const peerField = frostField === field ? frostTerraUptimeField(build.skills.active[other.rowIndex])
+          : other.id === id ? field : null;
+        if (!peerField) return [];
+        const peer = build.ss14Inputs.dps?.skills?.[other.rowIndex];
+        return [peer?.itemId === other.id && peer.sourcePageSha256 === SS14_CARDS_EN.records[other.id]?.sourcePageSha256
+          ? peer[peerField] : undefined];
+      }) : [];
+      const duplicate = peers.length > 0;
+      const exclusive = duplicate && saved !== 0 && peers.some(uptime => uptime !== 0);
+      const assumed = (duplicate && saved === 0) || exclusive ? saved : 100;
+      skillUptimes.push({name, rowIndex, field, saved, assumed, exclusive, duplicate});
+      if (assumed !== undefined) binding[field] = assumed;
     }
-    if (keys.includes('dotUptime') && binding.dotUptime === 100 && keys.includes('reapingOverlap')) {
-      skillUptimes.push({name,rowIndex,field:'reapingOverlap',saved:binding.reapingOverlap,assumed:100});
+    if (keys.includes('reapingOverlap') && keys.includes('dotUptime') && binding.dotUptime === 100)
       binding.reapingOverlap = 100;
-    }
     for (const [index,action] of (seasonModuleProfile(id)?.actions ?? []).entries()) {
       if (!isPersistentModuleAction(action)) continue;
       const field = `moduleRate${index}`;
@@ -68,7 +89,7 @@ export function buildUptimeScenario(build, report) {
     for (const c of row.conditionControls ?? []) {
       if (c.kind !== 'boolean' || !c.sourcePageSha256 || c.fixedScenarioOnly) continue;
       // Aura activation changes which skills reserve mana. It is a loadout choice.
-      if (row.isAura && c.conditionGroup === `nether-buff-${row.buffSkill}`) continue;
+      if (isAuraActivationControl(row,c)) continue;
       const predicate = c.predicate ?? c.conditionGroup;
       const equipped = seasonEquippedPredicateValue(predicate,next);
       if (equipped !== undefined && !c.automatic) {
@@ -93,8 +114,19 @@ export function buildUptimeScenario(build, report) {
       Object.assign(input.theaEvents,{[prefix+'Start']:0,[prefix+'Interval']:1800,[prefix+'Duration']:1800});
     }
     for (const key of row.heroControls ?? []) {
-      if (key === 'signal' || input.theaCycle?.mode !== 'automatic' && ['boonActive','boonActiveSecond'].includes(key))
+      if (key === 'signal') {
         (input.heroCombat ??= {})[key] = 1;
+        continue;
+      }
+      if (input.theaCycle?.mode === 'automatic' || !['boonActive','boonActiveSecond'].includes(key)
+        || input.heroCombat?.[key] !== undefined) continue;
+      // An uptime assumption cannot supply the Focus stacks a Boon consumed.
+      const suffix = key === 'boonActiveSecond' ? 'Second' : '';
+      const focusKey = 'boonFocus' + suffix, maxKey = 'boonAtMax' + suffix;
+      const focus = input.heroCombat?.[focusKey], atMax = input.heroCombat?.[maxKey];
+      if (validCombatValue(SEASON_HERO_COMBAT_FIELDS[focusKey],focus)
+        && validCombatValue(SEASON_HERO_COMBAT_FIELDS[maxKey],atMax) && (focus > 0 || atMax === 0))
+        input.heroCombat[key] = 1;
     }
   }
   const resourceStates = new Map();
@@ -138,7 +170,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
   const estimate = scenario.fullDps;
   const {mana, reservedManaPercent, sealedManaCompensation, unreservedMana} = scenario.character.values;
   report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,
-    dotWindowIssues:estimate.dotWindowIssues, dotUptimeOverflow:estimate.dotUptimeOverflow,
+    dotWindowIssues:estimate.dotWindowIssues, dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
     dotExclusiveUnconfirmed:estimate.dotExclusiveUnconfirmed, reapingOverlapOverflow:estimate.reapingOverlapOverflow,
     manaReservation:{mana,reservedManaPercent,sealedManaCompensation,unreservedMana},
     manaReservations:scenario.character.manaReservations,
@@ -151,16 +183,17 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,reaping,fissure,dotBreakdown,pools,takenMultiplier,weaponHands})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
-      return {id,rowIndex,supported,values,weaponHands,useRate:direct?.offenseBasis?.rate,
-        conversionTrace:conversionTrace??direct?.trace,
+      return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
+        conversionTrace:conversionTrace??direct?.trace,minionDamageByType,
         detail:{damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
           critical:offense?.values, pools, takenMultiplier, skillLevel:seasonSkillCalculationLevel(scenario,rowIndex),
+          hitModifierTrace:direct?.trace?.filter(e=>e.stage==='damage-modifier'&&e.appliesToHit),
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
-        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,...(reaping&&{reaping}),...(fissure&&{fissure}),...(dotBreakdown&&!scenario.theaAverage&&{dotBreakdown})};
+        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,...(reaping&&{reaping}),...(fissure&&{fissure}),...(dotBreakdown&&!scenario.theaAverage&&{dotBreakdown})};
     }),
-    uptimeDetails:describeUptime(build,report,scenario,skillUptimes)};
+    uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};
   return report;
 }

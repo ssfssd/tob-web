@@ -29,9 +29,39 @@ export function calculateElixirAverage(build, projection, calculateState) {
   return result;
 }
 
-const damageFields=['dps','manualDps','spellBurstDps','repeatDps','heroDps','dotDps','reapingDps','netherDps','minionDps','fixedNumbedHitDps','fixedNumbedDotDps'];
+const damageFields=['dps','manualDps','spellBurstDps','repeatDps','heroDps','dotDps','reapingDps','netherDps','minionDps','fixedNumbedHitDps','fixedNumbedDotDps','fixedNumbedReapingDps'];
+const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDps'].filter(key=>Object.hasOwn(row.values,key))];
 const weighted=(states,read)=>states.every(({value})=>Number.isFinite(read(value)))
   ? states.reduce((sum,{value,weight})=>sum+read(value)*weight,0) : null;
+
+function averageDotBreakdown(samples, key) {
+  const first=samples[0]?.value?.[key];
+  if (!Number.isFinite(first?.uptime)
+    || !samples.every(({value})=>value?.[key]?.uptime===first.uptime && value?.[key]?.charge===first.charge)) return undefined;
+  const active=weighted(samples,value=>value?.[key]?.active);
+  return Number.isFinite(active)?{...first,active}:undefined;
+}
+
+function averageDotDefense(samples,key) {
+  const states=samples.map(({value})=>value?.[key]);
+  if(states.some(state=>!state))return undefined;
+  const first=JSON.stringify(states[0]);
+  return states.every(state=>JSON.stringify(state)===first)?states[0]:{states};
+}
+
+function averageChannelCost(samples) {
+  const channel=samples.find(({value})=>value?.channelCost)?.value.channelCost;
+  if (!channel || samples.length===1) return null;
+  const max=weighted(samples,value=>value?.channelCost?.max);
+  const {rate}=channel;
+  const {manaPerUse,lifePerUse}=samples[0].value??{};
+  const variable=!Number.isFinite(manaPerUse)||!Number.isFinite(lifePerUse)
+    || samples.some(({value})=>value?.manaPerUse!==manaPerUse||value?.lifePerUse!==lifePerUse);
+  const valid=Number.isFinite(rate)&&rate>=0&&(rate===0||Number.isFinite(max)&&rate<=max+1e-8&&!variable);
+  return {channelCost:{rate,max,valid,variable,observed:true},
+    manualManaPerSecond:valid?(rate===0?0:rate*manaPerUse):null,
+    manualLifePerSecond:valid?(rate===0?0:rate*lifePerUse):null};
+}
 
 function observedStates(varying) {
   if(!varying.length)return {times:[{active:[],weight:1}]};
@@ -56,8 +86,8 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   const original=report.fullDps;
   const {times,overlap,reason}=observedStates(varying);
   if(reason){
-    report.fullDps={...original,supported:false,dps:null,rows:original.rows.map(row=>({...row,supported:false,
-      values:{...row.values,...Object.fromEntries(damageFields.map(key=>[key,null]))}})),manualResources:null,
+    report.fullDps={...original,supported:false,dps:null,rows:original.rows.map(row=>({...row,supported:false,dotBreakdown:undefined,permafrostBreakdown:undefined,permafrostHitDps:undefined,
+      values:{...row.values,...Object.fromEntries(damageFieldsFor(row).map(key=>[key,null]))}})),manualResources:null,
       blockers:[...new Set([...original.blockers,reason])]};
     return;
   }
@@ -69,21 +99,63 @@ export function applyObservedElixirUptime(build,report,calculateState) {
       (input.ss14Inputs.extensionInputs??={})[key]={value:active[varying.indexOf(row)]??Number(uptime===100),
         sourcePageSha256:control.sourcePageSha256,sourceFingerprint:control.sourceFingerprint};
     }
-    return {value:calculateState(input).fullDps,weight,active};
+    const scenario=calculateState(input);
+    return {value:scenario.fullDps,direct:scenario.coupledSkills.rows,
+      fixedScenario:varying.length===0?scenario:null,weight,active};
   });
+  const fixed=states[0].fixedScenario;
+  if (fixed) {
+    // Use the same state for DPS and its supporting stats. Keep saved editor
+    // controls editable even if the measured uptime overrides a switch.
+    const storedSwitches=new Map(observed.map(row=>{
+      const key=`elixir:${row.elixirState.index}:active`;
+      return [key,row.extensionControls.find(control=>control.key===key)?.value];
+    }));
+    const rows=fixed.componentProjection.rows.map(row=>row.extensionControls?.some(control=>storedSwitches.has(control.key))
+      ? {...row,extensionControls:row.extensionControls.map(control=>storedSwitches.has(control.key)
+        ? {...control,value:storedSwitches.get(control.key)} : control)}
+      : row);
+    for (const key of ['components','blockers','counts','coupledSkills','character','offense','blessings'])
+      report[key]=fixed[key];
+    report.componentProjection={...fixed.componentProjection,rows};
+  }
   const first=states[0].value;
   const sameRows=states.every(({value})=>value.rows.length===first.rows.length&&first.rows.every(row=>
     value.rows.some(r=>r.rowIndex===row.rowIndex&&r.id===row.id)));
   const supported=sameRows&&states.every(({value})=>value.supported);
+  const varyingNames=varying.map(entry=>entry.name);
   const rows=first.rows.map(row=>{
     const samples=states.map(({value,weight})=>({value:value.rows.find(r=>r.rowIndex===row.rowIndex&&r.id===row.id),weight}));
     const stable=(key)=>samples.every(({value})=>value?.[key]===row[key])?row[key]:null;
+    const routes = supported ? states.map(({direct,weight,active},index)=>{
+      const entry=samples[index].value;
+      const trace=entry.conversionTrace??direct.find(skill=>skill.rowIndex===row.rowIndex&&skill.id===row.id)?.trace;
+      const groups=entry.weaponHands?.length
+        ? entry.weaponHands.map(hand=>({slotIndex:hand.slotIndex,trace:hand.conversionTrace}))
+        : [{trace}];
+      return {active,uptime:100*weight,groups:groups.map(group=>({...group,trace:(group.trace??[])
+        .filter(effect=>effect.stage==='conversion'||effect.stage==='gained-as-extra')}))};
+    }) : [];
     return {...row,supported,blockers:[...new Set(samples.flatMap(({value})=>value?.blockers??[]))],
+      ...(routes.length===1&&routes[0].groups.length===1&&{conversionTrace:routes[0].groups[0].trace}),
+      ...(varying.length&&routes.length&&{
+        elixirDamageRoutes:{names:varyingNames,states:routes},
+        elixirDpsStates:{names:varyingNames,states:states.map(({active,weight},index)=>{
+          const dps=samples[index].value.values.dps;
+          return {active,uptime:100*weight,dps,weightedDps:Number.isFinite(dps)?dps*weight:null};
+        })},
+      }),
+      dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
+      permafrostBreakdown:supported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
+      dotDefense:supported?averageDotDefense(samples,'dotDefense'):undefined,
+      frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,
+      permafrostHitDps:weighted(samples,value=>value?.permafrostHitDps),
       manaPerUse:stable('manaPerUse'),lifePerUse:stable('lifePerUse'),
       manualManaPerSecond:weighted(samples,r=>r?.manualManaPerSecond),
       manualLifePerSecond:weighted(samples,r=>r?.manualLifePerSecond),
+      ...averageChannelCost(samples),
       values:{...row.values,manualRate:weighted(samples,r=>r?.values.manualRate),
-        ...Object.fromEntries(damageFields.map(key=>[key,supported?weighted(samples,r=>r?.values[key]??0):null]))}};
+        ...Object.fromEntries(damageFieldsFor(row).map(key=>[key,supported?weighted(samples,r=>r?.values[key]??0):null]))}};
   });
   const recovery=(first.manualResources?.recovery??[]).map(r=>({...r,value:weighted(states,
     value=>value.manualResources?.recovery.find(row=>row.id===r.id)?.value)}));
@@ -93,6 +165,11 @@ export function applyObservedElixirUptime(build,report,calculateState) {
     manualResources:manualResourceBalance(rows,recovery,build.ss14Inputs.dps?.skills)};
   report.elixirUptime={supported,rows:observed.map(row=>({path:row.path,name:row.name,uptime:row.elixirState.uptime})),
     ...(varying.length===1&&{activeDps:states[1].value.dps,inactiveDps:first.dps}),
-    ...(varying.length===2&&{overlap,states:states.map(({active,weight,value})=>
-      ({active,uptime:100*weight,dps:value.dps,manaPerSecond:value.manualResources?.manaPerSecond}))})};
+    ...(varying.length===2&&{overlap}),
+    states:states.map(({active,weight,value})=>({
+      active:observed.map(row=>active[varying.indexOf(row)]??Number(row.elixirState.uptime===100)),
+      uptime:100*weight,dps:value.dps,weightedDps:supported?value.dps*weight:null,
+      manaPerSecond: varying.length && value.rows.some(r=>r.channelCost && r.channelCost.rate!==0)
+        ? null : value.manualResources?.manaPerSecond,
+    }))};
 }

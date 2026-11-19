@@ -393,10 +393,10 @@ export function routeSeasonDamagePaths(paths, groups, onConversion) {
     for (const edge of group) {
       const { targetType, value } = edge;
       const ratio = value / Math.max(100, total);
-      onConversion(edge, ratio);
-      if (!value) continue;
-      (paths[targetType] ??= []).push(...source.map(path => ({ ...path, min: path.min * ratio, max: path.max * ratio,
-        types: [...path.types, targetType] })));
+      const moved=value?source.map(path => ({ ...path, min:path.min*ratio, max:path.max*ratio,
+        types:[...path.types,targetType] })):[];
+      onConversion(edge,ratio,moved);
+      if(moved.length)(paths[targetType]??=[]).push(...moved);
     }
     const remainder = Math.max(0, 1 - total / 100);
     if (remainder) paths[sourceType] = source.map(path => ({ ...path, min: path.min * remainder, max: path.max * remainder }));
@@ -407,7 +407,7 @@ export function routeSeasonDamagePaths(paths, groups, onConversion) {
 
 function applySeasonConversions(entries, conversions, apply, exclude) {
   const groups = new Map();
-  const used = new Set();
+  const movedTotals = new Map();
   for (const { effect, index, targetType } of conversions) {
     const sourceType = damageTypeFromText(effect.sourceDependency);
     if (!conversionOrder.includes(sourceType) || conversionOrder.indexOf(sourceType) >= conversionOrder.indexOf(targetType)) {
@@ -423,9 +423,11 @@ function applySeasonConversions(entries, conversions, apply, exclude) {
   for (const entry of entries) {
     const paths = Object.fromEntries(Object.entries(entry.pools).map(([type, values]) => [type, [{ ...values, types: [type] }]]));
     let converted = false;
-    routeSeasonDamagePaths(paths, groups, ({ index, targetType, value }) => {
+    routeSeasonDamagePaths(paths, groups, ({ index, targetType, value }, _ratio, moved) => {
       converted = true;
-      used.add(index);
+      const total=movedTotals.get(index)??{min:0,max:0};
+      for(const range of moved){total.min+=range.min;total.max+=range.max;}
+      movedTotals.set(index,total);
       if (value) entry.tags.add(targetType);
     });
     if (!converted) continue;
@@ -435,10 +437,13 @@ function applySeasonConversions(entries, conversions, apply, exclude) {
       min: rows.reduce((sum, row) => sum + row.min, 0), max: rows.reduce((sum, row) => sum + row.max, 0),
     }]));
   }
-  for (const [sourceType, group] of groups) {
+  for (const sourceType of conversionOrder) {
+    const group=groups.get(sourceType);
+    if(!group)continue;
     const total=group.reduce((sum,edge)=>sum+edge.value,0);
     for(const {index,targetType,value,optionalSource} of group) {
-      if (used.has(index)) apply(index, 'conversion', { resolvedValue: value, effectivePercent:value/Math.max(100,total)*100, sourceType, targetType });
+      if (movedTotals.has(index)) apply(index, 'conversion', { resolvedValue: value, effectivePercent:value/Math.max(100,total)*100,
+        sourceType,targetType,movedBaseDamage:movedTotals.get(index) });
       else exclude(index, 'conversion', optionalSource ? 'gear-conversion-source-absent' : 'ss14-hit-conversion-source-absent');
     }
   }
@@ -717,6 +722,12 @@ export function evaluateTlidbSkillDamage(input = {}) {
   const effectiveness = resolved
     .map((effect, index) => ({ effect, index }))
     .filter(({ effect, index }) => effect?.stat === "added-damage-effectiveness" && !traced[index]);
+  if (context.missingAddedDamageEffectiveness && effectiveness.length === 0 && context.addedDamage != null) {
+    const added = damagePools(context.addedDamage, context.addedDamageType ?? "physical");
+    if (!added || Object.values(added).some(pool => pool.min !== 0 || pool.max !== 0)) {
+      synthetic("added-damage", "added-damage-effectiveness-unavailable");
+    }
+  }
   if (effectiveness.length > 1) {
     for (const { index } of effectiveness) {
       exclude(index, "added-damage", "added-damage-effectiveness-ambiguous", true);
@@ -931,6 +942,11 @@ export function evaluateTlidbSkillDamage(input = {}) {
     const damageTakenModifier = /-damage-taken$/u.test(effect.stat);
     const targets = targetComponents(target, allComponents, damageTakenModifier);
     if (!targets.length) {
+      if (context.verifiedDotOnly === true && target.kind === "hit" && dotComponents.length && !hitComponents.length
+        && (effect.operation !== "more" || effect.value >= -100)) {
+        exclude(index, "damage-modifier", "no-hit-damage-not-applied");
+        continue;
+      }
       const affectsCompletion = !(
         effect.nonBlockingWhenDamageTargetUnavailable === true
         || (
@@ -982,6 +998,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
     }
     apply(index, "damage-modifier", {
       resolvedValue: effect.value,
+      ...(context.damageConversion === 'ss14' && {appliesToHit:targets.some(({entry})=>entry.kind==='hit')}),
       targetCount: targets.length,
       targetPoolCount: targets.reduce((count, { entry, types }) => (
         count + (types?.length ?? Object.keys(entry.pools).length)

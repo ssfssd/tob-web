@@ -14,10 +14,12 @@ import { validLogGear, editLogGearRoll } from "./seasonLogGear.js";
 import { corrosionCard,isImplicitRoll,setSeasonCorrosion,setSeasonCorrosionBase } from './seasonCorrosion.js';
 import { applyLogSlates } from "./seasonLogSlates.js";
 import { applySeasonConfigurations, captureSeasonConfiguration, compareSeasonConfigurations, SEASON_CONFIGURATION_GROUPS, validSeasonConfigurations, validPactAllocations } from "./seasonConfiguration.js";
-import { applySeasonSupportSelections, isRecentDamageCondition, seasonSupportItem, seasonSupportOptions, supportFitsSocket } from "./seasonSupport.js";
+import { applySeasonSupportSelections, ICE_CORROSION_ID, isRecentDamageCondition, seasonSupportItem, seasonSupportOptions, supportFitsSocket } from "./seasonSupport.js";
 import { pinSeasonComponentReceipts, projectSeasonComponents, validSeasonConditionValue } from "./seasonComponents.js";
+import { auraActivationControl } from './seasonNetherModifiers.js';
 import { boundSeasonConditionGroups, exclusiveResourceStates, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from "./seasonEffectConditions.js";
 import { SEASON_CHARACTER_INPUTS, seasonRulePins } from "./seasonCharacter.js";
+import { observedManaRecoveryBasis, validObservedManaRecoveryBasis } from "./seasonSurvival.js";
 import { seasonOffenseRulePins, validBaseCriticalRating } from "./seasonOffense.js";
 import { seasonGameCritical, validGameCriticalBinding } from "./seasonGameData.js";
 import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
@@ -26,7 +28,7 @@ import { seasonMemoryRows, validSeasonMemoryBases, validSeasonMemoryRolls } from
 import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
-import { validSeasonDpsInputs, editSeasonDpsInput } from "./seasonDps.js";
+import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides } from "./seasonDps.js";
 import { trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
@@ -43,6 +45,10 @@ export const SEASON_WORKSPACE_STORAGE_KEY = "tob.season-workspaces.v1";
 const MODEL = "tlidb-ss14-editable-v1";
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const json = (value) => JSON.stringify(value);
+function pinManaObservation(source, inputs) {
+  if (Number.isFinite(inputs.character?.observedManaRecovery) && !inputs.observedManaRecoveryBasis)
+    inputs.observedManaRecoveryBasis=observedManaRecoveryBasis(source,calculateSeasonBuild(source));
+}
 const sharedBase = () => ({ id: "tob-shared-base-v1", name: "공유 빌드", patchSnapshot: { season: "SS14", shared: true } });
 const patch = () => ({ season: "SS14", baselineSeason: "SS14", overlaySeason: "SS14", overlayState: "season-workspace",
   overlayApplicationComplete: false, calculationModel: MODEL });
@@ -138,6 +144,9 @@ function validDocument(document) {
     || !Object.entries(target.ss14Inputs.character).every(([key, value]) => SEASON_CHARACTER_INPUTS[key]
       && typeof value === "number" && Number.isFinite(value) && value >= SEASON_CHARACTER_INPUTS[key].min
       && value <= SEASON_CHARACTER_INPUTS[key].max && (key !== "enemyLevel" || Number.isInteger(value))))) return false;
+  if (target.ss14Inputs.observedManaRecoveryBasis !== undefined
+    && (!Number.isFinite(target.ss14Inputs.character?.observedManaRecovery)
+      || !validObservedManaRecoveryBasis(target.ss14Inputs.observedManaRecoveryBasis))) return false;
   if (target.ss14Inputs.componentConditions !== undefined && (!object(target.ss14Inputs.componentConditions)
     || !Object.entries(target.ss14Inputs.componentConditions).every(([key, binding]) => key.length > 0 && key.length < 2000
       && object(binding) && Number.isInteger(binding.value) && binding.value >= 0 && binding.value <= 1000
@@ -201,7 +210,9 @@ function validDocument(document) {
       if (binding.rolls !== undefined && (!object(binding.rolls)
         || Object.entries(binding.rolls).some(([k,v]) => !/^range-\d+$/u.test(k) || !Number.isFinite(v)))) return false;
       if (binding.conditions !== undefined && (!object(binding.conditions)
-        || Object.entries(binding.conditions).some(([k,v]) => isRecentDamageCondition(k) ? v!==0&&v!==1
+        || Object.entries(binding.conditions).some(([k,v]) => k==='frostTerra'||k==='frostTerraCount'
+          ? binding.itemId!==ICE_CORROSION_ID || !Number.isInteger(v) || v<0 || v>(k==='frostTerraCount'?100:1)
+          : isRecentDamageCondition(k) ? v!==0&&v!==1
           : !(k === "jumpsBeforeHit" || k === 'sameTargetHits' || k === 'beamTargetCount' || /^repeat(?:Jump|DelayMs)-[1-9]\d?$/u.test(k) || /^snapshot-\d+$/u.test(k))
           || k === 'beamTargetCount' && (v !== 1 && v !== 2)
           || !Number.isInteger(v) || v < (k === 'sameTargetHits' || k.startsWith('repeatJump-') ? 1 : 0)
@@ -257,6 +268,13 @@ export function resetSeasonWorkspace(document) {
 
 export function editSeasonWorkspace(document, edit) {
   if (!validDocument(document)) throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
+  if (edit.kind==='skill-selection' && edit.auraActive!==undefined) {
+    const {auraActive,...selection}=edit;
+    const selected=editSeasonWorkspace(document,selection);
+    const control=auraActivationControl(projectSeasonComponents(selected.targetBuild),edit.rowIndex);
+    if(!control)throw new Error('오라를 선택한 뒤 적용 여부를 설정하세요.');
+    return editSeasonWorkspace(selected,{kind:'component-condition',key:control.key,value:auraActive});
+  }
   if (['skill-selection','support-selection'].includes(edit.kind) && edit.level !== undefined) {
     const {level,...selection}=edit;
     const selected=editSeasonWorkspace(document,selection);
@@ -276,6 +294,8 @@ export function editSeasonWorkspace(document, edit) {
     }
   }
   const target = next.targetBuild;
+  const remeasure = edit.kind==='character-input' && edit.key==='observedManaRecovery';
+  if (!remeasure) pinManaObservation(document.targetBuild,target.ss14Inputs);
   if ((edit.kind==='talent-node'||edit.kind==='thea-node') && edit.value>0) {
     const mirror=target.talents?.placedInverseImage;
     if(mirror&&mirror.boardIndex===(edit.kind==='thea-node'?3:edit.slotIndex)&&mirror.nodeId===edit.key)
@@ -457,8 +477,15 @@ export function editSeasonWorkspace(document, edit) {
     const old = slot.supports?.[edit.supportIndex];
     const id = edit.kind === "support-selection" ? edit.value || null : old?.supportId;
     const level = edit.kind === "support-level" ? edit.value : old?.supportId === id && id ? old.level : seasonSupportItem(id)?.tlidbText.en.cardLevel ?? 20;
-    if ((id && !seasonSupportOptions().some((row) => row.id === id)) || !Number.isInteger(level) || level < 1 || level > 100
-      || (id && edit.supportIndex >= slot.unlockedSupportCount)) throw new Error("열린 보조 칸과 SS14 보조·레벨(1~100)을 확인하세요.");
+    const validSupport = !id || seasonSupportOptions().some(row => row.id === id);
+    if (!validSupport || !Number.isInteger(level) || level < 1 || level > 100)
+      throw new Error("SS14 보조와 레벨(1~100)을 확인하세요.");
+    if (id && edit.supportIndex >= slot.unlockedSupportCount) {
+      const host = getSeasonSelectionRecord("skills", slot.skillId);
+      if (edit.kind !== "support-selection" || edit.unlockSupportSlot !== true
+        || !supportFitsSocket(id, host, edit.rowIndex, edit.supportIndex)) throw new Error("열린 보조 칸을 확인하세요.");
+      editNativeSeasonSelection(target, {kind:"support-count", rowIndex:edit.rowIndex, value:edit.supportIndex+1});
+    }
     target.ss14Inputs.supportSelections ??= {};
     target.ss14Inputs.supports ??= {};
     target.ss14Inputs.supportSelections[key] = id ? { supportId: id, level } : null;
@@ -549,6 +576,11 @@ export function editSeasonWorkspace(document, edit) {
     for (const type of ["fire", "cold", "lightning", "erosion"]) {
       editSeasonDpsInput(target, "enemy:" + type, dummy.resistance);
     }
+  } else if (edit.kind === 'confirm-dot-allocation') {
+    const group=calculateSeasonBuild(target,{includeTheaAverage:false}).fullDps.dotAllocationGroups?.find(group=>group.id===edit.key);
+    if(!group||group.overflow||group.slots.some(slot=>slot.uptime===null))
+      throw new Error('각 칸의 유지율을 입력하고 합계를 100% 이내로 배정하세요.');
+    for(const {rowIndex} of group.slots.filter(slot=>slot.uptime>0))editSeasonDpsInput(target,`${rowIndex}:dotExclusive`,1);
   } else if (edit.kind === "dps-input") {
     editSeasonDpsInput(target, edit.key, edit.value);
   } else if (edit.kind === "game-critical-input") {
@@ -594,8 +626,10 @@ export function editSeasonWorkspace(document, edit) {
     target.ss14Inputs.character ??= {};
     if (edit.value === "") delete target.ss14Inputs.character[edit.key];
     else target.ss14Inputs.character[edit.key] = edit.value;
+    if (remeasure) delete target.ss14Inputs.observedManaRecoveryBasis;
     target.ss14Inputs.ruleReceipts = seasonRulePins();
-  } else if (edit.kind === "clear-effect-conditions") {
+  } else if (edit.kind === "clear-effect-conditions" || edit.kind === "clear-combat-conditions") {
+    if (edit.kind === "clear-combat-conditions") clearSeasonDpsConditionOverrides(target.ss14Inputs.dps);
     delete target.ss14Inputs.componentConditions;
     for (const binding of Object.values(target.ss14Inputs.supports ?? {})) delete binding.conditions;
   } else if (edit.kind === nearbyEnemyCountInput) {
@@ -672,6 +706,7 @@ export function editSeasonWorkspace(document, edit) {
     }
   } else if (!editNativeSeasonSelection(target, edit) && !editNativeDivinity(target, edit) && !editNativeExtension(target, edit)) throw new Error("지원하지 않는 SS14 편집입니다.");
   next.targetBuild = targetFor(next.sourceBuild, next.id, target.name, target.skillLevels, target.ss14Inputs);
+  if (remeasure) pinManaObservation(next.targetBuild,next.targetBuild.ss14Inputs);
   if (gearId) inheritGearResourceStates(document.targetBuild, next.targetBuild, edit.slotIndex);
   if(edit.kind==='shelf-apply'&&!validDocument(next))throw Error('보관 항목의 SS14 수치 연결을 확인할 수 없습니다.');
   return next;
@@ -684,6 +719,7 @@ export function prepareSeasonConfigurationTransfer(document, currentBuild, group
     || groups.some((id) => !SEASON_CONFIGURATION_GROUPS.some((group) => group.id === id))) throw new Error("이전할 구성 범위를 선택하세요.");
   const next = structuredClone(document);
   const inputs = next.targetBuild.ss14Inputs;
+  pinManaObservation(document.targetBuild,inputs);
   inputs.configurations ??= {};
   for (const group of groups) inputs.configurations[group] = captureSeasonConfiguration(currentBuild, group);
   const base = applySeasonConfigurations(next.sourceBuild, inputs.configurations);
@@ -698,7 +734,10 @@ export function prepareSeasonConfigurationTransfer(document, currentBuild, group
   // Any configuration replacement can change the observed elixir effect or
   // module uptime. Keep source selections, but require current confirmation.
   delete inputs.extensionInputs;
-  if (groups.includes("hero")) delete inputs.character;
+  if (groups.includes("hero")) {
+    delete inputs.character;
+    delete inputs.observedManaRecoveryBasis;
+  }
   if (groups.some((group) => ["hero", "gear", "skills", "combat"].includes(group))) delete inputs.offense;
   if (groups.some((group) => ["hero", "gear", "skills", "combat"].includes(group))) delete inputs.dps;
   // Any replaced configuration may alter generation, consumption or legality.

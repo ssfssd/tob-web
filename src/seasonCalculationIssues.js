@@ -11,6 +11,8 @@ export function seasonIssueCause(value) {
   if (/^(?:conditional|per-unit|capped)-effect-pattern-unsupported$|^unsupported-numeric-tooltip-clause$|^calculation-mechanic-without-structured-value$/u.test(reason)) return 'parsing';
   if (/^unsupported-nonnumeric-mechanic-or-flavor$|호환 조건·효과 해석 미완료/u.test(reason)) return 'unresolved';
   if (/^range-value-requires-selected-roll$|^attack-base-damage-unavailable$/u.test(reason)) return 'input';
+  if (reason === '추가 번개 대미지의 최소·최대 값을 모두 확인하세요.') return 'input';
+  if (reason === 'added-damage-effectiveness-unavailable' || /이 레벨의 추가 대미지 효율을 확인할 수 없습니다/u.test(reason)) return 'source';
   if (/^spell-base-damage-unavailable$|^level-formula-pattern-unsupported$/u.test(reason)) return 'source';
   if (/^(?:trigger|stacking|skill-support)-runtime-required$|^legendary-runtime-mechanic$/u.test(reason)) return 'model';
   if (/출처 충돌|원문.*충돌|source.*conflict|ss14-level-row-unavailable|레벨.*수치.*(?:없|미확보)|수치.*근거.*미확보|동일.*카드 미확보|원문 미확보/u.test(reason)) return 'source';

@@ -1,7 +1,8 @@
 import { SS14_GAME_CRITICAL } from "./data/ss14GameCritical.generated.js";
 import { SS14_ICE_LANCES_CRITICAL } from "./data/ss14IceLancesCritical.generated.js";
+import { SS14_SPELL_CRITICAL } from "./data/ss14SpellCritical.generated.js";
 
-const receipts = [SS14_GAME_CRITICAL, SS14_ICE_LANCES_CRITICAL];
+const receipts = [SS14_GAME_CRITICAL, SS14_ICE_LANCES_CRITICAL, ...Object.values(SS14_SPELL_CRITICAL)];
 
 export function seasonGameCritical(record) {
   return receipts.find(data => record?.season === "SS14" && record.itemId === data.itemId

@@ -5,10 +5,11 @@ import { checkSeasonSupportHost, MANIACAL_ARMY_ID } from "./seasonSupport.js";
 import { readSkillMainStats } from "./seasonOffense.js";
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_THEA_EFFECTS } from "./data/ss14TheaEffects.generated.js";
-import { SEASON_GEAR_LEVEL_STATS, seasonMinionDamageConversion } from './seasonGearEffects.js';
+import { SEASON_GEAR_LEVEL_STATS, fixedSeasonErosionResistance, isSeasonTargetDamageTaken, seasonMinionDamageConversion } from './seasonGearEffects.js';
 import { evaluateTlidbSkillDamage } from './tlidbSkillDamageRuntime.js';
 import { resolveSeasonSkillLevel, seasonOverlevelDamageMultiplier } from './seasonSkillLevels.js';
 import { hasObservedDarkGate } from './seasonMindInfusion.js';
+import { theaState } from './seasonTheaState.js';
 
 export const SEASON_MINION_FIELDS = {
   minionCount: { label: "해당 종류의 현재 소환체 수", min: 0, max: 8, integer: true },
@@ -198,16 +199,25 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
   if (!damage.complete) blockers.push("소환체 기본 대미지 또는 전환 수치를 확인하세요.");
   const conversionTrace = damage.applied.filter(e => e.stage === 'conversion' || e.stage === 'gained-as-extra')
     .map(e => ({ ...e, effectSource: damageEffects[e.inputIndex]?.effectSource }));
+  const fixedErosion=fixedSeasonErosionResistance(effects);
+  const targetState=theaState(build)?.events;
+  const scorch=targetState?.scorched ? build.ss14Inputs.theaEvents?.scorchResistance : 0;
   const pools = damage.hit.pools.map(pool => {
     const { type, min, max } = pool;
-    if (type !== 'physical' && !validValue(enemyFields[type], input?.enemy?.[type])) blockers.push(`${enemyFields[type].label} 미입력`);
+    const resistance=type==='erosion'?fixedErosion??input?.enemy?.erosion:input?.enemy?.[type];
+    if (type !== 'physical' && !validValue(enemyFields[type], resistance)) blockers.push(`${enemyFields[type].label} 미입력`);
     const armorMultiplier = report.beforeDefense ? 1 : 1 - Math.min(.8, armor / (.9 * armor + 30000)) * (type === 'physical' ? 1 : .6) + armorPenetration / 100;
-    const resistanceMultiplier = report.beforeDefense || type === 'physical' ? 1 : 1 - (input?.enemy?.[type] - penetration[type]) / 100;
-    const multiplier = armorMultiplier * resistanceMultiplier * netherMore(effects,`${type}_damage_taken`);
+    const resistanceMultiplier = report.beforeDefense || type === 'physical' ? 1 : 1 - (resistance - scorch - penetration[type]) / 100;
+    const numbed=type==='lightning' ? 1 + (targetState?.numbedEffect ?? 0)/100 : 1;
+    const received = effects.filter(e => isSeasonTargetDamageTaken(e.stat, type));
+    if (received.some(e => e.operation !== 'more' || !Number.isFinite(e.value))) blockers.push("소환체 대상의 받는 대미지 연산을 확인하세요.");
+    const takenMultiplier = received.reduce((n, e) => n * (1 + e.value / 100), 1);
+    const multiplier = armorMultiplier * resistanceMultiplier * takenMultiplier * numbed;
     return { type, min: min * multiplier, max: max * multiplier, armorMultiplier, resistanceMultiplier };
   });
   const levelMultiplier = overlevel ? seasonOverlevelDamageMultiplier(entry.level) : 1;
-  const base = pools.reduce((total, pool) => total + (pool.min + pool.max) / 2, 0)
+  const poolMeanSum = pools.reduce((total, pool) => total + (pool.min + pool.max) / 2, 0);
+  const base = poolMeanSum
     * (1 + mainStatBonus) * more * stateMultiplier * criticalMultiplier * taken * b?.hitChance / 100 * levelMultiplier;
   const skills = profile.skills.map(skill => {
     const page = mechanicPage(build, skill.slug);
@@ -223,6 +233,9 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
   if (!Number.isFinite(dps) || dps < 0) blockers.push("소환체 DPS 산출 입력을 확인하세요.");
   return { id: profile.card.itemId, rowIndex, supported: !blockers.length, blockers: [...new Set(blockers)], receipts, minionSkills: skills,
     minionMaximum, minionLevel:entry.level, minionLevelMultiplier:levelMultiplier, syntheticTroop:profile.kind==='synthetic-troop',
-    values: { dps: blockers.length ? null : dps, minionDps: blockers.length ? null : dps, manualDps: 0, spellBurstDps: 0, repeatDps: 0, heroDps: 0, dotDps: 0 },
-    pools: [], minionPools: blockers.length ? [] : pools, conversionTrace, mechanics: [] };
+    values: { dps: blockers.length ? null : dps, minionDps: blockers.length ? null : dps, minionHitDps: blockers.length ? null : dps, manualDps: 0, spellBurstDps: 0, repeatDps: 0, heroDps: 0, dotDps: 0 },
+    pools: [], minionPools: blockers.length ? [] : pools,
+    minionDamageByType: !blockers.length && poolMeanSum > 0 ? Object.fromEntries(
+      pools.map(({ type, min, max }) => [type, ((min + max) / 2) / poolMeanSum * dps])) : undefined,
+    conversionTrace, mechanics: [] };
 }

@@ -6,7 +6,9 @@ import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { ADDED_FIELDS, WEAPON_FIELDS } from './seasonWeaponInputs.js';
 import { getSeasonSelectionRecord } from './seasonSelections.js';
 import { boundSeasonConditionGroups, exclusiveResourceStates, incompatibleNearbyEnemyStates } from './seasonEffectConditions.js';
+import { isAuraActivationControl } from './seasonNetherModifiers.js';
 import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
+import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -66,6 +68,8 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     theaCycle:build.ss14Inputs.theaCycle, theaEvents:build.ss14Inputs.theaEvents,
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
+  const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
+  if(leftBurst!==undefined&&rightBurst!==undefined&&leftBurst!==rightBurst)return false;
   const leftInputs = left.ss14Inputs.dps?.skills ?? {}, rightInputs = right.ss14Inputs.dps?.skills ?? {};
   const slotId = (build, index) => (index < 5 ? build.skills?.active?.[index] : build.skills?.passive?.[index-5])?.skillId;
   const timed = theaCombatEnabled(left) && left.ss14Inputs.theaCycle?.mode === 'automatic';
@@ -85,15 +89,16 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     if (sameSkill && timed && (stable(leftWindows) !== stable(rightWindows)
       || stable(row(leftReport)?.fissure?.times) !== stable(row(rightReport)?.fissure?.times))) return false;
     for (const key of Object.keys(a)) {
-      if (['itemId','sourcePageSha256','dotWindows','fissureTimes',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
+      if (['itemId','sourcePageSha256','dotWindows','fissureTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
       if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime') continue;
       if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
     }
   }
   // A shared manual state can move between item or board sources. An
   // automatic state follows the gear and is part of the build change.
-  const leftConditions = boundSeasonConditionGroups(leftReport?.componentProjection, left.ss14Inputs.componentConditions);
-  const rightConditions = boundSeasonConditionGroups(rightReport?.componentProjection, right.ss14Inputs.componentConditions);
+  const encounterCondition=(row,control)=>!isAuraActivationControl(row,control);
+  const leftConditions = boundSeasonConditionGroups(leftReport?.componentProjection, left.ss14Inputs.componentConditions,encounterCondition);
+  const rightConditions = boundSeasonConditionGroups(rightReport?.componentProjection, right.ss14Inputs.componentConditions,encounterCondition);
   for (const [group, a] of leftConditions) {
     const b = rightConditions.get(group);
     if (b && (a.size !== b.size || [...a].some(value => !b.has(value)))) return false;

@@ -15,7 +15,7 @@ export function matchingTrainingDummy(enemy) {
 export function renderTrainingDummyPicker(enemy) {
   const preset=matchingTrainingDummy(enemy);
   const custom=enemy && ['armor',...resistances].some(key=>Number.isFinite(enemy[key]));
-  return `<label>허수아비 방어 적용<select data-season-edit="dummy-level" aria-label="허수아비 방어 적용">
+  return `<label>허수아비 방어 적용<select data-role="training-dummy-picker" data-season-edit="dummy-level" aria-label="허수아비 방어 적용">
     <option value=""${preset ? "" : " selected"} disabled>${custom ? "직접 설정한 방어" : "레벨 선택"}</option>
     ${trainingDummyLevels.map(({ level, armor, resistance }) =>
       `<option value="${level}"${level===preset?.level ? " selected" : ""}>${level}레벨 · 아머 ${armor.toLocaleString('ko-KR')} · 저항 ${resistance}%</option>`).join('')}

@@ -7,7 +7,7 @@ import { theaState } from "./seasonTheaState.js";
 import { moduleElementalEnabled, theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { netherMore } from './seasonNetherRemaining.js';
 import { seasonCommandDamageMultiplier, seasonMinionMaximum } from './seasonMinions.js';
-import { SEASON_GEAR_LEVEL_STATS, seasonMinionDamageConversion } from './seasonGearEffects.js';
+import { SEASON_GEAR_LEVEL_STATS, fixedSeasonErosionResistance, isSeasonTargetDamageTaken, seasonMinionDamageConversion } from './seasonGearEffects.js';
 import { routeSeasonDamagePaths } from './tlidbSkillDamageRuntime.js';
 
 const actionState = (slug, description = "버프 적용") => ({ label: `${DATA.koActions.records[slug].name} ${description} (0 또는 1)`, min: 0, max: 1, integer: true });
@@ -210,9 +210,11 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   row.wiltBase = 5 * (1 + main) * hostMore * (1 + wiltEffects.filter(e => e.operation === "add_percent").reduce((n,e) => n + e.value, 0) / 100)
     * wiltEffects.filter(e => e.operation === "more").reduce((n,e) => n * (1 + e.value / 100), 1);
   row.wiltDuration = 1.5 * (state("moduleProfane") ? 1.07 : 1);
-  const fixedErosion = effects.find(e => e.stat === "enemy_erosion_resistance_fixed")?.value;
-  row.wiltTargetBase = (report.beforeDefense ? 1 : 1 - ((fixedErosion ?? input?.enemy?.erosion) - (theaState(build)?.events?.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0) - minionEffects.filter(e => e.stat === "erosion_penetration").reduce((n,e) => n + e.value, 0)) / 100)
-    * effects.filter(e => e.stat === "erosion_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1);
+  const fixedErosion = fixedSeasonErosionResistance(effects);
+  const combatState = theaState(build)?.events ?? {};
+  const scorch = combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0;
+  row.wiltTargetBase = (report.beforeDefense ? 1 : 1 - ((fixedErosion ?? input?.enemy?.erosion) - scorch - minionEffects.filter(e => e.stat === "erosion_penetration").reduce((n,e) => n + e.value, 0)) / 100)
+    * effects.filter(e => isSeasonTargetDamageTaken(e.stat, "erosion")).reduce((n,e) => n * (1 + e.value / 100), 1);
   row.wiltTargetMultiplier = row.wiltTargetBase * (1 + (input?.enemy?.affliction ?? 0) / 100);
   row.minionSkills = profile.actions.map((action, n) => {
     const detail = action.detail.split("Details\n")[1], lines = detail.split("\n").slice(1);
@@ -283,10 +285,10 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     if (persistent && !valid(enemyFields.affliction, input?.enemy?.affliction)) reasons.push("소환체 지속 대미지의 대상 심화 수치를 입력하세요.");
     if (persistent && frequency > 0 && b?.minionCount > 1 && !valid({...MODULE_FIELDS.moduleDotCount,max:b.minionCount},contributors))
       reasons.push(`${MODULE_FIELDS.moduleDotCount.label}를 확인하세요. 대상에게 겹쳐도 한 효과만 적용되면 1을 입력하세요.`);
-    const combatState = theaState(build)?.events ?? {};
     const randomHit = { fire: 0, cold: 0, lightning: 0 };
     const erosionHit = { fixed: 0, fire: 0, cold: 0, lightning: 0 };
     const lightningRolls = [];
+    const damageByType = {};
     const perHit = pools.reduce((total, pool) => {
       const stats = new Set(["damage", ...action.tags.map(t => t.toLowerCase()).filter(t => !typedDamage.includes(t) && t !== 'elemental').map(t => `${t}_damage`),
         ...pool.types.map(t => `${t}_damage`)]);
@@ -298,17 +300,16 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       const armorPen = minionEffects.filter(e => ["armor_penetration", "armor_damage_mitigation_penetration"].includes(e.stat)).reduce((n, e) => n + e.value, 0);
       const resPen = minionEffects.filter(e => e.stat === `${pool.type}_penetration`).reduce((n, e) => n + e.value, 0);
       if (!valid(enemyFields.armor, input?.enemy?.armor)) reasons.push("모듈 대상 적 아머 미입력");
-      if (pool.type !== "physical" && !valid(enemyFields[pool.type], input?.enemy?.[pool.type])) reasons.push(`모듈 대상 ${pool.type} 저항 미입력`);
+      const resistance = pool.type==='erosion' ? fixedErosion??input?.enemy?.erosion : input?.enemy?.[pool.type];
+      if (pool.type !== "physical" && !valid(enemyFields[pool.type], resistance)) reasons.push(`모듈 대상 ${pool.type} 저항 미입력`);
       const armor = report.beforeDefense || match[1] === "Persistent" ? 1 : 1 - Math.min(.8, input?.enemy?.armor / (.9 * input?.enemy?.armor + 30000)) * (pool.type === "physical" ? 1 : .6) + armorPen / 100;
-      const scorch = combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0;
-      const fixed = effects.find(e => e.stat === "enemy_erosion_resistance_fixed");
-      const resistance = pool.type === "erosion" && fixed ? fixed.value : input?.enemy?.[pool.type];
       const res = report.beforeDefense || pool.type === "physical" ? 1 : 1 - (resistance - scorch - resPen) / 100;
-      const targetEffects = effects.filter(e => e.stat === `${pool.type}_damage_taken` || e.stat === "spell_damage_taken" && match[1] === "Spell");
+      const targetEffects = effects.filter(e => isSeasonTargetDamageTaken(e.stat, pool.type) || e.stat === "spell_damage_taken" && match[1] === "Spell");
       if (targetEffects.some(e => e.operation !== "more" || !Number.isFinite(e.value))) reasons.push("소환체 대상의 받는 대미지 연산을 확인하세요.");
       const taken = targetEffects.reduce((n, e) => n * (1 + e.value / 100), 1) * (pool.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1)
         *netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,match[1]==='Persistent'?'enemy_dot_damage_taken':'enemy_hit_damage_taken');
       const damage = average * Number(match[3]) / 100 * pool.portion * (1 + inc / 100) * more * armor * res * taken * (match[1] === "Persistent" ? 1 + input.enemy.affliction / 100 : crit);
+      damageByType[pool.type] = (damageByType[pool.type] ?? 0) + damage;
       if (pool.randomElement) randomHit[pool.randomElement] += damage;
       if (pool.type === 'erosion' && !persistent) erosionHit[pool.randomElement ?? 'fixed'] += damage;
       if (pool.type === "lightning") lightningRolls.push({ randomElement: pool.randomElement,
@@ -317,13 +318,15 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       return total + damage;
     }, 0);
     const perCast = perHit * hitCount;
-    const dps = persistent ? frequency === 0 ? 0 : perHit * frequency * contributors
-      : perCast * frequency * b?.minionCount * b?.minionUptime / 100 * b?.hitChance / 100;
+    const scale = persistent ? frequency === 0 ? 0 : frequency * contributors
+      : hitCount * frequency * b?.minionCount * b?.minionUptime / 100 * b?.hitChance / 100;
+    const dps = perHit * scale;
+    for (const type of Object.keys(damageByType)) damageByType[type] *= scale;
     const randomDamageTypes = Object.fromEntries(elementalDamage.map(element => [element, pools.filter(p => p.portion > 0 && p.randomElement === element).map(p => p.type)]));
     const canDeteriorate = deteriorationChance > 0 && deterioration && Object.values(erosionHit).some(v => v > 0);
     if (canDeteriorate && action.itemId === 'Gravelshot' && b?.moduleSplitHits > 0)
       reasons.push('분열 전후 적중 순서를 확인해야 악화 대미지를 계산할 수 있습니다.');
-    return { slug: action.itemId, name: actionName, coefficient: Number(match[3]), dps,
+    return { slug: action.itemId, name: actionName, coefficient: Number(match[3]), dps, damageByType,
       perCast, hitCount: persistent ? 0 : b?.[`moduleHits${n}`], persistent, damageTypes: [...new Set(pools.filter(p => p.portion > 0 && !p.randomElement).map(p => p.type))],
       randomElemental: pools.some(p => p.randomElement), randomDamageTypes, randomHit, lightningRolls,
       ...(shotgun ? { additionalHitMultiplier: 1 - Number(shotgun[1]) / 100, damageHitCount: hitCount } : {}),
@@ -349,9 +352,9 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const increase = eligible.filter(e => e.operation === "add_percent").reduce((n,e) => n + e.value, 0);
     const more = eligible.filter(e => e.operation === "more").reduce((n,e) => n * (1 + e.value / 100), 1);
     const penetration = minionEffects.filter(e => e.stat === "fire_penetration").reduce((n,e) => n + e.value, 0);
-    const taken = effects.filter(e => e.stat === "fire_damage_taken").reduce((n,e) => n * (1 + e.value / 100), 1)*netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,'enemy_dot_damage_taken');
+    const taken = effects.filter(e => isSeasonTargetDamageTaken(e.stat, "fire")).reduce((n,e) => n * (1 + e.value / 100), 1)*netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,'enemy_dot_damage_taken');
     row.ailmentDps = (b.moduleIgniteBaseMin + b.moduleIgniteBaseMax) / 2 * (1 + main) * hostMore * (1 + increase / 100) * more
-      * (report.beforeDefense ? 1 : 1 - (input.enemy.fire - penetration) / 100) * taken * (1 + input.enemy.affliction / 100) * b.moduleIgniteStacks * b.moduleIgniteUptime / 100;
+      * (report.beforeDefense ? 1 : 1 - (input.enemy.fire - scorch - penetration) / 100) * taken * (1 + input.enemy.affliction / 100) * b.moduleIgniteStacks * b.moduleIgniteUptime / 100;
     // These are observed final target stacks, not stacks per creature. Never
     // multiply them by count or accuracy a second time.
     dps += row.ailmentDps;
@@ -374,6 +377,13 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   }
   if (!Number.isFinite(dps) || dps < 0) reasons.push("모듈 소환체 대미지·횟수 입력을 확인하세요.");
   row.blockers = [...new Set(reasons)]; row.supported = !reasons.length;
-  if (row.supported) row.values.dps = row.values.minionDps = dps;
+  if (row.supported) {
+    row.values.dps = row.values.minionDps = dps;
+    row.minionDamageByType = {};
+    for (const action of row.minionSkills) for (const [type, value] of Object.entries(action.damageByType))
+      row.minionDamageByType[type] = (row.minionDamageByType[type] ?? 0) + value;
+  }
+  row.values.minionHitDps = row.supported ? row.minionSkills.reduce((total, action) => total + (action.persistent ? 0 : action.dps), 0) : null;
+  if (row.elementalProtocol) row.values.moduleIgniteDps = row.supported ? row.ailmentDps : null;
   return row;
 }

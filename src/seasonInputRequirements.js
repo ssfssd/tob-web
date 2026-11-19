@@ -5,8 +5,9 @@ import { SEASON_HERO_COMBAT_FIELDS } from './seasonMechanicInputs.js';
 import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
 import { THEA_SS14_ID } from './seasonHeroSelection.js';
-import { isRecentDamageCondition, recentDamageConflict, recentDamageMissing } from './seasonSupport.js';
+import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
+import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
 const customOptions={ id:'custom', label:'사용자 옵션', section:'combat', role:'custom-options', pattern:/사용자 옵션 \d+/u };
 const routes = [
   customOptions,
@@ -27,6 +28,9 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     return [{section:'combat',label:'영약 동시 활성 비율 입력',edit:'extension-input',key:'elixir:overlap'}];
   if(reason === '간헐적 폭발의 현재 적용 여부를 선택하세요.')
     return [{section:'combat',label:'간헐적 폭발 상태 선택',edit:'dps-input',key:'0:periodicBurstUptime'}];
+  if (reason === ADDED_LIGHTNING_RANGE_ISSUE) return (dps?.rows ?? [])
+    .filter(row => Number.isInteger(row.rowIndex) && row.blockers?.includes(reason))
+    .map(row => ({section:'combat',label:`스킬 ${row.rowIndex+1} 추가 번개 범위 입력`,edit:'dps-input',key:`${row.rowIndex}:addedLightningMin`}));
   if(reason.includes('자동 은총과 균열 후속 적중을 함께 계산하려면'))
     return [{section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
   if (reason.startsWith('고압전기의 마취는') && report?.components?.some(row => row.category === 'hero' && row.id === THEA_SS14_ID))
@@ -53,12 +57,14 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     : reason.includes('적중하기 전 점프 횟수를 선택') ? /^jumpsBeforeHit$/u
     : reason.includes('반복 적중마다 누적 점프 횟수를 선택') ? /^repeatJump-/u
     : reason.includes('보조 효과의 조건 충족 여부 또는 적용 수량을 선택') ? /^snapshot-/u
-    : reason.includes(recentDamageMissing) ? /^recentDamage-/u : null;
+    : reason.includes(recentDamageMissing) ? /^recentDamage-/u
+    : reason.includes(iceCorrosionConditionMissing) ? /^frostTerra$/u
+    : reason.includes(iceCorrosionCountMissing) ? /^frostTerraCount$/u : null;
   if(isSupportRoll || isRepeatTiming || conditionKey) {
     for(const component of report?.components??[]) {
       if(component.category!=='supports')continue;
       for(const entry of component.calculations??[]) {
-        if(isRepeatTiming ? !report.fullDps?.rows?.some(row=>row.rowIndex===entry.rowIndex&&row.blockers.includes(reason))
+        if(isRepeatTiming ? !dps?.rows?.some(row=>row.rowIndex===entry.rowIndex&&row.blockers.includes(reason))
           : !entry.blockers.some(blocker=>reason.includes(blocker))) continue;
         const controls=isSupportRoll ? entry.controls??[] : entry.conditionControls??[];
         const delays=entry.mechanics?.find(mechanic=>mechanic.kind==='ice-lances-rebound')?.delaysMs;
@@ -104,13 +110,24 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
   const theaInput = Object.entries(THEA_EVENT_FIELDS).find(([,field]) =>
     reason === `${field.label}: 프로그램에서 값을 선택하세요.`);
   if (theaInput) return [{section:'combat', label:'발동 조건 입력', edit:'thea-event', key:theaInput[0]}];
-  if(/시전 MP 부족/u.test(reason)) {
-    for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'))
-      for(const control of row.conditionControls.filter(c=>c.value===1))add('combat',row.name+' 효과 설정','component-condition',control.key);
+  if(/시전 MP 부족|MP 봉인 합이 100%를 초과/u.test(reason)) {
+    for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'&&e.value>0))
+      for(const control of row.conditionControls.filter(c=>c.key.endsWith(`:nether-buff-${row.buffSkill}`)&&c.value===1))
+        add('skills',row.name+' 오라 설정','component-condition',control.key,{index:row.buffSkill});
     return links;
   }
   if(reason.includes('초당 MP 소모율을 입력하세요.')) return [{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
-  if(reason.startsWith('자동 은총에서 동일 지속 스킬의 중첩')) return [{section:'combat',role:'season-thea-controls',label:'복합 계산 켜기'}];
+  if(/^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간)/u.test(reason)) return [{section:'combat',role:'season-thea-controls',label:'복합 계산 켜기'}];
+  if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계')||reason.includes(SEASON_DPS_SKILL_FIELDS.reapingOverlap.label)){
+    const overflow=reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계');
+    const issue=reason.includes('미입력')?'missing':'requires-full-uptime';
+    const groups=report?.fullDps?.reapingAllocationGroups?.filter(group=>overflow?group.overflow:group.slots.some(slot=>slot.issue===issue))??[];
+    if(groups.length){
+      const destinations=groups.map(group=>({tab:'conditions',role:`reaping-allocation-${group.id}`,label:'슬롯별 수확 비율 배정'}));
+      const separate=dps?.rows?.filter(row=>row.blockers.includes(reason)&&!groups.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex)))??[];
+      return [...destinations,...separate.map(row=>({section:'combat',label:`스킬 ${row.rowIndex+1} 수확 겹침 입력`,edit:'dps-input',key:`${row.rowIndex}:reapingOverlap`}))];
+    }
+  }
   if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계'))
     return (dps?.reapingOverlapOverflow??[]).map(i=>({
       section:'combat',label:`스킬 ${i+1} 수확 겹침 입력`,edit:'dps-input',key:`${i}:reapingOverlap`,
@@ -119,11 +136,13 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     if(reason.includes('적용 구간')) return (dps?.dotWindowIssues?.[reason]??[]).map(rowIndex=>({
       section:'combat', label:`스킬 ${rowIndex+1} 적용 구간`, edit:'dps-input', key:`${rowIndex}:dotWindows`,
     }));
-    const confirm = reason.endsWith('각 칸에서 확인하세요.');
+    const confirm = reason.endsWith('슬롯별 유지율 배정을 확인하세요.');
     const affected = confirm ? dps?.dotExclusiveUnconfirmed : dps?.dotUptimeOverflow;
+    const groups=report?.fullDps?.dotAllocationGroups?.filter(group=>group.slots.some(slot=>affected?.includes(slot.rowIndex)))??[];
+    if(groups.length)return groups.map(group=>({tab:'conditions',role:`dot-allocation-${group.id}`,label:'슬롯별 유지율 배정'}));
     return (affected ?? []).map(index => ({
       section: 'combat', label: `스킬 ${index + 1} ${confirm ? '중복 제외 확인' : '유지율 입력'}`,
-      edit: 'dps-input', key: `${index}:${confirm ? 'dotExclusive' : 'dotUptime'}`,
+      edit: 'dps-input', key: `${index}:${confirm ? 'dotExclusive' : dps?.dotUptimeFields?.[index] ?? 'dotUptime'}`,
     }));
   }
   if(/공식 원문|미확인|해석 미완료|주력 스킬은 일반 장벽 폭발/u.test(reason))return [];
@@ -131,24 +150,33 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     if(row.name && reason.includes(row.name)&&reason.includes('기본 옵션 수치')&&row.memoryControl)
       add('hero',row.name+' 수치 입력','memory-base',String(row.memoryControl.key),{type:'memory',index:Number(row.memoryControl.key)});
     for(const key of row.heroControls??[])if(reason.includes(SEASON_HERO_COMBAT_FIELDS[key]?.label))add('combat','발동 조건 입력','hero-combat',key);
-    for(const c of row.conditionControls??[])if(c.label && reason.includes(c.label))add('combat','효과 조건 입력','component-condition',c.key);
+    for(const c of row.conditionControls??[])if(c.label && reason.includes(c.label)){
+      if(row.isAura&&c.conditionGroup===`nether-buff-${row.buffSkill}`)
+        add('skills',row.name+' 오라 설정','component-condition',c.key,{index:row.buffSkill});
+      else add('combat','효과 조건 입력','component-condition',c.key);
+    }
   }
   for(const [key,def] of Object.entries(SEASON_DPS_ENEMY_FIELDS))if(reason.includes(def.label)&&(key!=='numbedStacks'||!links.length))
     add('combat',key==='affliction'?'대상 심화 입력':key==='numbedStacks'?'마취 중첩 입력':'대상 조건 입력','dps-input','enemy:'+key);
-  const commandRow = report?.fullDps?.observedCommandRow;
+  const commandRow = dps?.observedCommandRow;
   if(Number.isInteger(commandRow) && reason.includes('스마트 웨폰에 적용할 현재 통솔 수치'))
     add('combat','현재 통솔 수치 입력','dps-input',commandRow+':command');
   if(reason.startsWith('스마트 웨폰 소환체 수 합계가 맵 상한')) {
-    for(const row of report?.fullDps?.rows??[]) if(row.syntheticTroop && Number.isInteger(row.rowIndex))
+    for(const row of dps?.rows??[]) if(row.syntheticTroop && Number.isInteger(row.rowIndex))
       add('combat','스킬 '+(row.rowIndex+1)+' 소환체 수','dps-input',row.rowIndex+':minionCount');
   }
   const contextualKey = reason.startsWith('아이스링 처치 재발동의 대상 적중 횟수를 확인') ? 'repeatHits'
     : reason.startsWith('복합 계산의 스킬별 일반 시전 횟수를 선택') || reason.startsWith('일반 시전 횟수가 시전 배분·속도로 가능한 횟수를 초과') ? 'castRate'
     : reason.includes('채널링 회차가 수확 쿨타임을 충족하는지 확인할 수 없습니다. 관측값 입력을 선택하세요.') ? 'reapingMode'
     : reason.includes('소환체 수량 상한') ? 'minionCount' : null;
-  for(const row of report?.fullDps?.rows??[])for(const [key,def] of Object.entries(SEASON_DPS_SKILL_FIELDS))
-    if(Number.isInteger(row.rowIndex)&&(reason.includes(def.label)||key===contextualKey)
-      &&row.blockers?.some(t=>reason.includes(t)))add('combat','스킬 '+(row.rowIndex+1)+(key==='dotUptime'?' 유지율 입력':' 조건 입력'),'dps-input',row.rowIndex+':'+key);
+  for(const row of dps?.rows??[])for(const [key,def] of Object.entries(SEASON_DPS_SKILL_FIELDS)) {
+    if(!Number.isInteger(row.rowIndex)||!(reason.includes(def.label)||key===contextualKey)
+      ||!row.blockers?.some(t=>reason.includes(t)))continue;
+    const dot=(report?.fullDps?.dotAllocationGroups??[]).some(group=>group.slots.some(slot=>
+      slot.rowIndex===row.rowIndex&&slot.field===key));
+    add('combat','스킬 '+(row.rowIndex+1)+(key==='dotUptime'||key==='permafrostUptime'?' 유지율 입력':' 조건 입력'),
+      'dps-input',row.rowIndex+':'+key,dot?{tab:'conditions'}:{});
+  }
   if(links.length)return links.filter((l,i)=>links.findIndex(v=>v.key===l.key&&v.index===l.index)===i);
   if(/주력 스킬을 선택/.test(reason))return [{section:'skills',index:0,label:'주력 스킬 선택'}];
   if(/기본 크리티컬.*입력/.test(reason))return [{section:'combat',role:'native-critical-input',label:'기본 크리티컬 입력'}];

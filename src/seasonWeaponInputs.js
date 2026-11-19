@@ -14,16 +14,28 @@ export const WEAPON_FIELDS = Object.fromEntries([
 export const ADDED_FIELDS = Object.fromEntries(["Min", "Max"].map(side => [`addedLightning${side}`, {
   label: `스킬 효과 적용 전 추가 번개 ${side === "Min" ? "최소" : "최대"} 대미지 (없으면 0)`, min: 0, max: 1e9,
 }]));
+export const ADDED_LIGHTNING_RANGE_ISSUE = '추가 번개 대미지의 최소·최대 값을 모두 확인하세요.';
+
+// Absent input is optional. A partially entered or inverted range is unresolved.
+export function manualAddedLightningRange(binding) {
+  const min = binding?.addedLightningMin;
+  const max = binding?.addedLightningMax;
+  if (min === undefined && max === undefined) return undefined;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max > ADDED_FIELDS.addedLightningMax.max || min > max) return null;
+  return { min, max };
+}
+
 export function seasonDamageContext(build, index, id) {
   const stored = build?.ss14Inputs?.dps?.skills?.[index];
   const b = stored?.itemId === id && stored.sourcePageSha256 === SS14_CARDS_EN.records[id]?.sourcePageSha256 ? stored : {};
   const attack = SS14_CARDS_EN.records[id]?.tags?.includes('Attack');
   const weapon = attack ? seasonWeaponProfile(build) : null;
   const offhandTags = findItemById(build?.gear?.slots?.[1]?.itemId)?.tags;
-  const blade = SS14_CARDS_EN.records[id];
-  const canAlternate = weapon?.enabled && blade?.sourceRecordKey === 'Blade_of_Glory'
-    && blade.sourceSeasonEvidence?.actualSeason === 14 && blade.sourceSeasonEvidence.verificationComplete
-    && /\nDetails\nBlade of Glory:\nDeals Attack Physical Damage equal to [\d.]+% of Base Damage$/u.test(blade.detail)
+  const card = SS14_CARDS_EN.records[id];
+  const usesAlternation = card?.sourceRecordKey === 'Moon_Strike' || card?.sourceRecordKey === 'Blade_of_Glory'
+    && /\nDetails\nBlade of Glory:\nDeals Attack Physical Damage equal to [\d.]+% of Base Damage$/u.test(card.detail);
+  const canAlternate = weapon?.enabled && usesAlternation
+    && card.sourceSeasonEvidence?.actualSeason === 14 && card.sourceSeasonEvidence.verificationComplete
     && offhandTags?.includes('mainHand') && !offhandTags.includes('twoHand');
   const hands = canAlternate ? [0,1].map(slotIndex => seasonWeaponProfile(build,slotIndex,{individual:true})) : [];
   const alternating = hands.length === 2 && hands.every(hand=>hand.supported);
@@ -41,7 +53,7 @@ export function seasonDamageContext(build, index, id) {
     if (alternating) context.weaponHands = hands.map(hand=>({ slotIndex:hand.slotIndex, weaponDamage:weaponDamage(hand.values),
       baseCriticalRating:hand.values.baseCriticalRating, receipts:hand.receipts }));
   }
-  if (Number.isFinite(b.addedLightningMin) && b.addedLightningMin >= 0 && Number.isFinite(b.addedLightningMax) && b.addedLightningMax <= 1e9 && b.addedLightningMin <= b.addedLightningMax)
-    context.addedDamage = { lightning: { min: b.addedLightningMin, max: b.addedLightningMax } };
+  const lightning = manualAddedLightningRange(b);
+  if (lightning) context.addedDamage = { lightning };
   return context;
 }

@@ -7,13 +7,14 @@ import { SEASON_GEAR_LEVEL_STATS, validSeasonGearEffects } from './seasonGearEff
 const growth = SS14_THEA_EFFECTS.levelGrowth;
 const overlevelSource = 'SS14 스킬 초과 레벨 별도 대미지';
 const effectivenessLine = /^Effectiveness of added damage ([\d.]+)%\n/u;
+const effectivenessLines = /^(?:Effectiveness of added damage [\d.]+%\n)+/u;
 export function seasonOverlevelDamageMultiplier(level) {
   return (1 + growth.firstTierMore / 100) ** Math.max(0, Math.min(growth.firstTierEnd, level) - growth.baseCap)
     * (1 + growth.laterMore / 100) ** Math.max(0, level - growth.firstTierEnd);
 }
 
 // Resolve a whole, explicit progression row before parsing effects. Never
-// interpolate damage ranges or reuse a level-20 row with missing coefficients.
+// interpolate damage ranges or replace a changed affix with its level-20 value.
 export function resolveSeasonSkillLevel(item, level) {
   const locale = item?.tlidbText?.en;
   const utility = SS14_UTILITY_LEVELS[item?.id];
@@ -29,6 +30,9 @@ export function resolveSeasonSkillLevel(item, level) {
   const receipt = { season: "SS14", level, sourceUrl: table.sourceUrl, sourcePageSha256: table.sourcePageSha256 };
   const hasSecondCoefficient = ['Groundshaker','Moon_Strike'].includes(locale.sourceRecordKey);
   const secondCoefficient = text => hasSecondCoefficient ? effectivenessLine.exec(text.replace(effectivenessLine,'')) : null;
+  const extraEffects = overflow ? [{ stat: "skill-damage", operation: "more", unit: "percent",
+    value: (seasonOverlevelDamageMultiplier(level) - 1) * 100,
+    sourceText: overlevelSource, sourceUrl: growth.sourceUrl, sourcePageSha256: growth.sourcePageSha256 }] : [];
   // The verified displayed level already separates hit/DoT descriptions. Some
   // tables flatten multiple effectiveness columns into ambiguous consecutive
   // lines; do not replace the valid displayed card with that flattened text.
@@ -37,10 +41,23 @@ export function resolveSeasonSkillLevel(item, level) {
   let body = row.at(-1);
   let header = table.baseDetail.split(/\n(?:Simple|Details)\n/u)[0];
   let coefficient = body.match(effectivenessLine);
+  let persistentOnly = false;
+  let missingAddedDamageEffectiveness = false;
   if (overflow) {
     const base = table.rows.find(row => Number(row[0]) === growth.baseCap)?.at(-1);
     if (SS14_THEA_EFFECTS.season !== 'SS14' || !base) return fail();
     const baseCoefficient = base.match(effectivenessLine);
+    const coefficientBlock = base.match(effectivenessLines)?.[0];
+    // Multi-form tables can omit the entire coefficient block above Lv.20.
+    // When the exact row still has every original description, preserve the
+    // verified card's form boundaries and let its existing mechanic parser run.
+    if (!coefficient && coefficientBlock?.trimEnd().includes('\n')
+      && !hasSecondCoefficient && body === base.slice(coefficientBlock.length)) {
+      const last = Number(row[0]);
+      const constantRows = level === last || Array.from({ length: last - growth.baseCap }, (_, index) =>
+        table.rows.find(row => Number(row[0]) === growth.baseCap + index + 1)?.at(-1)).every(text => text === body);
+      if (constantRows) return { item, parserLevel: 20, receipt, blockers: [], extraEffects };
+    }
     const description = text => {
       const afterFirst = text.replace(effectivenessLine, '');
       return hasSecondCoefficient ? afterFirst.replace(effectivenessLine, '') : afterFirst;
@@ -54,10 +71,22 @@ export function resolveSeasonSkillLevel(item, level) {
       body = base;
       coefficient = baseCoefficient;
     }
+    const removeEuphoriaRoll = text => description(text).replace(
+      /^(You deal \+ )[\d.]+( % additional Damage Over Time to enemies in the Black Hole for every 10 Affliction they have for 4 s\.)$/mu,
+      '$1$2');
+    // Black Hole's verified progression row changes only the DoT buff.
+    // There is no outgoing hit for the omitted added-damage coefficient.
+    persistentOnly = !coefficient && locale.sourceRecordKey === 'Black_Hole'
+      && body.startsWith('Black Hole:\nDeals 249-249 Persistent Erosion Damage.\n')
+      && removeEuphoriaRoll(body) === removeEuphoriaRoll(base);
+    missingAddedDamageEffectiveness = !coefficient && !persistentOnly && level === Number(row[0])
+      && Boolean(baseCoefficient && baseCoefficient[0] === coefficientBlock
+        && /(?:^|\n)Effectiveness of added damage\n([\d.]+)%(?:\n|$)/u.exec(header)?.[1] === baseCoefficient[1]);
   }
   if (header.includes("Effectiveness of added damage")) {
-    if (!coefficient) return fail();
-    header = header.replace(/(Effectiveness of added damage\n)[\d.]+%/u, `$1${coefficient[1]}%`);
+    if (coefficient) header = header.replace(/(Effectiveness of added damage\n)[\d.]+%/u, `$1${coefficient[1]}%`);
+    else if (persistentOnly || missingAddedDamageEffectiveness) header = header.replace(/\nEffectiveness of added damage\n[\d.]+%/u, '');
+    else return fail();
   } else if (coefficient) {
     header += `\nEffectiveness of added damage\n${coefficient[1]}%`;
   }
@@ -67,16 +96,20 @@ export function resolveSeasonSkillLevel(item, level) {
     detail: `${header}\nDetails\n${body}`, progressionReceipt: receipt } } },
     // The parser receives an already resolved card, not a request to extrapolate
     // its level-20 display. Runtime effects still carry the actual skill level.
-    parserLevel: 20, receipt, blockers: [], secondaryEffectiveness: Number(secondary?.[1]), extraEffects: overflow ? [{ stat: "skill-damage", operation: "more", unit: "percent",
-      value: (seasonOverlevelDamageMultiplier(level) - 1) * 100,
-      sourceText: overlevelSource, sourceUrl: SS14_THEA_EFFECTS.levelGrowth.sourceUrl,
-      sourcePageSha256: SS14_THEA_EFFECTS.levelGrowth.sourcePageSha256 }] : [] };
+    parserLevel: 20, receipt, blockers: [], secondaryEffectiveness: Number(secondary?.[1]), extraEffects,
+    missingAddedDamageEffectiveness };
+}
+
+export function seasonSupportManaMultiplier(effects) {
+  return effects.some(e=>e.stat==='support_mana_multiplier_fixed' && e.operation==='set' && e.unit==='percent' && e.value===95
+    && !e.condition && !e.conditionRequirements && !e.target && !e.per) ? 95 : undefined;
 }
 
 export function seasonEffectLevelBonus(effects, record, support = false, rowIndex = 0) {
   const tags = new Set((record?.tags ?? []).map(t=>t.toLowerCase()));
   const matches = stat => {
     if(stat==='all_skill_levels')return true;
+    if(stat==='support_skill_levels')return support;
     if(support)return false;
     if(stat==='main_skill_levels')return rowIndex===0;
     if(stat==='active_skill_levels')return rowIndex<5;
@@ -125,6 +158,9 @@ export function seasonSkillCalculationLevel(report, rowIndex) {
     effect.stage==='damage-modifier' && effect.sourceText===overlevelSource && Number.isFinite(effect.resolvedValue));
   const moonStrike = entry?.mechanics?.find(m=>m.kind==='moon-strike-forms');
   const moonGrowth = moonStrike?.level === state.level ? moonStrike?.growthMultiplier : null;
-  const growthMultiplier = growth ? 1+growth.resolvedValue/100 : moonGrowth ?? null;
+  const minion = report.fullDps?.rows.find(row=>row.rowIndex===rowIndex&&row.id===entry?.itemId);
+  const minionGrowth = minion?.minionLevel === state.level && minion.minionLevelMultiplier > 1
+    ? minion.minionLevelMultiplier : null;
+  const growthMultiplier = growth ? 1+growth.resolvedValue/100 : moonGrowth ?? minionGrowth;
   return {...state,growthMultiplier:state.confirmed ? growthMultiplier : null};
 }
