@@ -9,6 +9,7 @@ import { boundSeasonConditionGroups, exclusiveResourceStates, incompatibleNearby
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
 import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
 import { readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { theaElixirTimingKeys } from './seasonTheaEvents.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -62,10 +63,15 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     return metric==='assumedDps' ? Object.fromEntries(Object.entries(enemy??{}).filter(([key])=>
       !ASSUMED_DPS_IGNORED_DEFENSE_FIELDS.includes(key))) : enemy;
   };
+  const independentElixirTiming = [0,1].flatMap(index=>{
+    const old = left.skills?.elixirs?.[index]?.skillId;
+    return old && old===right.skills?.elixirs?.[index]?.skillId ? [] : theaElixirTimingKeys(index);
+  });
   const encounter = build => ({ character:Object.fromEntries(
     Object.entries(build.ss14Inputs.character??{}).filter(([key])=>key!=='observedManaRecovery')), enemy:target(build),
     blessings:build.ss14Inputs.blessings, heroCombat:build.ss14Inputs.heroCombat,
-    theaCycle:build.ss14Inputs.theaCycle, theaEvents:build.ss14Inputs.theaEvents,
+    theaCycle:build.ss14Inputs.theaCycle, theaEvents:Object.fromEntries(
+      Object.entries(build.ss14Inputs.theaEvents??{}).filter(([key])=>!independentElixirTiming.includes(key))),
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
   const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
@@ -90,13 +96,19 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     const chargeSchedule = channel => channel?.times ?? (channel?.rate === 0 ? [] : undefined);
     const leftCharges = timed ? chargeSchedule(leftRow?.channelCost) : undefined;
     const rightCharges = timed ? chargeSchedule(rightRow?.channelCost) : undefined;
+    const reapSchedule = report => (report?.[metric]?.rows ?? report?.fullDps?.rows)
+      ?.find(r=>r.rowIndex===Number(index))?.reaping?.times;
+    const leftReaps = timed && sameSkill ? reapSchedule(leftReport) : undefined;
+    const rightReaps = timed && sameSkill ? reapSchedule(rightReport) : undefined;
     if (sameSkill && timed && (stable(leftWindows) !== stable(rightWindows)
       || stable(leftRow?.fissure?.times) !== stable(rightRow?.fissure?.times)
-      || stable(leftCharges) !== stable(rightCharges))) return false;
+      || stable(leftCharges) !== stable(rightCharges)
+      || stable(leftReaps) !== stable(rightReaps))) return false;
     for (const key of Object.keys(a)) {
       if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
       if (timed && key==='fissureHits' || leftWindows && rightWindows && key==='dotUptime'
         || sameSkill && leftCharges && rightCharges && key==='channelCostRate') continue;
+      if (leftReaps && rightReaps && ['reapingTimes','reapingRate','reapingMode'].includes(key)) continue;
       if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
     }
   }

@@ -1,4 +1,5 @@
 import { SS14_EXTENSIONS } from "./data/ss14Extensions.generated.js";
+import { SS14_ELIXIR_LEVELS } from './data/ss14ElixirLevels.generated.js';
 import { SS14_CRAFT } from "./data/ss14Craft.generated.js";
 import { craftOptions } from './seasonItemCraft.js';
 import { memoryRange } from "./seasonMemoryRolls.js";
@@ -10,8 +11,6 @@ import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { moduleOptionEffects, seasonModuleProfile } from "./seasonModules.js";
 import { ADVANCED_EXTENSION_FIELDS, advancedExtensionContext, advancedModuleLine, advancedElixirLine } from "./seasonAdvancedExtensions.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
-import { resolveSeasonSkillLevel } from "./seasonSkillLevels.js";
-import { logAllSkillLevelBonus } from "./seasonLogGear.js";
 
 const safeKo = (s) => typeof s === "string" && /[가-힣]/u.test(s) && !/\p{Script=Han}/u.test(s) ? s : "한국어 원문 미제공";
 const validPage = (p) => p?.season === "SS14" && /^[a-f0-9]{64}$/u.test(p.sourcePageSha256);
@@ -22,7 +21,8 @@ export const validExtensionValue = (control, value) => value === "" || typeof va
 
 // These are instantaneous, explicitly confirmed inputs, not simulated uptime or
 // an inferred effect bonus. Old season values/conditions never supply defaults.
-export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS, craftData = SS14_CRAFT, netherElixirBonus=0, craftSlot, requireBindings = build?.patchSnapshot?.season === "SS14" } = {}) {
+export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS, craftData = SS14_CRAFT, netherElixirBonus=0,
+  part='all', levelBonus=()=>0, relatedRows=[], craftSlot, requireBindings = build?.patchSnapshot?.season === "SS14" } = {}) {
   const rows = [];
   const make = (path, id, en, ko, record, text, detail, reason = "", boundByControl = false) => {
     const receipt = validPage(en) ? { season: "SS14", sourceUrl: en.sourceUrl, sourcePageSha256: en.sourcePageSha256,
@@ -50,8 +50,7 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
     row.blockers.push(...parsed.blockers);
   };
   const active = craftSlot === undefined ? build.skills?.active ?? [] : [];
-  const elixirs = craftSlot === undefined ? build.skills?.elixirs ?? [] : [];
-  const levelBonus = elixirs.some(s => s?.skillId) ? logAllSkillLevelBonus(build) : 0;
+  const elixirs = craftSlot === undefined && part!=='other' ? build.skills?.elixirs ?? [] : [];
   for (const [index, slot] of elixirs.entries()) {
     if (!slot?.skillId && !(slot?.ingredientIds ?? []).some(Boolean)) continue;
     const identity = data.elixirs.find((s) => s.id === slot.skillId);
@@ -59,17 +58,20 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
     const hostIndex = active.findIndex(s => identity && s?.skillId === identity.itemId);
     const host = active[hostIndex];
     const card = SS14_CARDS_EN.records[identity?.itemId];
-    const level = host?.level + levelBonus;
-    const leveled = card && resolveSeasonSkillLevel({ id: identity.itemId, tlidbText: { en: { ...card, sourcePageVersion: "SS14" } } }, level);
-    const levelText = leveled && !leveled.blockers.length ? leveled.item.tlidbText.en.detail.split("\nDetails\n").at(-1) : null;
-    const text = level === 20 ? en?.parsed.detailMods.join("\n") : levelText;
+    const bonus = host ? levelBonus(card,hostIndex) : 0;
+    const level = host?.level + bonus;
+    const table = SS14_ELIXIR_LEVELS[identity?.id];
+    const levelBlock = table?.cardSha256===en?.sourcePageSha256 && Number.isInteger(level) ? table?.blocks[level-1] : null;
+    const block = level === en?.parsed.level ? en?.parsed.detailMods[0] : levelBlock;
     const valid = index < 2 && slot.bottleId === ["base", "special"][index] && identity
-      && host?.skillId === identity.itemId && (level === en?.parsed.level || levelText) && en?.parsed.season === 14
+      && host?.skillId === identity.itemId && en?.parsed.season === 14
       && !active.some((s, i) => i !== hostIndex && s?.skillId === identity.itemId);
-    const row = make(`skills.elixirs.${index}`, identity?.itemId ?? slot.skillId, en, ko, en?.parsed.key, text,
+    const row = make(`skills.elixirs.${index}`, identity?.itemId ?? slot.skillId, en, ko, en?.parsed.key, block ?? en?.parsed.detailMods[0],
       ko?.detailMods.join("\n"), valid ? "" : "영약 종류·병·실제 액티브 칸과 SS14 원문 레벨을 확인하세요. 중복 영약은 합산하지 않습니다.");
     row.comparisonFingerprint = signature({ slot, host, inputs: Object.entries(build.ss14Inputs?.extensionInputs ?? {}).filter(([k]) => k.startsWith(`elixir:${index}:`)) });
     row.effectiveLevel = level;
+    row.levelUnavailable = !block;
+    if (levelBlock) row.progressionReceipt = {season:'SS14',level,sourceUrl:table.sourceUrl,sourcePageSha256:table.sourcePageSha256};
     if (row.blockers.length) continue;
     const fingerprint = signature({ slot, skillId: host.skillId, level: host.level });
     const selectedEnabled = control(row, `elixir:${index}:active`, `영약 ${index + 1} 현재 활성`, "boolean", fingerprint);
@@ -98,12 +100,13 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       context.mechanic("elixir-infiltration", { index });
       for (const type of ["cold", "fire", "lightning"]) context.infiltration(type, 0);
     }
-    if (slot.skillId === "putrid-toad-distillate" && enabled === 0) advancedElixirLine("30.5 % Ill Omen Cumulative Efficiency while Blur is active", 0, advancedExtensionContext(build, row, `elixir:${index}`, fingerprint, control));
+    if (slot.skillId === "putrid-toad-distillate" && enabled === 0) {
+      const line=block?.split('\n').find(text=>text.endsWith('Ill Omen Cumulative Efficiency while Blur is active'));
+      if (line) advancedElixirLine(line,0,advancedExtensionContext(build,row,`elixir:${index}`,fingerprint,control));
+    }
     if (enabled === 0) { row.inactive.push({ reason: "입력한 영약 비활성 상태" }); continue; }
     if (enabled === "" || scale === "") continue;
-    // Only the detailed active-effect block is numeric authority; simple text,
-    // charge generation and duration are retained above, not averaged into DPS.
-    const block = level === 20 ? en.parsed.detailMods[0] : levelText.split("\nDefeating enemies")[0];
+    if (!block) { row.blockers.push({reason:`SS14 ${level}레벨 영약의 효과 수치가 필요합니다.`}); continue; }
     const restoration = block.match(/^Casts this skill and gains restoration:\nRestores ([\d.]+) % Max (Life|Mana) within ([\d.]+) s\nThis skill's Restoration Effect and Duration are also affected by Elixir Effect and Duration$/u);
     if (restoration) {
       row.restoration = { resource: restoration[2].toLowerCase(), percent: Number(restoration[1]) * scale,
@@ -149,6 +152,7 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
     const a=first.elixirState.uptime,b=second.elixirState.uptime;
     overlap.observedRange={min:Math.max(0,a+b-100),max:Math.min(a,b)};
   }
+  if (part==='elixirs') return finalizeExtensionRows(build,rows,relatedRows);
   const moduleSlots = active.flatMap((slot, index) => slot?.modularization ? [{ slot, index }] : []);
   const optionCounts = new Map();
   for (const { slot } of moduleSlots) for (const id of Array.isArray(slot.modularization.moduleOptionIds) ? slot.modularization.moduleOptionIds : []) optionCounts.set(id, (optionCounts.get(id) ?? 0) + 1);
@@ -312,6 +316,10 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       }
     }
   }
+  return finalizeExtensionRows(build,rows,rows);
+}
+
+function finalizeExtensionRows(build,rows,relatedRows) {
   const ingredientTiers = new Map();
   for (const row of rows.filter(r => r.ingredientTraitState)) {
     const { alt, tier } = row.ingredientTraitState;
@@ -327,7 +335,7 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       row.effects = []; delete row.charging; row.blockers.push({ reason: "같은 특성에 속한 재료들의 확인 단계가 서로 다릅니다." });
     }
     if (row.extensionControls.some(c => c.key.startsWith("ingredient:") && c.key.endsWith(":minion") && c.value === 0)
-      && rows.some(r => r.extensionControls.some(c => /^module:[0-4]:active$/u.test(c.key) && c.value === 1))) {
+      && relatedRows.some(r => r.extensionControls?.some(c => /^module:[0-4]:active$/u.test(c.key) && c.value === 1))) {
       row.effects = []; row.blockers.push({ reason: "소환체 없음 입력과 모듈 소환체 존재 입력이 서로 충돌합니다." });
     }
     row.status = row.blockers.length ? "partial" : "mapped";

@@ -149,6 +149,18 @@ function dotWindowRanges(value) {
   }
   return ranges.sort((a,b)=>a[0]-b[0]);
 }
+function continuousDotWindows(value) {
+  const ranges = dotWindowRanges(value);
+  if (!ranges) return null;
+  const merged = [];
+  for (const [start, stop] of ranges) {
+    const previous = merged.at(-1);
+    // Touching ranges in one slot have no intervening inactive time.
+    if (previous?.[1] === start) previous[1] = stop;
+    else merged.push([start, stop]);
+  }
+  return merged;
+}
 function observedTimeList(value) {
   if (typeof value !== 'string' || value.length > 4096) return null;
   if (value.trim() === '없음') return [];
@@ -735,7 +747,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const hasHit = Boolean(basis?.pools?.length); const hasDot = Boolean(basis?.dotPools?.length);
     const frost = direct.permafrost;
     const timed = timedFissure(build);
-    const dotWindows = timed && (hasDot || frost) ? dotWindowRanges(b?.dotWindows) : null;
+    const dotWindows = timed && (hasDot || frost) ? continuousDotWindows(b?.dotWindows) : null;
     const frostUptime = frost && timed ? (dotWindows?.length ? 100 : 0) : b?.permafrostUptime;
     const frostActive = frost && frostUptime>0;
     if(!automaticCycle&&validBinding&&(hasDot||frost)){
@@ -1074,11 +1086,12 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       hit:hit*shotgun.multiplier*(autoNetherBurst?burstHitMore:1),dotDps,combat,manualRate,cardDetail:record?.detail??''});
     reasons.push(...nether.blockers);
     const cost=core||!castCostVerified ? null : manualSkillCost(build,report,entry,direct.rowIndex,tags,effects);
-    const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0;
-    if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
-    else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
     const channeled=tags.includes("Channeled")||tags.includes("Channel");
     const chargeTimes = channeled && timed ? observedTimeList(b?.channelCostTimes) : null;
+    const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0 || chargeTimes?.length>0;
+    if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
+    else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
+    if (chargeTimes?.length && !cost) reasons.push(`${skillName} 채널링 차감에 적용할 시전 비용을 확인하세요.`);
     const cycle = build.ss14Inputs?.theaCycle;
     const measuredChargeRate = chargeTimes ? chargeTimes.filter(time=>time>=cycle.warmup).length / cycle.seconds : null;
     if (chargeTimes?.some(time=>time>=cycle.warmup+cycle.seconds-1e-8))

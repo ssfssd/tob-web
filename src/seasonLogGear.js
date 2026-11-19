@@ -161,12 +161,3 @@ export function editLogGearRoll(log, key, value) {
   }
   affix.args[control.ordinal] = value === "" ? null : value;
 }
-
-export function logAllSkillLevelBonus(build) {
-  return Object.entries(build.ss14Inputs?.gear ?? {}).reduce((sum, [index, binding]) => {
-    if (!binding.logGear || binding.itemId !== build.gear?.slots?.[index]?.itemId
-      || binding.sourcePageSha256 !== getSeasonSelectionRecord('gear', binding.itemId)?.sourcePageSha256) return sum;
-    return sum + inspectLogGear(binding.itemId, binding.logGear, build).rawEffects
-      .filter(e => e.stat === 'all_skill_levels' && e.operation === 'add' && Number.isInteger(e.value)).reduce((n, e) => n + e.value, 0);
-  }, 0);
-}

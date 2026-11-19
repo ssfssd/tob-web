@@ -157,18 +157,19 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
   if(amount('aura_effect')&&rows.some(r=>r.itemId?.startsWith('aura_overwrite_')))
     for(const r of sources('aura_effect'))r.inactive.push({reason:'독립된 소환체가 시전한 오라는 플레이어 오라 효과의 대상이 아님'});
   for(const row of sources('spirit_magus_origin_effect')) {
-    for(const slot of slots) {
+    for(const [index,slot] of slots.entries()) {
       const card=SS14_CARDS_EN.records[slot?.skillId];if(!card?.tags?.includes('Spirit Magus'))continue;
       const active=netherCondition(row,build,'origin-active','마령을 소환하여 근원 효과 적용 중');
       if(!active)continue;
-      const resolved=resolveBuff(slot,card);
+      const level=(slot.level??20)+levelBonus(card,index);
+      const resolved=resolveBuff({...slot,level},card);
       const m=resolved.item?.tlidbText.en.detail.match(/Gains Origin of Ice, restoring ([\d.]+) % of Max Life and Max Energy Shield per second to the summoner/u);
       if(resolved.blockers.length||!m){fail(row,'선택 마령의 근원 효과·레벨 해석 미지원');continue;}
       const same=rows.filter(r=>r.mechanics?.some(m=>m.kind==='nether-origin'));
       if(same.length)continue;
       const n=Number(m[1])*(1+amount('spirit_magus_origin_effect')/100);
       push(row,'life_regeneration_percent',n);push(row,'energy_shield_regeneration_percent',n);
-      row.mechanics.push({kind:'nether-origin',receipt:card});
+      row.mechanics.push({kind:'nether-origin',receipt:card,progressionReceipt:resolved.receipt});
     }
   }
   for(const row of sources('frostbite_effect')) {

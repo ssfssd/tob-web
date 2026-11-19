@@ -1,4 +1,5 @@
 import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric } from './seasonAdvisor.js';
+import { compareSeasonResourceCosts } from './seasonGearPicker.js';
 
 // The comparison baseline lives only in this editor session. Document versions,
 // persisted builds and the undo stack remain owned by their existing modules.
@@ -22,8 +23,14 @@ export function createSeasonEditComparison(document, report) {
       return this.result();
     },
     result() {
-      const compare = metric => ({baseline:compareSeasonDpsSnapshots(baseline,current,metric),
-        previous:previous?compareSeasonDpsSnapshots(previous,current,metric):null});
+      const compare = metric => {
+        const compared=compareSeasonDpsSnapshots(baseline,current,metric);
+        const resources=changed && compared.encounterMatches===true
+          && compareSeasonResourceCosts(baseline.report,current.report,metric);
+        return {baseline:compared,previous:previous?compareSeasonDpsSnapshots(previous,current,metric):null,
+          ...(resources && {resources:{...resources,dpsBasis:metric,
+            manaObservationStale:resources.manaObservationStale&&!baseline.report.character.survival?.manaObservationStale}})};
+      };
       const assumed=preferredSeasonDpsMetric(current.report)==='assumedDps'?compare('assumedDps'):null;
       return {changed,...compare('fullDps'),assumed};
     },

@@ -6,6 +6,7 @@ import { SS14_SPIRIT_NAMES } from "./data/ss14SpiritNames.generated.js";
 import { getCatalogItems, findItemById } from "./catalog.js";
 import { createDefaultSkillState, getSkillEnergyUsage } from "./skillRuntimeModel.js";
 import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
+import { clearTheaElixirTiming } from './seasonTheaEvents.js';
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
@@ -106,6 +107,7 @@ export function editNativeSeasonSelection(target, edit) {
     inputs.supports = {};
     inputs.supportSelections = {};
     for (let i = 0; i < 9; i++) rebindSeasonSkillInputs(inputs, i, null);
+    for (const i of [0,1]) clearTheaElixirTiming(inputs,i);
     for (const key of Object.keys(inputs.extensionInputs ?? {})) {
       if (/^(module|elixir|ingredient):/u.test(key)) delete inputs.extensionInputs[key];
     }

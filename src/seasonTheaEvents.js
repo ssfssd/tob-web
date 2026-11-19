@@ -1,5 +1,12 @@
 // Only scenario inputs live in the document. Timers, successful consumption,
 // and temporary modifiers are calculated and cannot be imported as state.
+export const theaElixirTimingKeys = index => ['Interval','Start','Duration'].map(field=>`elixir${index}${field}`);
+
+export function clearTheaElixirTiming(inputs, index) {
+  if (!inputs.theaEvents) return;
+  for (const key of theaElixirTimingKeys(index)) delete inputs.theaEvents[key];
+}
+
 export const THEA_EVENT_FIELDS = {
   combatMode: { label: "상태 이상·연속 공격·복합 발동을 시간 순서로 계산", max: 1, boolean: true },
   igniteEnabled: { label: "주력 스킬의 점화 계산 사용", max: 1, boolean: true },

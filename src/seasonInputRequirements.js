@@ -26,6 +26,14 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
   if(customOptions.pattern.test(reason))return [customOptions];
   if(reason.startsWith('두 영약 동시 활성 시간 비율'))
     return [{section:'combat',label:'영약 동시 활성 비율 입력',edit:'extension-input',key:'elixir:overlap'}];
+  if(reason==='영약의 최종 효과 배율을 선택하세요.')
+    return (report?.componentProjection?.rows??[]).flatMap(({elixirState,extensionControls=[]})=>{
+      if(elixirState?.scale!=='')return [];
+      const index=elixirState.index;
+      const control=['netherIncludes','netherOtherEffect','scale'].map(field=>extensionControls.find(c=>
+        c.key===`elixir:${index}:${field}`&&c.value==='')).find(Boolean);
+      return control?[{section:'combat',label:`영약 ${index+1} 효과 배율 입력`,edit:'extension-input',key:control.key}]:[];
+    });
   if(reason === '간헐적 폭발의 현재 적용 여부를 선택하세요.')
     return [{section:'combat',label:'간헐적 폭발 상태 선택',edit:'dps-input',key:'0:periodicBurstUptime'}];
   if (reason === ADDED_LIGHTNING_RANGE_ISSUE) return (dps?.rows ?? [])
@@ -109,7 +117,12 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
   if(links.length)return links;
   const theaInput = Object.entries(THEA_EVENT_FIELDS).find(([,field]) =>
     reason === `${field.label}: 프로그램에서 값을 선택하세요.`);
-  if (theaInput) return [{section:'combat', label:'발동 조건 입력', edit:'thea-event', key:theaInput[0]}];
+  if (theaInput) {
+    const [key,field]=theaInput;
+    const label=/^elixir[01](?:Interval|Start|Duration)$/u.test(key)
+      ? field.label.replace(/ \(초\)$/u,'')+' 입력' : '발동 조건 입력';
+    return [{section:'combat',label,edit:'thea-event',key}];
+  }
   if(/시전 MP 부족|MP 봉인 합이 100%를 초과/u.test(reason)) {
     for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'&&e.value>0))
       for(const control of row.conditionControls.filter(c=>c.key.endsWith(`:nether-buff-${row.buffSkill}`)&&c.value===1))

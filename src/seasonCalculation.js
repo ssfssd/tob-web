@@ -6,6 +6,7 @@ import { SS14_DPS_RULES } from "./data/ss14DpsRules.generated.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { inspectSeasonUtilitySkill } from "./seasonUtilitySkills.js";
 import { inspectSeasonMinionLevel, seasonMinionProfile } from './seasonMinions.js';
+import { inspectSeasonModuleLevel, seasonModuleProfile } from './seasonModules.js';
 
 export function seasonActionRateCap(season) {
   if (season !== 'SS14') return undefined;
@@ -36,8 +37,10 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
     return { ...result, blockers: ["동일 항목의 해당 시즌 계산 원문을 확보하지 못했습니다."] };
   }
   const minion = season === "SS14" && seasonMinionProfile(itemId, preview);
-  if (minion) {
-    const minionLevel = inspectSeasonMinionLevel(minion, level);
+  const module = season === 'SS14' && seasonModuleProfile(itemId);
+  if (minion || module) {
+    const minionLevel = minion ? inspectSeasonMinionLevel(minion,level)
+      : module.card.sourcePageSha256===locale.sourcePageSha256 ? inspectSeasonModuleLevel(module,level) : null;
     if (!minionLevel) return { ...result, levelUnavailable: true, blockers:["선택한 소환 스킬 레벨의 SS14 원문을 확인하세요."] };
     const mana = /^Mana Cost\n(\d+(?:\.\d+)?)$/mu.exec(locale.detail);
     const castTime = /^Cast Speed\n(\d+(?:\.\d+)?) s$/mu.exec(locale.detail);

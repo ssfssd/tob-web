@@ -4,6 +4,7 @@ import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
+import { clearTheaElixirTiming } from './seasonTheaEvents.js';
 
 const korean = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
 export function nativeElixirOptions() {
@@ -34,8 +35,12 @@ function capture(target) {
 export function clearNativeExtension(target, index) {
   const slot = target.skills?.active?.[index];
   if (slot) delete slot.modularization;
-  const elixirIndex = target.skills.elixirs?.findIndex(s => nativeElixirOptions().find(o => o.id === s?.skillId)?.itemId === slot?.skillId) ?? -1;
-  if (elixirIndex >= 0) target.skills.elixirs[elixirIndex] = null;
+  const elixirIndex = slot?.skillId ? (target.skills.elixirs?.findIndex(s =>
+    nativeElixirOptions().find(o => o.id === s?.skillId)?.itemId === slot.skillId) ?? -1) : -1;
+  if (elixirIndex >= 0) {
+    target.skills.elixirs[elixirIndex] = null;
+    clearTheaElixirTiming(target.ss14Inputs,elixirIndex);
+  }
   for (const key of Object.keys(target.ss14Inputs.extensionInputs ?? {})) {
     if (key.startsWith(`module:${index}:`) || elixirIndex >= 0 && (key.startsWith(`elixir:${elixirIndex}:`) || key.startsWith(`ingredient:${elixirIndex}:`))) delete target.ss14Inputs.extensionInputs[key];
   }
@@ -69,6 +74,7 @@ export function editNativeExtension(target, edit) {
     const hostIndex = edit.rowIndex ?? (oldHost >= 0 ? oldHost : i + 1);
     if (!Number.isInteger(hostIndex) || hostIndex < 0 || hostIndex > 4) throw new Error("영약을 넣을 액티브 칸을 확인하세요.");
     host(target, hostIndex, option?.itemId ?? null);
+    clearTheaElixirTiming(target.ss14Inputs,i);
     target.skills.elixirs ??= [];
     target.skills.elixirs[i] = option ? { bottleId: i === 0 ? "base" : "special", skillId: option.id, ingredientIds: [] } : null;
   } else if (edit.kind === "module-selection") {

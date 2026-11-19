@@ -31,7 +31,8 @@ export function applySeasonCurses(rows,build,levelBonus) {
       sourcePageSha256:card.sourcePageSha256,sourceText:card.detail,value:[0,1].includes(state)?state:''});
     if(![0,1].includes(state)){fail(row,'대상에게 저주가 적용되어 있는지 선택하세요.');continue;}
     const resolved=resolveSeasonSkillLevel({id:slot.skillId,categoryId:'skills',tlidbText:{en:{...card,sourcePageVersion:'SS14',sourceFieldStatus:{detail:'exact'}}}},level);
-    if(resolved.blockers.length){fail(row,`SS14 ${level}레벨의 저주 수치가 필요합니다.`);continue;}
+    row.levelUnavailable=resolved.blockers.length>0;
+    if(row.levelUnavailable && state===1){fail(row,`SS14 ${level}레벨의 저주 수치가 필요합니다.`);continue;}
     row.progressionReceipt=resolved.receipt;
     let supportIncrease=0,supportMore=1;
     for(const [supportIndex,support] of (slot.supports??[]).entries()) {

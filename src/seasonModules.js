@@ -1,4 +1,5 @@
 import { SS14_MODULE_CARDS as DATA } from "./data/ss14ModuleCards.generated.js";
+import { SS14_MODULE_LEVELS } from './data/ss14ModuleLevels.generated.js';
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { readSkillMainStats } from "./seasonOffense.js";
 import { checkSeasonSupportHost } from "./seasonSupport.js";
@@ -8,6 +9,7 @@ import { moduleElementalEnabled, theaCombatEnabled } from "./seasonTheaCombatInp
 import { netherMore } from './seasonNetherRemaining.js';
 import { seasonCommandDamageMultiplier, seasonMinionMaximum } from './seasonMinions.js';
 import { SEASON_GEAR_LEVEL_STATS, fixedSeasonErosionResistance, isSeasonTargetDamageTaken, seasonMinionDamageConversion } from './seasonGearEffects.js';
+import { seasonOverlevelDamageMultiplier } from './seasonSkillLevels.js';
 import { routeSeasonDamagePaths } from './tlidbSkillDamageRuntime.js';
 
 const actionState = (slug, description = "버프 적용") => ({ label: `${DATA.koActions.records[slug].name} ${description} (0 또는 1)`, min: 0, max: 1, integer: true });
@@ -52,6 +54,14 @@ export function seasonModuleProfile(id) {
     actions: DATA.actions[id].map(slug => DATA.enActions.records[slug]),
     conversion: card.detail.match(/Converts (\d+) % of Physical Damage dealt by Minions summoned by this skill to (\w+) Damage/u) };
 }
+export function inspectSeasonModuleLevel(profile, level) {
+  const {card} = profile;
+  const table = SS14_MODULE_LEVELS[card.itemId];
+  if (!Number.isInteger(level) || table?.sourcePageSha256!==card.sourcePageSha256) return null;
+  const slotCap = table.caps[level-1];
+  if (!Number.isInteger(slotCap)) return null;
+  return {slotCap,receipt:{level,season:card.season,sourceUrl:card.sourceUrl,sourcePageSha256:card.sourcePageSha256}};
+}
 export const isPersistentModuleAction = action => /Deals Persistent \w+ Damage/u.test(action?.detail ?? '');
 export function seasonModuleFieldKeys(profile, options = [], build, binding) {
   return ["useShare", "hitChance", "minionCount", "minionUptime", "minionBaseMin", "minionBaseMax", "minionCriticalRating",
@@ -89,9 +99,12 @@ export function moduleOptionEffects(text, parseLines) {
 export function calculateSeasonModule(build, report, entry, profile, effects, valid, enemyFields, mapCap, sharedCommand) {
   const index = entry.rowIndex, input = build.ss14Inputs?.dps, b = input?.skills?.[index], reasons = [];
   const syntheticTroop = profile.card.tags?.includes("Synthetic Troop") === true;
-  const minionMaximum = syntheticTroop ? seasonMinionMaximum(effects, profile.maximum, mapCap) : profile.maximum;
-  const row = { id: profile.card.itemId, rowIndex: index, supported: false, blockers: reasons, receipts: [profile.card, ...profile.actions],
-    pools: [], mechanics: [], conversionTrace: [], minionMaximum, syntheticTroop,
+  const level = inspectSeasonModuleLevel(profile,entry.level);
+  const levelMultiplier = level ? seasonOverlevelDamageMultiplier(entry.level) : 1;
+  const slotCap = level?.slotCap ?? profile.maximum;
+  const minionMaximum = syntheticTroop ? seasonMinionMaximum(effects,slotCap,mapCap) : slotCap;
+  const row = { id: profile.card.itemId, rowIndex: index, supported: false, blockers: reasons, receipts: [profile.card, ...profile.actions, ...(level?[level.receipt]:[])],
+    pools: [], mechanics: [], conversionTrace: [], minionMaximum, syntheticTroop, minionLevel:entry.level, minionLevelMultiplier:levelMultiplier,
     values: { dps: null, minionDps: null, manualDps: 0, spellBurstDps: 0, repeatDps: 0, heroDps: 0, dotDps: 0 } };
   const config = build.skills.active[index].modularization;
   const requiredFields = seasonModuleFieldKeys(profile, config?.moduleOptionIds, build, b);
@@ -99,7 +112,8 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   const projected = report.componentProjection.rows.filter(r => r.path.startsWith(`skills.active.${index}.modularization.`));
   const active = projected.flatMap(r => r.extensionControls ?? []).find(c => c.key === `module:${index}:active`)?.value;
   if (!config || !projected.length || active === "" || active === undefined) reasons.push("모듈 구성과 소환체 존재 여부를 선택하세요.");
-  if (entry.level !== 20 || b?.itemId !== profile.card.itemId || b?.sourcePageSha256 !== profile.card.sourcePageSha256) reasons.push("모듈의 SS14 20레벨 전투 입력을 확인하세요.");
+  if (b?.itemId !== profile.card.itemId || b?.sourcePageSha256 !== profile.card.sourcePageSha256) reasons.push("모듈의 SS14 전투 입력을 확인하세요.");
+  if (!level && active!==0) reasons.push(`SS14 ${entry.level}레벨의 모듈 소환 수치를 확인할 수 없습니다.`);
   if (active === 0 && !reasons.length) {
     if (b.minionCount > 0) reasons.push("소환체 없음 선택과 현재 소환체 수가 서로 다릅니다.");
     else { row.supported = true; row.values.dps = 0; row.values.minionDps = 0; }
@@ -160,7 +174,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   // These host lines affect geometry or the final action frequencies supplied
   // by the user. Extra damage mechanics must be explicitly implemented below.
   const hostLines = profile.card.detail.split("Details\n")[1].split("\n").slice(3).filter(line => line !== "<Random Module-Related Affix>");
-  let hostMore = sharedCommand && row.syntheticTroop ? seasonCommandDamageMultiplier(sharedCommand.value) : 1;
+  let hostMore = levelMultiplier * (sharedCommand && row.syntheticTroop ? seasonCommandDamageMultiplier(sharedCommand.value) : 1);
   for (const line of hostLines) {
     if (/^Converts 100 % of Physical Damage/u.test(line) || /^0\.5 % Skill Area/u.test(line) || /^\+1 Horizontal Projectile Penetration/u.test(line) || /^\+1 to Barrage Skill Total Waves/u.test(line) || /^\+2 to Parabolic Projectile Split Quantity/u.test(line) || /^\+3 % Attack Speed for every Critical Strike/u.test(line)) continue;
     if (line === "+1 % additional damage for Minions summoned by this skill for every 5 Strength the summoner has") hostMore *= 1 + Math.floor(report.character.values.strength / 5) / 100;
@@ -214,7 +228,8 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   const combatState = theaState(build)?.events ?? {};
   const scorch = combatState.scorched ? build.ss14Inputs.theaEvents.scorchResistance : 0;
   row.wiltTargetBase = (report.beforeDefense ? 1 : 1 - ((fixedErosion ?? input?.enemy?.erosion) - scorch - minionEffects.filter(e => e.stat === "erosion_penetration").reduce((n,e) => n + e.value, 0)) / 100)
-    * effects.filter(e => isSeasonTargetDamageTaken(e.stat, "erosion")).reduce((n,e) => n * (1 + e.value / 100), 1);
+    * effects.filter(e => isSeasonTargetDamageTaken(e.stat, "erosion")).reduce((n,e) => n * (1 + e.value / 100), 1)
+    * netherMore(effects,'enemy_all_damage_taken') * netherMore(effects,'enemy_dot_damage_taken');
   row.wiltTargetMultiplier = row.wiltTargetBase * (1 + (input?.enemy?.affliction ?? 0) / 100);
   row.minionSkills = profile.actions.map((action, n) => {
     const detail = action.detail.split("Details\n")[1], lines = detail.split("\n").slice(1);
@@ -350,9 +365,12 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   if (numbedTimeline && b.moduleSplitHits > 0 && row.minionSkills.some(action => action.slug === "Gravelshot"))
     reasons.push("분열 전후 적중 순서를 확인해야 모듈 번개 적중의 마취 중첩을 계산할 수 있습니다.");
   let dps = row.minionSkills.reduce((sum, action) => sum + action.dps, 0);
-  if (config?.moduleOptionIds.includes("protocol_elemental")) {
+  if (row.elementalProtocol) {
     if (b.moduleIgniteBaseMin > b.moduleIgniteBaseMax) reasons.push("소환체 기본 점화의 최소·최대 값을 확인하세요.");
     if (b.moduleIgniteStacks > 0 && (b.moduleIgniteBaseMax === 0 || b.hitChance === 0 || b.minionCount === 0)) reasons.push("기본 점화 대미지와 실제 소환체 적중 없이 점화 중첩을 적용할 수 없습니다.");
+    row.ailmentDps = 0;
+  }
+  if (row.elementalProtocol && b.moduleIgniteStacks > 0 && b.moduleIgniteUptime > 0) {
     if (!valid(enemyFields.fire, input?.enemy?.fire) || !valid(enemyFields.affliction, input?.enemy?.affliction)) reasons.push("소환체 점화의 대상 화염 저항·심화 수치를 선택하세요.");
     const eligible = minionEffects.filter(e => ["damage", "fire_damage", "elemental_damage", "damage_over_time", "ailment_damage"].includes(e.stat));
     const increase = eligible.filter(e => e.operation === "add_percent").reduce((n,e) => n + e.value, 0);
@@ -388,6 +406,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     row.minionDamageByType = {};
     for (const action of row.minionSkills) for (const [type, value] of Object.entries(action.damageByType))
       row.minionDamageByType[type] = (row.minionDamageByType[type] ?? 0) + value;
+    if (row.ailmentDps > 0) row.minionDamageByType.fire = (row.minionDamageByType.fire ?? 0) + row.ailmentDps;
   }
   row.values.minionHitDps = row.supported ? row.minionSkills.reduce((total, action) => total + (action.persistent ? 0 : action.dps), 0) : null;
   if (row.elementalProtocol) row.values.moduleIgniteDps = row.supported ? row.ailmentDps : null;

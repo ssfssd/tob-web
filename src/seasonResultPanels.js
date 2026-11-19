@@ -70,7 +70,7 @@ export function renderEditDpsComparison(s, compact = false) {
   if (!comparison || compact && !comparison.changed) return '';
   if (s.pending.size) return '<section data-role="native-edit-comparison" hidden></section>';
   const assumed = preferredSeasonDpsMetric(s.report)==='assumedDps' && comparison.assumed;
-  const {baseline,previous} = assumed || comparison;
+  const {baseline,previous,resources} = assumed || comparison;
   const metricLabel = assumed ? '방어 전 DPS' : 'DPS';
   const comparisonText = value => value.supported ? deltaText(value)
     : value.encounterMatches === false ? '전투 조건 변경' : '비교 보류';
@@ -86,6 +86,7 @@ export function renderEditDpsComparison(s, compact = false) {
       ${!compact && previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
     ${compact ? (!baseline.supported ? button('비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"') : '')
       : `<dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
+        ${resources?renderResourceChanges(resources,esc,{board:true}):''}
         ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${renderReasons(s,baseline.reasons)}</details>` : ''}
         ${previous && !previous.supported && JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons) ? `<details><summary>직전 변경 비교 보류 이유</summary>${renderReasons(s,previous.reasons)}</details>` : ''}
         ${button('현재 빌드를 비교 기준으로', 'reset-comparison')}

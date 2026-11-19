@@ -1,0 +1,21 @@
+// SS14 module host progression; see scripts/collect-ss14-module-levels.mjs.
+export const SS14_MODULE_LEVELS = {
+  "skills-modularization-skill-blade-god": {"sourcePageSha256":"2dc66f60ef22be422c63d9ecb3b8c4a38d40b9a70077019c83b6e1ee1c495c4d","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-calamity-winged-beast": {"sourcePageSha256":"ad96d831574e15534f28cecb1661430bf8e1999864e607e8ccd58d615e3328d5","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-chief-mechanic": {"sourcePageSha256":"13f21a313c2f199e649444c88b42cba46eb641eee46e2141775cee4cec3ba8a8","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-demon-mage": {"sourcePageSha256":"2542347408e704af3aeded906abaaed1c37c824ff7e69abd93b8735bb319821c","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-demon-second-general": {"sourcePageSha256":"4ad55d60f1d3ed6f1ecaf05ec408172f5d55d4ed85b94ad5eaf40bd9321479fc","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-dwarf-mecha": {"sourcePageSha256":"662f53bfc2c8fba3dbae5e3f84f7c2bbb1153499e515e9862b1d4072d75f6525","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-giant-ember-mecha": {"sourcePageSha256":"2e7370913d0ef86a1f48ae1b022675b5cd076dd7d40cf61e05e011b25096552f","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-goblin-elder": {"sourcePageSha256":"c1780f128c39196b3c7ae4960e7337f5b8a2ad5b24e81f27ce61dd7dcfa80688","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-goblin-elemental-arch-elder": {"sourcePageSha256":"5eb8a9d4cf75ae12d447c845ab7d295457c14b735892c678ef46e6cdb3c5096e","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-heroic-archsage": {"sourcePageSha256":"db752f63d16f28b04982c2b6a3acef4625924f17a7611beeae02d2e2ed4dfed9","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-igi-gale": {"sourcePageSha256":"75e6e3fd22d329daa527dfb0ea29a49aee455774ef31fd1f4a0c8d1ced0c40f0","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-medium-ember-mecha": {"sourcePageSha256":"4b73bcb64a2af3d60aedab65728af5a90e66ba469bf9b691d0a500c196511334","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-punisher": {"sourcePageSha256":"447fcf8a784ff45396d87e31a6f01e3eb769287cc8b11e55b3cff658501f9c99","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-ratling-assault-captain": {"sourcePageSha256":"d905469fa6545abcebaac3812bc89473972554c77c09f0e9709a8233f68c4124","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-ryan-phantom": {"sourcePageSha256":"e9b181468e1946b9bacbe555c018b54a9d6c862d04578eb9d921acabe6ce1ce9","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-sand-giant": {"sourcePageSha256":"411b98921e41c3cedbdea15e7f93bb4361497cb16c9ec4e48c6472eddb404db8","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-treant-arch-elder": {"sourcePageSha256":"ca5ee406219ce0386d5e68f84353470a8a5fa92d51c3dd083a0d3d202b99e380","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+  "skills-modularization-skill-tyrant": {"sourcePageSha256":"b41de30b8b56af0e1a2aacc353714611562a23be407fe570d7aeb4cdada0cd81","caps":[2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]},
+};

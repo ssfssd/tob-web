@@ -275,10 +275,11 @@ export function seasonUnitOptionLines() {
 }
 export function projectSeasonComponents(build, { data = SS14_COMPONENTS, requireBindings = build?.patchSnapshot?.season === "SS14", gearSealCompensation = 0, gearLevelEffects = [], gearNumbedEffect = 0 } = {}) {
   const rows = seasonGearConditionRows(build);
+  const elixirRowStart = rows.length;
   const resolvedSlates = resolveSeasonSlates(build);
   const netherTemplate = resolvedSlates.special.find(t=>t.nether);
   const topology = netherTopology(netherTemplate?.board, netherTemplate, resolvedSlates.selections.map(s=>({...s,nativeId:seasonSlateEntry(s.selection.valueId)?.id})));
-  rows.push(...seasonExtensionRows(build, { parseLines: parseSeasonComponentLines, requireBindings }));
+  rows.push(...seasonExtensionRows(build, { parseLines: parseSeasonComponentLines, requireBindings, part:'other' }));
   const allocation = inspectSeasonAllocation(build, { components: data });
   for (const row of rows.filter(r => r.talentTransform)) if (allocation.issues.some(i => i.path.startsWith(`talents.boards.${row.talentTransform.boardIndex}`))) {
     row.effects = []; delete row.talentTransform; row.status = "partial";
@@ -507,17 +508,13 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     if (active > row.maxActive) { row.effects = []; row.status = "partial"; row.blockers.push({ reason: "신격 옵션의 SS14 원문 활성 개수 상한을 초과했습니다." }); }
   }
   rows.push(...projectSeasonCustomOptions(build,data));
-  applyNetherAggression(rows);
   const netherElixirBonus=rows.flatMap(r=>r.effects).filter(e=>e.stat==='elixir_effect').reduce((n,e)=>n+e.value,0);
-  if(netherElixirBonus){
-    const revised=seasonExtensionRows(build,{parseLines:parseSeasonComponentLines,requireBindings,netherElixirBonus}).filter(r=>r.path.startsWith('skills.elixirs.'));
-    for(let n=rows.length-1;n>=0;n--)if(rows[n].path.startsWith('skills.elixirs.'))rows.splice(n,1);
-    rows.push(...revised);
-  }
   const levelRows = rows.slice();
   const levelEffects = [...levelRows.flatMap(row => row.effects), ...gearLevelEffects];
   const levelBonus = (record, index, support = false) => seasonEffectLevelBonus(levelEffects,record,support,index)
     + (support ? 0 : seasonRevelationLevelBonus(build,levelRows,record));
+  rows.splice(elixirRowStart, 0, ...seasonExtensionRows(build,{parseLines:parseSeasonComponentLines,requireBindings,netherElixirBonus,levelBonus,part:'elixirs',relatedRows:rows}));
+  applyNetherAggression(rows);
   applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation,levelBonus);
   applySeasonCurses(rows,build,levelBonus);
   const fixedNumbed=projectFixedNumbed(rows,build,gearNumbedEffect);

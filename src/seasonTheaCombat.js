@@ -537,9 +537,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           const baseAffliction = 1 + (enemy.affliction ?? 0) / 100;
           const totals = rows.get(row.rowIndex);
           totals.minionDps += direct * w + dots / baseAffliction * dotTime;
-          totals.moduleIgniteDps += (row.values.moduleIgniteDps ?? 0) / baseAffliction * dotTime;
+          const moduleIgnite = (row.values.moduleIgniteDps ?? 0) / baseAffliction * dotTime;
+          totals.moduleIgniteDps += moduleIgnite;
           if (!row.moduleTimeline) totals.minionHitDps += row.values.minionHitDps * w;
           if (row.moduleTimeline) {
+            if (moduleIgnite > 0) accumulateMinionTypes(row.rowIndex, {fire:moduleIgnite}, 1);
             for (const action of row.minionSkills) {
               if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction);
             }
@@ -548,6 +550,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         for (const wilt of wilts) {
           const amount = wilt.damage * r.fullDps.rows.find(row => row.rowIndex === wilt.row).wiltTargetBase * (w + integral(lo,hi) / 100);
           rows.get(wilt.row).minionDps += amount;
+          accumulateMinionTypes(wilt.row, {erosion:amount}, 1);
         }
       }
       if (r.componentProjection.rows.some(row => row.mechanics?.some(m => m.kind === "ill-omen"))) {
@@ -606,7 +609,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       }
       for (const event of deteriorations.filter(e => e.at <= time + eps)) {
         recordDamage(event.row, event.player ? 'playerDeteriorationDps' : 'minionDps', event.damage, time);
-        if (!event.player) recordDamage(event.row, 'minionDeteriorationDps', event.damage, time);
+        if (!event.player) {
+          recordDamage(event.row, 'minionDeteriorationDps', event.damage, time);
+          if (inMeasurement(time)) accumulateMinionTypes(event.row, {erosion:event.damage}, 1);
+        }
         omenDamage(event.damage, time, getReport(ctx.snapshot()));
         deteriorations.splice(deteriorations.indexOf(event), 1);
       }

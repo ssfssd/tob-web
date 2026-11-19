@@ -102,33 +102,38 @@ export function advancedModuleLine(id, line, context, row) {
 
 export function advancedElixirLine(line, scale, context) {
   const { effect, mechanic } = context;
-  if (line === "Adds 15 % of Max Life to Energy Shield") { effect("max_life_as_energy_shield", 15 * scale); return true; }
+  const lifeAsShield = /^Adds ([\d.]+) % of Max Life to Energy Shield$/u.exec(line);
+  if (lifeAsShield) { effect("max_life_as_energy_shield", Number(lifeAsShield[1]) * scale); return true; }
   if (line === "Half of the damage taken bypasses Energy Shield") { effect("damage_bypasses_energy_shield", 50); return true; }
   if (line === "Has Blur") {
     const rating = context.condition("blurRating");
     if (rating !== "") { effect("blur_rating", rating, "set"); effect("blur_avoidance", rating * .25); }
     return true;
   }
-  if (line === "While Blur is active, +20 % Defense") {
-    if (context.condition("blurRating") > 0) for (const stat of ["armor", "evasion", "max_energy_shield"]) effect(stat, 20 * scale);
+  const blurDefense = /^While Blur is active, \+?([\d.]+) % Defense$/u.exec(line);
+  if (blurDefense) {
+    if (context.condition("blurRating") > 0) for (const stat of ["armor", "evasion", "max_energy_shield"]) effect(stat, Number(blurDefense[1]) * scale);
     return true;
   }
-  if (line === "30.5 % Ill Omen Cumulative Efficiency while Blur is active") {
+  const omenEfficiency = /^\+?([\d.]+) % Ill Omen Cumulative Efficiency while Blur is active$/u.exec(line);
+  if (omenEfficiency) {
     const rating = context.condition("blurRating"), curse = context.condition("ominousCurse");
     if (curse === 1) {
       const elite = context.condition("omenElite"), maxLife = context.condition("omenMaxLife");
       const remainingLife = elite === 0 ? context.condition("omenRemainingLife") : 0;
-      mechanic("ill-omen", { efficiency: rating > 0 ? 30.5 * scale : 0, curse: true, elite: elite === 1, maxLife, remainingLife });
+      mechanic("ill-omen", { efficiency: rating > 0 ? Number(omenEfficiency[1]) * scale : 0, curse: true, elite: elite === 1, maxLife, remainingLife });
     }
     return true;
   }
   if (line === "25 % chance for enemies to explode when defeated by Minions' Attacks or Spells, dealing True Damage equal to 250 % of their Max Life to enemies within a 6 m radius (not affected by the effects of Elixir Skills)") {
     mechanic("elixir-minion-kill-explosion", { chance: .25, lifeMultiplier: 2.5, radius: 6 }); return true;
   }
-  if (line === "12 % of damage taken is transferred to a random Minion") {
-    if (context.condition("minionPresent") === 1) effect("damage_transferred_to_minion", 12 * scale); return true;
+  const damageTransfer = /^([\d.]+) % of damage taken is transferred to a random Minion$/u.exec(line);
+  if (damageTransfer) {
+    if (context.condition("minionPresent") === 1) effect("damage_transferred_to_minion", Number(damageTransfer[1]) * scale); return true;
   }
-  if (line === "23.5 % Elemental Resistance Penetration for Spell Skills") { effect("spell_elemental_penetration", 23.5 * scale); return true; }
+  const spellPenetration = /^\+?([\d.]+) % Elemental Resistance Penetration for Spell Skills$/u.exec(line);
+  if (spellPenetration) { effect("spell_elemental_penetration", Number(spellPenetration[1]) * scale); return true; }
   if (line === "Inflicts all Infiltration Effects when a Spell Skill deals damage. Interval on each enemy: 1 s") {
     for (const type of ["cold", "fire", "lightning"]) context.infiltration(type, context.condition(`${type}Infiltration`));
     return true;
