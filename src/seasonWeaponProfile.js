@@ -73,7 +73,7 @@ export function seasonWeaponProfile(build, slotIndex = 0, { individual = false }
       * (1 + modifiers.filter(e => e.operation === 'add_percent').reduce((n, e) => n + e.value, 0) / 100)
       * modifiers.filter(e => ['more', 'more_percent'].includes(e.operation)).reduce((n, e) => n * (1 + e.value / 100), 1);
     if (!finite(value) || value < 0 || value > maximum) { result.blockers.push(`무기 ${label}의 계산 범위를 확인하세요.`); return null; }
-    return value;
+    return { value, base: bases[0].value };
   };
   const damage = (type, side) => {
     const stat = `gear_${type}_damage_${side}`;
@@ -88,8 +88,10 @@ export function seasonWeaponProfile(build, slotIndex = 0, { individual = false }
       * (1 + modifiers.filter(e => e.operation === 'add_percent').reduce((n, e) => n + e.value, 0) / 100)
       * modifiers.filter(e => ['more', 'more_percent'].includes(e.operation)).reduce((n, e) => n * (1 + e.value / 100), 1);
   };
-  result.values = { weaponSpeed: scalar('weapon_attack_speed', 'gear_attack_speed', '공격 속도', 20),
-    baseCriticalRating: scalar('weapon_critical_strike_rating', 'gear_attack_critical_strike_rating', '크리티컬 수치', 100000) };
+  const speed = scalar('weapon_attack_speed', 'gear_attack_speed', '공격 속도', 20);
+  result.weaponSpeedBase = speed?.base;
+  result.values = { weaponSpeed: speed?.value ?? null,
+    baseCriticalRating: scalar('weapon_critical_strike_rating', 'gear_attack_critical_strike_rating', '크리티컬 수치', 100000)?.value ?? null };
   for (const type of ['physical', 'fire', 'cold', 'lightning', 'erosion']) for (const side of ['Min', 'Max']) result.values[`weapon${type}${side}`] = damage(type, side.toLowerCase());
   if (result.values.weaponSpeed === 0 || ['physical', 'fire', 'cold', 'lightning', 'erosion'].some(type =>
     result.values[`weapon${type}Min`] > result.values[`weapon${type}Max`]

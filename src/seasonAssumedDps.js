@@ -170,7 +170,8 @@ export function calculateEditorSeasonBuild(build, options = {}) {
   const estimate = scenario.fullDps;
   const {mana, reservedManaPercent, sealedManaCompensation, unreservedMana} = scenario.character.values;
   report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,
-    dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
+    dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotWindowBounds:estimate.dotWindowBounds,
+    dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
     dotExclusiveUnconfirmed:estimate.dotExclusiveUnconfirmed, reapingOverlapOverflow:estimate.reapingOverlapOverflow,
     manaReservation:{mana,reservedManaPercent,sealedManaCompensation,unreservedMana},
     manaReservations:scenario.character.manaReservations,
@@ -183,16 +184,18 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,measuredManualUses})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
       return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
         conversionTrace:conversionTrace??direct?.trace,minionDamageByType,
         detail:{damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
           critical:offense?.values, pools, takenMultiplier, skillLevel:seasonSkillCalculationLevel(scenario,rowIndex),
+          cadence:direct?.offenseBasis?.cadence,
+          cadenceTrace:direct?.offenseBasis?.cadenceTrace,
           hitModifierTrace:direct?.trace?.filter(e=>e.stage==='damage-modifier'&&e.appliesToHit),
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
-        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,...(reaping&&{reaping}),...(fissure&&{fissure}),
+        manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(reaping&&{reaping}),...(fissure&&{fissure}),
         ...(dotBreakdown&&(!scenario.theaAverage||estimate.scope==='ss14-thea-joint-combat')&&{dotBreakdown})};
     }),
     uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};

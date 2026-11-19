@@ -1,5 +1,36 @@
 import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { compareSeasonResourceCosts } from './seasonGearPicker.js';
+import { compareSeasonDamageBreakdown, compareSeasonResourceCosts } from './seasonGearPicker.js';
+import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition } from './seasonDps.js';
+
+function encounterInputChanges(before, after, metric) {
+  const old=before.document.targetBuild, current=after.document.targetBuild;
+  const changes=[];
+  const add=(label,a,b,edit,key,tab,unit='')=>{
+    if (a!==b) changes.push({label,a,b,edit,key,tab,unit});
+  };
+  const oldInputs=old.ss14Inputs, inputs=current.ss14Inputs;
+  for(const key of Object.keys(SEASON_DPS_ENEMY_FIELDS)) {
+    if(metric==='assumedDps'&&ASSUMED_DPS_IGNORED_DEFENSE_FIELDS.includes(key))continue;
+    const label=seasonDpsEnemyFieldDefinition(current,key).label;
+    add(label,oldInputs.dps?.enemy?.[key],inputs.dps?.enemy?.[key],'dps-input',`enemy:${key}`,
+      key!=='numbedStacks'?'conditions':null,label.endsWith('(%)')?'%':'');
+  }
+  if(oldInputs.theaCycle?.mode==='automatic'&&inputs.theaCycle?.mode==='automatic'){
+    for(const [key,label] of [['seconds','측정 시간'],['warmup','측정 전 준비 시간']])
+      add(label,oldInputs.theaCycle[key],inputs.theaCycle[key],'thea-cycle-input',key,null,'초');
+  }
+  const single=before.report.coupledSkills.rows.length===1&&after.report.coupledSkills.rows.length===1;
+  current.skills.active.forEach((slot,index)=>{
+    if(!slot?.skillId||slot.skillId!==old.skills.active[index]?.skillId)return;
+    const a=oldInputs.dps?.skills?.[index]??{}, b=inputs.dps?.skills?.[index]??{};
+    for(const [key,fallback] of [['hitChance',100],['useShare',single?100:undefined]]) {
+      const label=SEASON_DPS_SKILL_FIELDS[key].label;
+      add(`${index+1}번 칸 · ${label}`,a[key]??fallback,b[key]??fallback,'dps-input',`${index}:${key}`,'conditions','%');
+    }
+  });
+  return changes;
+}
 
 export function compactSeasonEditDelta(comparison) {
   const baseline = comparison?.baseline;
@@ -33,12 +64,18 @@ export function createSeasonEditComparison(document, report) {
       const compare = metric => {
         const compared=compareSeasonDpsSnapshots(baseline,current,metric);
         const previousCompared=previous?compareSeasonDpsSnapshots(previous,current,metric):null;
-        const resourceBaseline=compared.encounterMatches===true ? baseline
-          : previousCompared?.encounterMatches===true ? previous : null;
+        const resourceBaseline=compared.supported ? baseline : previousCompared?.supported ? previous
+          : compared.encounterMatches===true ? baseline : previousCompared?.encounterMatches===true ? previous : null;
         const resources=changed && resourceBaseline && compareSeasonResourceCosts(resourceBaseline.report,current.report,metric);
+        const breakdown=changed && (compared.supported || previousCompared?.supported)
+          && compareSeasonDamageBreakdown(resourceBaseline.report,current.report,metric);
+        const fromPrevious=resourceBaseline!==baseline && resourceBaseline===previous;
         return {baseline:compared,previous:previousCompared,
+          ...(breakdown && {breakdown:{...breakdown,dpsBasis:metric,previous:fromPrevious}}),
+          ...(compared.encounterMatches===false && {encounterChanges:encounterInputChanges(baseline,current,metric)}),
+          ...(previousCompared?.encounterMatches===false && {previousEncounterChanges:encounterInputChanges(previous,current,metric)}),
           ...(resources && {resources:{...resources,dpsBasis:metric,
-            previous:resourceBaseline===previous,
+            previous:fromPrevious,
             manaObservationStale:resources.manaObservationStale&&!resourceBaseline.report.character.survival?.manaObservationStale}})};
       };
       const assumed=preferredSeasonDpsMetric(current.report)==='assumedDps'?compare('assumedDps'):null;

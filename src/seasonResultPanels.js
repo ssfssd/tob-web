@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, SEASON_DPS_PARTS } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -17,7 +17,7 @@ import { DUAL_WIELD_ATTACK_SOURCE } from './seasonWeaponInputs.js';
 import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { SEASON_STAT_LABELS } from './seasonNumericStats.js';
-import { renderResourceChanges } from './seasonEditorTools.js';
+import { renderDamageBreakdown, renderResourceChanges } from './seasonEditorTools.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
@@ -71,7 +71,7 @@ export function renderEditDpsComparison(s, compact = false) {
   if (!comparison || compact && !comparison.changed) return '';
   if (s.pending.size) return '<section data-role="native-edit-comparison" hidden></section>';
   const assumed = preferredSeasonDpsMetric(s.report)==='assumedDps' && comparison.assumed;
-  const {baseline,previous,resources} = assumed || comparison;
+  const {baseline,previous,resources,breakdown,encounterChanges,previousEncounterChanges} = assumed || comparison;
   const metricLabel = assumed ? '방어 전 DPS' : 'DPS';
   const comparisonText = value => value.supported ? deltaText(value)
     : value.encounterMatches === false ? '전투 조건 변경' : '비교 보류';
@@ -83,14 +83,26 @@ export function renderEditDpsComparison(s, compact = false) {
       || baseline.encounterMatches===false && s.report.assumedDps?.supported;
     return hasDps ? `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">${button(baseline.encounterMatches===false?'전투 조건 변경':'비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"')}</section>` : '';
   }
+  const changedInputs=(rows,role)=>{
+    if(!rows?.length)return '';
+    const value=(n,unit)=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:6})+unit:'미입력';
+    return `<ul aria-label="달라진 전투 조건" data-role="${role}">${rows.map(({label,a,b,edit,key,tab,unit})=>
+      `<li>${esc(label.replace(/ \(%\)$/u,''))} <strong>${value(a,unit)} → ${value(b,unit)}</strong>
+        ${button('조건 수정',tab?'result-tab':'requirement',
+          `${tab?'data-tab="conditions"':'data-section="combat"'} data-field="${esc(edit)}" data-field-key="${esc(key)}" aria-label="${esc(label)} 수정"`)}</li>`).join('')}</ul>`;
+  };
+  const showPrevious=previous&&!previous.supported&&(JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons)
+    || previousEncounterChanges?.length&&JSON.stringify(previousEncounterChanges)!==JSON.stringify(encounterChanges));
+  const damage=breakdown?renderDamageBreakdown(breakdown,esc,{before:breakdown.previous?'직전':'기준',after:'현재'}):'';
   return `<section class="native-edit-comparison" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">
     <h2>편집 전후 자동 비교</h2>
     ${comparison.changed ? `<p>기준 대비 <strong class="${baseline.supported ? baseline.delta > 0 ? 'is-increase' : baseline.delta < 0 ? 'is-decrease' : '' : ''}">${comparisonText(baseline)}</strong></p>
       ${previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
     <dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
         ${resources?renderResourceChanges(resources,esc,{board:true}):''}
-        ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${renderReasons(s,baseline.reasons)}</details>` : ''}
-        ${previous && !previous.supported && JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons) ? `<details><summary>직전 변경 비교 보류 이유</summary>${renderReasons(s,previous.reasons)}</details>` : ''}
+        ${damage?`<details data-role="edit-damage-breakdown"><summary>${breakdown.previous?'직전 대비':'기준 대비'} 변경 수치</summary>${damage}</details>`:''}
+        ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${changedInputs(encounterChanges,'baseline-encounter-changes')}${renderReasons(s,baseline.reasons)}</details>` : ''}
+        ${showPrevious ? `<details><summary>직전 변경 비교 보류 이유</summary>${changedInputs(previousEncounterChanges,'previous-encounter-changes')}${renderReasons(s,previous.reasons)}</details>` : ''}
         ${button('현재 빌드를 비교 기준으로', 'reset-comparison')}
         <details><summary>비교 기준</summary><p>빌드를 열었을 때의 구성이 기준입니다. 저장해도 유지되며, 빌드를 다시 열면 새 기준이 됩니다.</p></details>
   </section>`;
@@ -172,13 +184,17 @@ export function renderResultConditions(s) {
   const sharedDots=s.report.fullDps.dotAllocationGroups??[];
   const sharedReaping=s.report.fullDps.reapingAllocationGroups??[];
   const overlaps=s.report.fullDps.dotWindowConflicts??s.report.assumedDps?.dotWindowConflicts??[];
+  const outOfBounds=s.report.fullDps.dotWindowBounds??s.report.assumedDps?.dotWindowBounds??[];
+  const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
   const windowAssignments=overlaps.map(({id,start,stop,slots})=>{
     const name=SS14_CARDS.records[id]?.name??'지속 대미지';
-    const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
     return `<fieldset data-role="dot-window-overlap-${esc(id)}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
       <p>겹친 시간에 대미지를 준 슬롯을 선택하세요.</p>
       ${slots.map(index=>button(`${index+1}번 칸에 배정`,'assign-dot-window',`data-key="${esc(id)}" data-start="${start}" data-stop="${stop}" data-index="${index}"`)).join('')}</fieldset>`;
   }).join('');
+  const windowBounds=outOfBounds.map(({rowIndex,start,stop,end})=>
+    `<div class="native-stat-note" data-role="dot-window-bound-${rowIndex}"><p>${rowIndex+1}번 칸 · ${time(start)}–${time(stop)}초 구간이 측정 종료 ${time(end)}초를 넘습니다.</p>
+      ${button('적용 구간 수정','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${rowIndex}:dotWindows"`)}</div>`).join('');
   const allocations=sharedDots.map(({id,total,slots,overflow})=>{
     const name=SS14_CARDS.records[id]?.name??'같은 지속 대미지';
     const applied=slots.filter(slot=>slot.uptime>0);
@@ -219,7 +235,7 @@ export function renderResultConditions(s) {
     }).join('')}</dl></details>
     ${renderFixedNumbedField(build,s.report,inputs.dps?.enemy?.numbedStacks)}
     ${periodicBurst ? renderSeasonDpsField(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(inputs.dps),'조건 탭') : ''}
-    ${windowAssignments}
+    ${windowBounds}${windowAssignments}
     ${allocations}
     ${reapingAllocations}
     ${skillFields ? `${shareOverflow?`<p role="status">시전 배분 ${number(shareOverflow)}% / 최대 100%</p>`:''}<details data-role="dock-skill-conditions"${shareOverflow?' open':''}><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}
@@ -344,19 +360,17 @@ export function renderSkillConversion(trace,index) {
   const conversions=(trace??[]).filter(e=>e.stage==='conversion'&&e.effectivePercent>0&&damageTypes[e.sourceType]&&damageTypes[e.targetType]);
   const route=e=>`${damageTypes[e.sourceType]} → ${damageTypes[e.targetType]}`;
   const percent=e=>number(e.effectivePercent)+'%';
-  const moved=e=>{
-    const {min,max}=e.movedBaseDamage??{};
-    return Number.isFinite(min)&&Number.isFinite(max)
-      ? ' · 보정 전 전환량 '+number(min)+(min===max?'':'–'+number(max))
-      : '';
-  };
+  const amount=({min,max}={})=>Number.isFinite(min)&&Number.isFinite(max)
+    ? number(min)+(min===max?'':'–'+number(max)) : '';
+  const moved=e=>e.movedBaseDamage?' · 보정 전 전환량 '+amount(e.movedBaseDamage):'';
   const converted=conversions.length?calcGroup('대미지 전환',conversions.length===1?`${route(conversions[0])} ${percent(conversions[0])}`:'',
     calcRows(conversions.map(e=>[[e.actionName,route(e)].filter(Boolean).join(' · '),percent(e)+(Math.abs(e.effectivePercent-e.resolvedValue)>1e-8?` (원래 ${number(e.resolvedValue)}%)`:'')+moved(e),conversionSource(e.effectSource??undefined)])),`skill-conversion-${index}`):'';
   const gains=(trace??[]).filter(e=>e.stage==='gained-as-extra'&&e.resolvedValue>0
     && (damageTypes[e.sourceType]||e.sourceType==='non-erosion')&&damageTypes[e.targetType]);
   const gainedLabel=e=>`${damageTypes[e.sourceType]??'부식 이외'} → ${damageTypes[e.targetType]} +${number(e.resolvedValue)}%`;
   const extra=gains.length?calcGroup('대미지 추가 획득',gains.length===1?gainedLabel(gains[0]):'',
-    calcRows(gains.map(e=>[gainedLabel(e),'',conversionSource(e.effectSource??undefined)])),`skill-gain-${index}`):'';
+    calcRows(gains.map(e=>[[e.actionName,gainedLabel(e)].filter(Boolean).join(' · '),
+      e.gainedBaseDamage?'보정 전 획득량 '+amount(e.gainedBaseDamage):'',conversionSource(e.effectSource??undefined)])),`skill-gain-${index}`):'';
   return converted+extra;
 }
 function renderExcludedHitRoutes(effects) {
@@ -456,6 +470,10 @@ function renderSkillResourceCosts(row, averaged, timedCombat) {
   }
   if (row.channelCost?.valid)
     costs.push([row.channelCost.times?'측정 구간 차감 빈도':'관측 차감 횟수',number(row.channelCost.rate)+'회/초']);
+  if (row.measuredManualUses) {
+    const {count,seconds,rate}=row.measuredManualUses;
+    costs.push(['측정 구간 수동 사용',`${number(count)}회 / ${number(seconds)}초 · ${number(rate)}회/초`]);
+  }
   const channel=row.channelCost;
   const needsRate=channel&&!channel.valid;
   const channelDetails=needsRate
@@ -472,14 +490,31 @@ function renderSkillResourceCosts(row, averaged, timedCombat) {
 
 function renderSkillNumbedContribution(dps,row) {
   if(!dps?.supported||!row?.supported)return '';
-  const dynamic=dps.scope==='ss14-thea-joint-combat';
-  const prefix=dynamic?'numbed':'fixedNumbed';
-  const entries=[['번개 적중','HitDps'],['번개 지속 대미지','DotDps'],['번개 수확','ReapingDps']]
-    .map(([label,key])=>[label,row.values[prefix+key]]).filter(([,value])=>Number.isFinite(value)&&value>0);
+  const entries=seasonNumbedDamageRows(dps.scope,row.values);
   if(!entries.length)return '';
   const total=entries.reduce((sum,[,value])=>sum+value,0);
   return calcGroup('이 스킬의 마취 기여','+'+number(total)+' DPS',calcRows(entries.map(([label,value])=>[label,'+'+number(value)+' DPS']))
     +'<p>스킬 DPS에 이미 반영된 수치입니다.</p>','selected-skill-numbed');
+}
+
+function renderSkillCadence(cadence,trace, rates, weaponHands) {
+  const speed=cadence.kind==='attack'?'공격':'시전';
+  const fmt=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:4});
+  const sourceRows=(trace??[]).filter(e=>/-(?:attack-speed|cast-speed|cooldown-recovery-speed)$/u.test(e.stat))
+    .map(e=>[e.stage==='cooldown'?'쿨타임 회복 속도':speed+' 속도',
+      e.operation==='more'?'×'+fmt(1+e.resolvedValue/100):fmt(e.resolvedValue)+'%',conversionSource(e.effectSource??undefined)]);
+  return calcGroup(speed+' 속도 계산',fmt(cadence.rate)+'회/초',calcRows([
+    ...(weaponHands??[]).map(hand=>[`${hand.slotIndex===0?'메인':'서브'} 무기 공격 속도`,
+      (hand.weaponSpeedBase!==hand.weaponSpeed?fmt(hand.weaponSpeedBase)+' → ':'')+fmt(hand.weaponSpeed)+'회/초']),
+    ...(weaponHands?.length?[['쌍수 기본 공격 속도',fmt(1/cadence.baseTime)+'회/초']]:[]),
+    ['기본 '+speed+' 간격',fmt(cadence.baseTime)+'초'],
+    [speed+' 속도 증가 합계',fmt(cadence.speedIncrease)+'%'],
+    ...(cadence.speedMore!==1?[[speed+' 속도 추가 배율','×'+fmt(cadence.speedMore)]]:[]),
+    ...(cadence.rateCap?[[speed+' 속도 상한',fmt(cadence.rateCap)+'회/초']]:[]),
+    ...(cadence.effectiveCooldown?[['적용 쿨타임',fmt(cadence.effectiveCooldown)+'초']]:[]),
+    ...sourceRows,
+    ...rates,
+  ]),'selected-skill-cadence');
 }
 
 export function renderSkillCalculation(s) {
@@ -506,15 +541,17 @@ export function renderSkillCalculation(s) {
   const detail=assumed ? displayRow?.detail : {
     damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
     critical:report.offense.rows.find(r=>r.rowIndex===index&&r.id===id)?.values, pools:row?.pools, takenMultiplier:row?.takenMultiplier,
+    cadence:direct?.offenseBasis?.cadence, cadenceTrace:direct?.offenseBasis?.cadenceTrace,
     skillLevel:seasonSkillCalculationLevel(report,index), excludedHitRoutes:excludedSeasonHitRoutes(direct), hitModifierTrace:direct?.trace,
   };
-  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, skillLevel, excludedHitRoutes,hitModifierTrace}=detail??{};
+  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, excludedHitRoutes,hitModifierTrace}=detail??{};
+  const skillLevel=detail?.skillLevel??seasonSkillCalculationLevel(report,index);
   const v=displayRow?.values??{};
   const averaged=assumed?report.assumedDps.measuredResources:!!report.theaAverage;
   const slotTitle=slot=>`${slot.slotName} · ${esc(slot.name)}${Number.isInteger(slot.row?.minionLevel)?' · Lv.'+slot.row.minionLevel:''}`;
   const selector=slots.length===1 ? `<h2 data-role="calculation-skill" tabindex="-1">${slotTitle(selected)}</h2>`
     : `<select aria-label="계산할 스킬" data-calculation-skill data-role="calculation-skill">${slots.map(slot=>`<option value="${slot.index}"${slot.index===index?' selected':''}>${slotTitle(slot)}</option>`).join('')}</select>`;
-  const levelDetails=Number.isInteger(skillLevel?.level)&&(skillLevel.bonus||skillLevel.growthMultiplier) ? calcGroup(
+  const levelDetails=Number.isInteger(skillLevel?.level)&&(skillLevel.bonus||skillLevel.growthMultiplier||skillLevel.unavailable) ? calcGroup(
     skillLevel.confirmed?'적용 스킬 레벨':'스킬 레벨 확인 필요',`Lv.${skillLevel.level}`,calcRows([
       ['기본 레벨',String(skillLevel.base)],
       ...(skillLevel.bonus?[['레벨 보너스',(skillLevel.bonus>0?'+':'')+skillLevel.bonus]]:[]),
@@ -649,7 +686,9 @@ export function renderSkillCalculation(s) {
   if(Number.isFinite(useRate)&&useRate>0){
     const rates=[['초당 사용 가능 횟수',number(useRate)]];
     if(displayRow?.supported&&Number.isFinite(v.manualRate))rates.push(['초당 일반 시전',number(v.manualRate)]);
-    steps+=calcGroup('사용 속도',number(useRate)+'/초',calcRows(rates));
+    steps+=!averaged&&displayRow?.supported&&detail?.cadence
+      ? renderSkillCadence(detail.cadence,detail.cadenceTrace,rates,displayRow.weaponHands)
+      : calcGroup('사용 속도',number(useRate)+'/초',calcRows(rates));
   }
   if(steps)steps=calcGroup(averaged?'전투 시작 상태의 계산 단계':assumed?'방어 전 계산 단계':'대미지 계산 단계','',steps);
   const details = conversion + minionDamage + excluded + steps;
@@ -665,6 +704,10 @@ export function renderNumbedCalculation(s) {
     ...(dot>0?[['플레이어 번개 지속 대미지의 마취 기여','+'+number(dot)+' DPS']]:[]),
     ...(reaping>0?[['플레이어 번개 수확의 마취 기여','+'+number(reaping)+' DPS']]:[]),
   ];
+  const minionContribution=key=>{
+    const value=contribution(key);
+    return value>0?[['소환체 번개 대미지의 마취 기여','+'+number(value)+' DPS']]:[];
+  };
   const fixed=(assumed?report.assumedDps:report.componentProjection).fixedNumbed;
   if(fixed) {
     const fixedContribution=key=>dps?.scope==='ss14-thea-joint-combat'?0:contribution(key);
@@ -673,6 +716,7 @@ export function renderNumbedCalculation(s) {
       ['입력한 중첩',number(fixed.stacks)],['번개 대미지 보정','+'+number(fixed.bonus)+'%'],
       ...(hit>0?[['플레이어 번개 적중의 마취 기여','+'+number(hit)+' DPS']]:[]),
       ...dotContributions(fixedContribution('fixedNumbedDotDps'),fixedContribution('fixedNumbedReapingDps')),
+      ...minionContribution('fixedNumbedMinionDps'),
     ])+(report.coupledSkills.rows.some(row=>row.voltageJolt)?'<p class="native-stat-note">혼비백산을 사용한 전투에서 관측한 대상 중첩을 적용합니다.</p>':'')
       +button('마취 조건 편집','requirement',`data-section="combat" data-field="${fixed.sourceKey?'component-condition':'dps-input'}" data-field-key="${esc(fixed.sourceKey??'enemy:numbedStacks')}"`),'numeric-numbed');
   }
@@ -691,6 +735,7 @@ export function renderNumbedCalculation(s) {
       ['플레이어 번개 적중의 마취 기여',`+${number(stats.playerHits.bonusDps)} DPS`],
     ]:[]),
     ...dotContributions(contribution('numbedDotDps'),contribution('numbedReapingDps')),
+    ...minionContribution('numbedMinionDps'),
   ])+
     button('마취 조건 편집','requirement','data-section="combat" data-field="thea-event" data-field-key="numbedEnabled"'),'numeric-numbed');
 }

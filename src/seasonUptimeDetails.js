@@ -1,5 +1,6 @@
 import { blessingConditionValue, blessingLabel } from './seasonBlessings.js';
 import { combatNumbedEnabled } from './seasonTheaCombatInputs.js';
+import { seasonNumbedDamageRows } from './seasonDps.js';
 
 export const uptimeFields = {
   dotUptime: ['지속 대미지', '효과가 끝나기 전에 같은 대상에게 다시 적용하면 100%를 유지할 수 있습니다. 지속 대미지 DPS에 유지율을 곱합니다.'],
@@ -16,9 +17,22 @@ const count = v => v.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const onOff = v => v === 1 ? '활성' : v === 0 ? '비활성' : '미입력';
 const korean = v => typeof v === 'string' && /[가-힣]/u.test(v) && !/\p{Script=Han}/u.test(v);
 function damageContribution(report, field) {
-  if (!report.fullDps.supported) return '';
-  const values=report.fullDps.rows.map(row=>row.values?.[field]).filter(Number.isFinite);
-  return values.length ? ' 방어 전 DPS 중 '+values.reduce((sum,value)=>sum+value,0).toLocaleString('ko-KR',{maximumFractionDigits:2})+' DPS.' : '';
+  if (!report.fullDps.supported) return null;
+  return report.fullDps.rows.reduce((sum,row)=>sum+(field==='numbed'
+    ? seasonNumbedDamageRows(report.fullDps.scope,row.values).reduce((total,[,value])=>total+value,0)
+    : row.values[field]??0),0);
+}
+
+export function compareSeasonUptimeChanges(before, after, metric) {
+  const key=metric==='assumedDps'?'assumed':'setting';
+  const damage=metric==='assumedDps'?'contribution':'inputContribution';
+  const rows=(report)=>new Map((report.assumedDps?.uptimeDetails??[])
+    .filter(row=>row.key&&row[key].endsWith('%')).map(row=>[row.key,row]));
+  const previous=rows(before), current=rows(after);
+  return [...current].flatMap(([id,row])=>{
+    const old=previous.get(id);
+    return old&&old[key]!==row[key] ? [{name:row.name,from:old[key],to:row[key],fromDps:old[damage],toDps:row[damage]}] : [];
+  });
 }
 
 export function describeUptime(build, report, estimate, skills, scenarioHeroCombat) {
@@ -48,6 +62,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       return null;
     };
     return {
+      key:`skill:${rowIndex}:${row?.id}:${field}:${actionIndex??''}`,
       name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
       setting:percent(windowed?windowUptime(original?.dotWindows?original:row,saved):saved),
       assumed:percent(windowed?windowUptime(row,assumed):assumed),
@@ -102,14 +117,14 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       if(build.ss14Inputs.theaCycle?.mode==='automatic'){
         const timing=estimate.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
         const original=report.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
-        lines.push({name:row.name,setting:original?percent(original.uptime):'계산 보류',assumed:timing?percent(timing.uptime):'계산 보류',
+        lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name,setting:original?percent(original.uptime):'계산 보류',assumed:timing?percent(timing.uptime):'계산 보류',
           method:(original?`${count(original.start)}초에 처음 사용하고 ${count(original.interval)}초마다 갱신합니다. 한 번 사용하면 ${count(original.duration)}초 동안 유지되며, 준비 시간을 뺀 측정 구간에서 활성 ${count(original.activeSeconds)}초를 반영합니다.`
             :'입력 조건의 사용 시간표로 가동률을 계산할 수 없습니다.')
             +(timing?' 방어 전 DPS에는 측정 구간 내내 영약을 적용합니다.':'')});
         continue;
       }
       const saved=report.componentProjection.rows.find(r=>r.path===row.path)?.elixirState;
-      lines.push({name:row.name, setting:Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
+      lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name, setting:Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
         method:'영약 효과가 끝나기 전에 갱신하면 유지됩니다. 방어 전 계산은 활성 상태의 효과 배율을 사용합니다.'});
     }
     for (const key of row.heroControls ?? []) {
@@ -130,21 +145,23 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
     const timing=Number.isFinite(cycle.duration)&&Number.isFinite(cycle.cooldown)
       ? ' 지속 '+cycle.duration.toLocaleString('ko-KR')+'초, 쿨타임 '+cycle.cooldown.toLocaleString('ko-KR')+'초.'+
         (cycle.cooldown>cycle.duration?' 즉시 재발동해도 '+(cycle.cooldown-cycle.duration).toLocaleString('ko-KR')+'초의 공백이 생깁니다.':' 다음 은총을 지속 시간 안에 발동하면 연속 유지됩니다.') : '';
-    lines.push({name:'신의 은총', setting:value(report.theaAverage?.uptime), assumed:value(cycle.uptime),
+    lines.push({key:'boon',name:'신의 은총', setting:value(report.theaAverage?.uptime), assumed:value(cycle.uptime),
       method:blessingLabel('Focus')+' 최대 중첩'+(Number.isFinite(cycle.caps?.Focus)?'('+cycle.caps.Focus+'개)':'')+'을 모으면 쿨타임이 끝난 뒤 축복을 소모해 발동합니다.'+timing+
         ' 준비 '+build.ss14Inputs.theaCycle.warmup+'초 뒤 '+build.ss14Inputs.theaCycle.seconds+'초 동안 은총 상태별 대미지를 합산합니다.'});
-    if (cycle.maxBoons===2) lines.push({name:'은총 동시 유지',setting:value(report.theaAverage?.doubleUptime),assumed:value(cycle.doubleUptime),
+    if (cycle.maxBoons===2) lines.push({key:'double-boon',name:'은총 동시 유지',setting:value(report.theaAverage?.doubleUptime),assumed:value(cycle.doubleUptime),
       method:'두 은총의 지속 시간이 겹치는 구간에 양쪽 효과를 적용합니다.'});
     if (build.ss14Inputs.theaEvents?.igniteEnabled && Number.isFinite(cycle.igniteUptime))
-      lines.push({name:'점화',setting:value(report.theaAverage?.igniteUptime),assumed:value(cycle.igniteUptime),
-        method:'점화를 부여한 뒤 만료 전에 다시 부여하면 유지됩니다. 적용 중인 점화의 대미지를 시간에 따라 합산합니다.'+
-          damageContribution(estimate,'igniteDps')});
+      lines.push({key:'ignite',name:'점화',setting:value(report.theaAverage?.igniteUptime),assumed:value(cycle.igniteUptime),
+        method:'점화를 부여한 뒤 만료 전에 다시 부여하면 유지됩니다. 적용 중인 점화의 대미지를 시간에 따라 합산합니다.',
+        inputContribution:damageContribution(report,'igniteDps'),contribution:damageContribution(estimate,'igniteDps')});
     if (combatNumbedEnabled(build, estimate) && Number.isFinite(cycle.numbedUptime))
-      lines.push({name:'마취',setting:value(report.theaAverage?.numbedUptime),assumed:value(cycle.numbedUptime),
-        method:'마취를 부여하고 만료 전에 갱신합니다. 각 번개 대미지에 그 시점의 마취 효과를 반영합니다.'});
+      lines.push({key:'numbed',name:'마취',setting:value(report.theaAverage?.numbedUptime),assumed:value(cycle.numbedUptime),
+        method:'마취를 부여하고 만료 전에 갱신합니다. 각 번개 대미지에 그 시점의 마취 효과를 반영합니다.',
+        inputContribution:damageContribution(report,'numbed'),contribution:damageContribution(estimate,'numbed')});
     if (estimate.componentProjection.rows.some(r=>r.mechanics?.some(m=>m.kind==='thea-scorch'||m.kind==='elixir-scorch')) && Number.isFinite(cycle.scorchUptime))
-      lines.push({name:'스코치',setting:value(report.theaAverage?.scorchUptime),assumed:value(cycle.scorchUptime),
-        method:'스코치를 부여하는 효과가 유지되는 시간을 계산합니다. 스코치의 저항 감소는 입력 조건 DPS에만 반영합니다.'+damageContribution(estimate,'scorchDps')});
+      lines.push({key:'scorch',name:'스코치',setting:value(report.theaAverage?.scorchUptime),assumed:value(cycle.scorchUptime),
+        method:'스코치를 부여하는 효과가 유지되는 시간을 계산합니다. 스코치의 저항 감소는 입력 조건 DPS에만 반영합니다.',
+        inputContribution:damageContribution(report,'scorchDps'),contribution:damageContribution(estimate,'scorchDps')});
   }
   return lines;
 }

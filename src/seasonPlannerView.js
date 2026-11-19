@@ -27,14 +27,14 @@ import { seasonEffectSources, effectSourceLabel } from "./seasonEffectSources.js
 import { exportSeasonWorkspace } from "./seasonWorkspace.js";
 import { previewLogGearOptions } from "./localGameLogImport.js";
 import { renderSeasonNumericStats } from "./seasonNumericStatsView.js";
-import { compareSeasonResourceCosts, gearFilters, previewSlotEdit, skillDpsChanges } from './seasonGearPicker.js';
-import { seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
+import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, gearFilters, previewSlotEdit } from './seasonGearPicker.js';
+import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
 import { craftFamilySlots, craftOptions, itemGearKind } from './seasonItemCraft.js';
 import { corrosionCard, corrosionOptions,corrosionBasePool } from './seasonCorrosion.js';
 import { calculateSeasonBuild } from './seasonBuild.js';
 import { renderReasons } from './seasonResultPanels.js';
-import { renderResourceChanges, renderSkillDpsChanges, renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
+import { renderDamageBreakdown, renderResourceChanges, renderSlotPreview, shelfTools, mobileDpsBar } from './seasonEditorTools.js';
 import { renderSlateEditor,slateEditorBoard } from './seasonSlateEditor.js';
 import { regularSlateFamilies } from './seasonDivinity.js';
 import { nativeSlateOptions } from './seasonNativeDivinity.js';
@@ -224,7 +224,7 @@ export function renderSkillCandidateResult(s) {
   const activation=preview?.skill?.activation;
   const id=s.picker?.candidate;
   const support=Number.isInteger(s.supportIndex);
-  return (support?appliedSkillLevel(entry):renderSkillLevelStats(entry))
+  return (support?appliedSkillLevel(entry):renderSkillLevelStats(entry,preview?.skill?.growthMultiplier))
     +(activation?renderBuffActivation(activation,activation.value,{binding:'data-role="candidate-aura-activation" data-candidate-aura-activation'}):'')
     +(id?`<div class="skill-candidate-effect" aria-label="스킬 효과">${skillLevelEffects(id,entry,support,s.picker.levels?.[id])}</div>`:'')
     +(removed?.length?`<p data-role="skill-removed-supports">보조 해제 예정 · ${removed.map(id=>esc(title(id))).join(' · ')}</p>`:'')
@@ -388,7 +388,7 @@ function appliedSkillLevel(entry) {
   const adjustment=bonus===0?'':` (${bonus>0?'+':''}${bonus})`;
   return `<small data-role="applied-skill-level">${confirmed?'적용 레벨':'계산 확인이 필요한 레벨'} ${level}${adjustment}</small>`;
 }
-function renderSkillLevelStats(entry) {
+function renderSkillLevelStats(entry, growthMultiplier) {
   const {base,level,bonus,confirmed}=seasonSkillLevelState(entry);
   if (!Number.isInteger(level)) return '';
   if (!confirmed)
@@ -396,13 +396,14 @@ function renderSkillLevelStats(entry) {
   const values = entry?.values ?? {};
   const showHit = Number.isFinite(values.averageHit) && (values.averageHit>0 || !entry.damageCapabilities?.dot);
   const stats = [
+    ['20레벨 이후 대미지 배율',growthMultiplier,'', '×'],
     showHit?['스킬 자체 평균 적중',values.averageHit]:['스킬 자체 DPS',values.baseDps],
     ['기본 MP 소모',values.manaCost], ['기본 시전 시간',values.castTime,'초'], ['기본 쿨타임',values.cooldown,'초'],
   ].filter(([, value])=>Number.isFinite(value));
   const number = value => value.toLocaleString('ko-KR',{maximumFractionDigits:3});
   return `<section data-role="skill-level-stats" aria-label="레벨별 스킬 수치"><strong>Lv.${level} 스킬 수치</strong>${bonus?` <small>기본 ${base} ${bonus>0?'+':''}${bonus}</small>`:''}
-    ${stats.length?`<dl class="native-stat-list">${stats.map(([label,value,unit])=>
-      `<div class="native-stat-cell"><dt>${label}</dt><dd>${number(value)}${unit??''}</dd></div>`).join('')}</dl>`:''}
+    ${stats.length?`<dl class="native-stat-list">${stats.map(([label,value,unit,prefix])=>
+      `<div class="native-stat-cell"><dt>${label}</dt><dd>${prefix??''}${number(value)}${unit??''}</dd></div>`).join('')}</dl>`:''}
     ${entry?.missingAddedDamageEffectiveness?'<small>이 레벨의 추가 대미지 효율 미확인</small>':''}</section>`;
 }
 
@@ -428,7 +429,7 @@ export function renderEquippedSkillStats(s) {
   const slots = s.document?.targetBuild?.skills;
   const slot = s.skillIndex < 5 ? slots?.active[s.skillIndex] : slots?.passive[s.skillIndex - 5];
   const id = support ? slot?.supports[s.supportIndex]?.supportId : entry?.itemId;
-  const stats = support ? appliedSkillLevel(entry) : renderSkillLevelStats(entry);
+  const stats = support ? appliedSkillLevel(entry) : renderSkillLevelStats(entry,seasonSkillCalculationLevel(s.report,s.skillIndex).growthMultiplier);
   const base = support ? slot?.supports[s.supportIndex]?.level : slot?.level;
   const activation=auraActivationControl(s.report.componentProjection,s.skillIndex);
   return stats+(activation?renderBuffActivation(activation,activation.value,{slot:true}):'')+equippedSkillResourceCost(s.report,s.skillIndex)
@@ -931,7 +932,8 @@ export function renderBoardComparison(s){
   const result=compareSeasonDpsSnapshots(s,after);
   const basis=result.supported?'fullDps':'assumedDps';
   const comparable=result.supported||compareSeasonDpsSnapshots(s,after,basis).supported;
-  const dpsChanges=comparable?renderSkillDpsChanges(skillDpsChanges(s.report[basis],after.report[basis]),basis,esc,{board:true}):'';
+  const dpsChanges=comparable?renderDamageBreakdown({...compareSeasonDamageBreakdown(s.report,after.report,basis),dpsBasis:basis},
+    esc,{before:'적용 전',after:'적용 후'}):'';
   const dpsBasis=comparable?basis:'fullDps';
   const resources=compareSeasonResourceCosts(s.report,after.report,dpsBasis,{allActive:true});
   const beforeRows=boardOptions(s,section),afterRows=boardOptions(after,section);

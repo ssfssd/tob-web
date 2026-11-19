@@ -32,6 +32,11 @@ const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
 const hash = v => typeof v === "string" && /^[a-f0-9]{64}$/u.test(v);
 const round = v => finite(v) ? Math.round(v * 1e5) / 1e5 : null;
 const wiltingBeamId = "skills-tlidb-com-cn-wilting-beam";
+export function seasonNumbedDamageRows(scope, values) {
+  const prefix=scope==='ss14-thea-joint-combat'?'numbed':'fixedNumbed';
+  return [['번개 적중','HitDps'],['번개 지속 대미지','DotDps'],['번개 수확','ReapingDps'],['소환체 번개 대미지','MinionDps']]
+    .flatMap(([label,key])=>finite(values[prefix+key])&&values[prefix+key]>0?[[label,values[prefix+key]]]:[]);
+}
 export const FROST_TERRA_ID = "skills-tlidb-com-cn-frost-terra";
 export function frostTerraUptimeField(slot) {
   if (slot?.skillId === FROST_TERRA_ID) return "dotUptime";
@@ -756,6 +761,9 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         result.supported = false;
         result.values.dps = result.values.minionDps = result.values.minionHitDps = null;
       }
+      const bonus=report.componentProjection.fixedNumbed?.bonus ?? 0;
+      result.values.fixedNumbedMinionDps=result.supported
+        ? (result.minionDamageByType?.lightning ?? 0) * bonus / (100 + bonus) : null;
       return result;
     }
     const validBinding=record?.season==='SS14'&&b?.itemId===direct.id&&b.sourcePageSha256===record.sourcePageSha256;
@@ -978,9 +986,10 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const weaponHands = offense?.values.weaponHands?.map(hand=>{
       const handPools=pools.filter(p=>p.weaponSlot===hand.slotIndex);
       const multiplier=hand.hitMultiplier*attributeAndTaken;
-      return {...hand,landedHit:meanHit(handPools,hand)*multiplier,
+      const {weaponSpeedBase,weaponSpeed,conversionTrace}=basis.weaponHands[hand.slotIndex];
+      return {...hand,weaponSpeedBase,weaponSpeed,landedHit:meanHit(handPools,hand)*multiplier,
         landedLightning:meanHit(handPools.filter(p=>p.type==='lightning'),hand)*multiplier,
-        conversionTrace:basis.weaponHands[hand.slotIndex].conversionTrace};
+        conversionTrace};
     });
     const landedHit = weaponHands ? weaponHands.reduce((sum,hand)=>sum+hand.landedHit,0)/2
       : mean * offense?.values.attributeMultiplier * criticalMultiplier * takenMultiplier;
@@ -1217,6 +1226,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const dotUptimeFields = {};
   const dotWindowIssues = new Map();
   const dotWindowConflicts = [];
+  const dotWindowBounds = [];
   const addWindowIssue = (reason, indices) => {
     blockers.push(reason);
     dotWindowIssues.set(reason,[...new Set([...(dotWindowIssues.get(reason)??[]),...indices])].sort((a,b)=>a-b));
@@ -1248,7 +1258,10 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       const invalid = new Set();
       let furthest, conflict;
       for (const window of windows) {
-        if (window.stop>end+1e-8) invalid.add(window.index);
+        if (window.stop>end+1e-8) {
+          invalid.add(window.index);
+          dotWindowBounds.push({id,rowIndex:window.index,start:window.start,stop:window.stop,end});
+        }
         if (furthest && window.start<furthest.stop) {
           invalid.add(window.index);
           invalid.add(furthest.index);
@@ -1305,6 +1318,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     ...(dotAllocationGroups.length && { dotAllocationGroups }),
     ...(dotWindowIssues.size && { dotWindowIssues:Object.fromEntries(dotWindowIssues) }),
     ...(dotWindowConflicts.length && { dotWindowConflicts }),
+    ...(dotWindowBounds.length && { dotWindowBounds }),
     manualResources,
     receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
       ...(sharedCommand?.receipt ? [sharedCommand.receipt] : []),

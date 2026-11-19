@@ -826,6 +826,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
       continue;
     }
     let gained = false;
+    const gainedBaseDamage = { min: 0, max: 0 };
     const ratio = effect.value / 100;
     for (const entry of seasonalConversion || effect.stat.startsWith('supported-skill-') ? hitComponents : allComponents) {
       const sourceTypes = sourceType === "non-erosion"
@@ -839,6 +840,8 @@ export function evaluateTlidbSkillDamage(input = {}) {
       }), { min: 0, max: 0 });
       if (seasonalConversion && source.max <= 0) continue;
       const extra = { min: source.min * ratio, max: source.max * ratio };
+      gainedBaseDamage.min += extra.min;
+      gainedBaseDamage.max += extra.max;
       const target = entry.pools[targetType] ?? { min: 0, max: 0 };
       target.min += extra.min;
       target.max += extra.max;
@@ -849,7 +852,8 @@ export function evaluateTlidbSkillDamage(input = {}) {
     if (!gained) {
       exclude(index, "gained-as-extra", seasonalConversion ? "ss14-hit-gain-source-absent" : "gained-as-extra-source-damage-unavailable");
     } else {
-      apply(index, "gained-as-extra", { resolvedValue: effect.value, sourceType, targetType });
+      apply(index, "gained-as-extra", { resolvedValue: effect.value, sourceType, targetType,
+        ...(seasonalConversion && { gainedBaseDamage }) });
     }
   }
 
@@ -1190,6 +1194,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
     : 1;
 
   let actionRate = hitComponents.length ? null : 0;
+  let cadence = null;
   const castTimeEffects = resolved
     .map((effect, index) => ({ effect, index }))
     .filter(({ effect, index }) => effect?.stat === "cast-time" && !traced[index]);
@@ -1259,12 +1264,14 @@ export function evaluateTlidbSkillDamage(input = {}) {
         synthetic("cadence", "cadence-speed-result-invalid");
       } else {
         actionRate = speedFactor / baseTime;
+        cadence = {kind:cadenceKind,baseTime,speedIncrease,speedMore};
         // Season callers supply an evidenced cap; historical callers retain
         // their original cadence. This limits actions, not hits or burst procs.
         if (context.actionRateCap !== undefined) {
           if (!Number.isFinite(context.actionRateCap) || context.actionRateCap <= 0) {
             synthetic('cadence', 'action-rate-cap-unverified');
           } else {
+            if (actionRate > context.actionRateCap) cadence.rateCap = context.actionRateCap;
             actionRate = Math.min(actionRate, context.actionRateCap);
           }
         }
@@ -1297,6 +1304,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
         if (!Number.isFinite(effectiveCooldown) || effectiveCooldown <= 0) {
           exclude(cooldownEntry.index, "cooldown", "effective-cooldown-invalid", true);
         } else {
+          if (cadence) cadence.effectiveCooldown = effectiveCooldown;
           actionRate = Math.min(actionRate, 1 / effectiveCooldown);
           apply(cooldownEntry.index, "cooldown", {
             resolvedValue: cooldownEntry.effect.value,
@@ -2015,6 +2023,7 @@ export function evaluateTlidbSkillDamage(input = {}) {
   return {
     level,
     complete,
+    ...(complete && cadence && context.damageConversion==='ss14' && {cadence:{...cadence,rate:safeRate}}),
     ...(persistentCadence ? { actionRate: rounded(safeRate) } : {}),
     hit: {
       min: hitMin,

@@ -313,6 +313,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
           && !e.reaping && !e.spellBurst && !e.luckyDamage && !e.doubleDamage && !e.tripleDamage
           && !e.critical?.conditionalDamageMultiplier && (e.actionRate??e.hit.rate)===(evaluation.actionRate??evaluation.hit.rate))) {
           weaponHands = rotations.map((e,i)=>({slotIndex:i, baseCriticalRating:candidateHands[i].baseCriticalRating,
+            weaponSpeedBase:candidateHands[i].weaponSpeedBase, weaponSpeed:candidateHands[i].weaponSpeed,
             receipts:candidateHands[i].receipts, hitDps:e.hit.dps, pools:e.hit.pools, excluded:e.excluded,
             conversionTrace:e.applied.filter(effect=>['conversion','gained-as-extra'].includes(effect.stage))
               .map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null}))}));
@@ -353,6 +354,9 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         .map(e => e.operation === 'add' && e.unit === 'percent' ? { ...e, operation: 'add_percent' } : e),
       damageStages: supported && !weaponHands ? evaluation.damageStages : null,
       offenseBasis: supported ? { hitDps: alternatingHitDps??evaluation.hit.dps, dotDps: evaluation.dot.dps, weaponHands, moonStrike,
+        cadence:evaluation.cadence,
+        cadenceTrace:evaluation.applied.filter(effect=>effect.stage==='cadence'||effect.stage==='cooldown')
+          .map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null})),
         pools: weaponHands ? weaponHands.flatMap(hand=>hand.pools.map(pool=>({...pool,weaponSlot:hand.slotIndex}))) : evaluation.hit.pools,
         dotPools: evaluation.dot.pools, rate: evaluation.actionRate ?? evaluation.hit.rate, projectileHits: evaluation.hit.projectileHits,
         excluded: (weaponHands?.flatMap(hand=>hand.excluded)??evaluation.excluded).map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null})),

@@ -186,6 +186,7 @@ export function calculateSeasonBuild(build, options) {
     survival.manaObservationStale = true;
     survival.manaScenarios = formulasOnly(survival.manaScenarios);
     survival.values.manaRegeneration = null;
+    report.character.values.manaRegeneration = null;
     const dps = report.fullDps;
     if (dps.manualResources)
       dps.manualResources = manualResourceBalance(dps.rows,formulasOnly(dps.manualResources.recovery),inputs.dps?.skills);

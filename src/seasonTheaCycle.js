@@ -196,7 +196,7 @@ export function calculateTheaAverage(build, calculateState) {
   }, 0) : null;
   for (const row of rows) {
     const stateRow = state => state.rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
-    for (const key of ["reapingDps", "permafrostDps", "minionHitDps", "fixedNumbedHitDps", "fixedNumbedDotDps", "fixedNumbedReapingDps"]) {
+    for (const key of ["reapingDps", "permafrostDps", "minionHitDps", "fixedNumbedHitDps", "fixedNumbedDotDps", "fixedNumbedReapingDps", "fixedNumbedMinionDps"]) {
       if (!Object.hasOwn(row.values,key)) continue;
       row.values[key] = timeAverage(state => stateRow(state)?.values[key]);
     }

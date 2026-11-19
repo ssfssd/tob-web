@@ -12,7 +12,7 @@ import { isNumbedBaseOverride } from './seasonNetherModifiers.js';
 const eps = 1e-8;
 const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "netherDps", "specialDps", "omenDps", "playerDeteriorationDps", "dotDps", "permafrostDps", "reapingDps", "igniteReapingDps", "minionDps", "minionDeteriorationDps", "igniteDps", "scorchDps", "dps"];
 // These are portions of existing damage totals and are never added to DPS.
-const contributionKeys = ["numbedHitDps", "numbedDotDps", "numbedReapingDps", "minionHitDps", "moduleIgniteDps"];
+const contributionKeys = ["numbedHitDps", "numbedDotDps", "numbedReapingDps", "numbedMinionDps", "minionHitDps", "moduleIgniteDps"];
 const recordedKeys = [...damageKeys, ...contributionKeys];
 const sum = a => a.reduce((n, v) => n + v, 0);
 function timelineRandom(seed) {
@@ -117,10 +117,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     ...Object.fromEntries(recordedKeys.map(k => [k, 0])),
     ...(r.minionSkills && {minionDamageByType:{}}),
   }]));
-  function accumulateMinionTypes(rowIndex, byType, weight) {
-    const totals = rows.get(rowIndex).minionDamageByType;
+  function accumulateMinionTypes(rowIndex, byType, weight, numbedEffect = 0) {
+    const row = rows.get(rowIndex), totals = row.minionDamageByType;
     if (!totals || !byType) return;
     for (const [type, damage] of Object.entries(byType)) totals[type] = (totals[type] ?? 0) + damage * weight;
+    if (numbedEffect > 0) row.numbedMinionDps += (byType.lightning ?? 0) * weight * numbedEffect / (100 + numbedEffect);
   }
   const costs = new Map(report.fullDps.rows.filter(row => Number.isFinite(row.manualSummonRate)
     ? row.manualSummonRate === 0 || Number.isFinite(row.manaPerUse) && Number.isFinite(row.lifePerUse)
@@ -135,6 +136,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   let elixirInfiltrationReady = 0;
   const counts = { casts: 0, hits: 0, followupHits: 0, multistrikes: 0, spellBurst: 0, ignites: 0, scorches: 0, numbedInflicted: 0, reaps: 0 };
   const measuredCounts = { ...counts };
+  const manualUses = new Map();
   const inMeasurement = time => time >= warmup && time < end;
   const count = (time, key, amount = 1) => {
     counts[key] += amount;
@@ -246,14 +248,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     const b = config[event.row], key = `${event.row}:${event.unit}`;
     const rate = b[`moduleRate${event.action}`];
     schedule(event, rate);
-    let row = rowAt(ctx.snapshot(), event.row), action = row?.minionSkills[event.action];
+    let snapshot = ctx.snapshot();
+    let row = rowAt(snapshot, event.row), action = row?.minionSkills[event.action];
     if (!row?.supported || !action) return;
     if (!row.moduleHitEvents) {
       const weight = (b.minionUptime / 100) * (b.hitChance / 100);
       const damage = action.perCast * weight;
       recordDamage(event.row, 'minionDps', damage, time);
       recordDamage(event.row, 'minionHitDps', damage, time);
-      if (inMeasurement(time)) accumulateMinionTypes(event.row, action.damagePerHitByType, action.weightedHits * weight);
+      if (inMeasurement(time)) accumulateMinionTypes(event.row, action.damagePerHitByType, action.weightedHits * weight, snapshot.events.numbedEffect);
       return;
     }
     // Module rolls cannot advance the player's random sequence.
@@ -265,7 +268,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (action.slug === "Burst_Hammer") {
       if (moduleBuffs.get(key)) { castMultiplier *= 2; moduleBuffs.delete(key); }
       if (ctx.runtime.trigger({ blessing: "Tenacity", consume: 1 }, time, ctx.stacks, ctx.caps, ctx.expires)) castMultiplier *= 1.3;
-      row = rowAt(ctx.snapshot(), event.row); action = row.minionSkills[event.action];
+      snapshot = ctx.snapshot();
+      row = rowAt(snapshot, event.row); action = row.minionSkills[event.action];
     }
     for (let h = 0; h < action.hitCount; h++) {
       if (random() >= b.hitChance / 100) continue;
@@ -282,12 +286,13 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       recordDamage(event.row, "minionDps", hit * hitMultiplier, time);
       recordDamage(event.row, "minionHitDps", hit * hitMultiplier, time);
       if (inMeasurement(time)) {
+        const numbedEffect = snapshot.events.numbedEffect;
         const weight = hitWeight * hitMultiplier;
         const hitScale = action.weightedHits / (action.damageHitCount ?? action.hitCount);
-        accumulateMinionTypes(event.row, action.damagePerHitByType, hitScale * weight);
+        accumulateMinionTypes(event.row, action.damagePerHitByType, hitScale * weight, numbedEffect);
         if (randomElement) {
           for (const [element, byType] of Object.entries(action.randomHitByType))
-            accumulateMinionTypes(event.row, byType, (element === randomElement ? 2 : -1) * weight);
+            accumulateMinionTypes(event.row, byType, (element === randomElement ? 2 : -1) * weight, numbedEffect);
         }
       }
       for (const type of row.infiltrationTypes) if ((action.damageTypes.includes(type) || action.randomDamageTypes?.[randomElement]?.includes(type)) && hit > 0) infiltrations[type] = time + SS14_EXTENSION_NATIVE.infiltration[type].duration;
@@ -466,7 +471,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (event.kind === "multi" && event.index === event.max) runTriggers("multistrikeRate", time, ctx);
   }
   return {
-    blockers, counts, measuredCounts, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows,
+    blockers, counts, measuredCounts, manualUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows,
     get hasProjectileTie() { return hasProjectileTie; },
     get hasFissureTie() { return hasFissureTie; },
     result() { return { numbedAverage: numbedArea / seconds, numbedEffectAverage: numbedEffectArea / seconds, scorchUptime: 100 * scorchArea / seconds,
@@ -559,9 +564,9 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           if (row.moduleTimeline) {
             if (moduleIgnite > 0) accumulateMinionTypes(row.rowIndex, {fire:moduleIgnite}, 1);
             for (const action of row.minionSkills) {
-              if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction);
+              if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction, ailmentState.numbedEffect);
             }
-          } else accumulateMinionTypes(row.rowIndex, row.minionDamageByType, w);
+          } else accumulateMinionTypes(row.rowIndex, row.minionDamageByType, w, ailmentState.numbedEffect);
         }
         for (const wilt of wilts) {
           const amount = wilt.damage * r.fullDps.rows.find(row => row.rowIndex === wilt.row).wiltTargetBase * (w + integral(lo,hi) / 100);
@@ -642,6 +647,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       }
       if (!newCastFirst) for (const e of arrivals) followupHit(e, time, ctx);
       for (const e of actions) {
+        if ((e.kind==='manual'||e.kind==='summon')&&inMeasurement(time))
+          manualUses.set(e.row,(manualUses.get(e.row)??0)+1);
         if (e.kind === 'channel-charge') {
           const snapshot = rowAt(ctx.snapshot(),e.row);
           if (!Number.isFinite(snapshot?.manaPerUse) || !Number.isFinite(snapshot?.lifePerUse))
@@ -767,6 +774,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const supported = !blockers.length && results.length === 128;
   const reapingEvents = supported ? sum(results.map(run=>run.measuredCounts.reaps)) : 0;
   const rows = report.fullDps.rows.map(r => {
+    const manualUses=supported&&(r.combat||Number.isFinite(r.manualSummonRate))
+      ? sum(results.map(run=>run.manualUses.get(r.rowIndex)??0))/results.length : null;
     const usages = results.map(v => v.costs.get(r.rowIndex));
     const canMeasure = supported && usages.every(Boolean);
     const perSecond = type => canMeasure ? sum(usages.map(usage => usage[type])) / results.length / options.seconds : null;
@@ -805,6 +814,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       type, sum(typeSamples.map(sample => sample?.[type] ?? 0)) / results.length,
     ])) : undefined;
     return { ...r, minionDamageByType, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+      ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds}}),
       ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });
   const dps = supported ? sum(rows.map(r => r.values.dps)) : null;

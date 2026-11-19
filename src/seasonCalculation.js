@@ -54,7 +54,7 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
   result.progressionReceipt = parsed.progressionReceipt ?? null;
   if (parsed.missingAddedDamageEffectiveness) result.missingAddedDamageEffectiveness = true;
   result.scope = "unmodified-skill-at-selected-level";
-  if (parsed.blockers.some(b => b.reason === 'ss14-level-row-unavailable')) return { ...result, levelUnavailable: true, blockers: ['선택 레벨의 수치가 없어 확인된 20레벨 카드만 계산합니다.'], evidenceBlockers: parsed.blockers };
+  if (parsed.blockers.some(b => b.reason === 'ss14-level-row-unavailable')) return { ...result, levelUnavailable: true, blockers: ['선택 레벨의 수치가 없어 스킬 대미지 계산을 보류합니다.'], evidenceBlockers: parsed.blockers };
   for (const [key, stat] of [["manaCost", "mana-cost"], ["castTime", "cast-time"], ["cooldown", "cooldown"]]) {
     if(parsed.blockers.length&&(season!=='SS14'||key!=='manaCost'))continue;
     const effects = parsed.effects.filter((effect) => effect.stat === stat);

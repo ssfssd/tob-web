@@ -51,6 +51,7 @@ export function seasonDamageContext(build, index, id) {
     context.attackSpeed = alternating ? (hands[0].values.weaponSpeed+hands[1].values.weaponSpeed)/2 : values.weaponSpeed;
     context.attackTime = 1 / context.attackSpeed;
     if (alternating) context.weaponHands = hands.map(hand=>({ slotIndex:hand.slotIndex, weaponDamage:weaponDamage(hand.values),
+      weaponSpeedBase:hand.weaponSpeedBase, weaponSpeed:hand.values.weaponSpeed,
       baseCriticalRating:hand.values.baseCriticalRating, receipts:hand.receipts }));
   }
   const lightning = manualAddedLightningRange(b);

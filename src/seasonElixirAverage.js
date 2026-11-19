@@ -30,7 +30,7 @@ export function calculateElixirAverage(build, projection, calculateState) {
 }
 
 const damageFields=['dps','manualDps','spellBurstDps','repeatDps','heroDps','dotDps','reapingDps','netherDps','minionDps','fixedNumbedHitDps','fixedNumbedDotDps','fixedNumbedReapingDps'];
-const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDps','moduleIgniteDps'].filter(key=>Object.hasOwn(row.values,key))];
+const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDps','moduleIgniteDps','fixedNumbedMinionDps'].filter(key=>Object.hasOwn(row.values,key))];
 const weighted=(states,read)=>states.every(({value})=>Number.isFinite(read(value)))
   ? states.reduce((sum,{value,weight})=>sum+read(value)*weight,0) : null;
 

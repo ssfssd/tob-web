@@ -162,5 +162,5 @@ export function seasonSkillCalculationLevel(report, rowIndex) {
   const minionGrowth = minion?.minionLevel === state.level && minion.minionLevelMultiplier > 1
     ? minion.minionLevelMultiplier : null;
   const growthMultiplier = growth ? 1+growth.resolvedValue/100 : moonGrowth ?? minionGrowth;
-  return {...state,growthMultiplier:state.confirmed ? growthMultiplier : null};
+  return {...state,unavailable:entry?.levelUnavailable===true,growthMultiplier:state.confirmed ? growthMultiplier : null};
 }
