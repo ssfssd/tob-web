@@ -170,7 +170,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
   const estimate = scenario.fullDps;
   const {mana, reservedManaPercent, sealedManaCompensation, unreservedMana} = scenario.character.values;
   report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,
-    dotWindowIssues:estimate.dotWindowIssues, dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
+    dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
     dotExclusiveUnconfirmed:estimate.dotExclusiveUnconfirmed, reapingOverlapOverflow:estimate.reapingOverlapOverflow,
     manaReservation:{mana,reservedManaPercent,sealedManaCompensation,unreservedMana},
     manaReservations:scenario.character.manaReservations,

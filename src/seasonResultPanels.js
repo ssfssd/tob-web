@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, SEASON_DPS_PARTS } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -18,6 +18,7 @@ import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { SEASON_STAT_LABELS } from './seasonNumericStats.js';
 import { renderResourceChanges } from './seasonEditorTools.js';
+import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
 const esc = v => String(v ?? '').replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
@@ -74,23 +75,24 @@ export function renderEditDpsComparison(s, compact = false) {
   const metricLabel = assumed ? '방어 전 DPS' : 'DPS';
   const comparisonText = value => value.supported ? deltaText(value)
     : value.encounterMatches === false ? '전투 조건 변경' : '비교 보류';
-  if (compact && baseline.supported && Math.abs(baseline.delta) < 0.005) return '';
-  if(compact && !baseline.supported && !previous?.supported) {
+  if (compact) {
+    const change = compactSeasonEditDelta(assumed || comparison);
+    if (change) return `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교"><p>${change.previous?'직전 대비':'기준 대비'} <strong class="${change.value.delta>0?'is-increase':'is-decrease'}">${deltaText(change.value)}</strong></p></section>`;
+    if (baseline.supported) return '';
     const hasDps = s.report.fullDps.supported || Number.isFinite(baseline.value) || Number.isFinite(baseline.baseValue) || Number.isFinite(previous?.baseValue)
       || baseline.encounterMatches===false && s.report.assumedDps?.supported;
     return hasDps ? `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">${button(baseline.encounterMatches===false?'전투 조건 변경':'비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"')}</section>` : '';
   }
-  return `<section class="native-edit-comparison${compact ? ' is-compact' : ''}" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교"${s.pending.size ? ' hidden' : ''}>
-    ${compact ? '' : '<h2>편집 전후 자동 비교</h2>'}
+  return `<section class="native-edit-comparison" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">
+    <h2>편집 전후 자동 비교</h2>
     ${comparison.changed ? `<p>기준 대비 <strong class="${baseline.supported ? baseline.delta > 0 ? 'is-increase' : baseline.delta < 0 ? 'is-decrease' : '' : ''}">${comparisonText(baseline)}</strong></p>
-      ${!compact && previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
-    ${compact ? (!baseline.supported ? button('비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"') : '')
-      : `<dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
+      ${previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
+    <dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
         ${resources?renderResourceChanges(resources,esc,{board:true}):''}
         ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${renderReasons(s,baseline.reasons)}</details>` : ''}
         ${previous && !previous.supported && JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons) ? `<details><summary>직전 변경 비교 보류 이유</summary>${renderReasons(s,previous.reasons)}</details>` : ''}
         ${button('현재 빌드를 비교 기준으로', 'reset-comparison')}
-        <details><summary>비교 기준</summary><p>빌드를 열었을 때의 구성이 기준입니다. 저장해도 유지되며, 빌드를 다시 열면 새 기준이 됩니다.</p></details>`}
+        <details><summary>비교 기준</summary><p>빌드를 열었을 때의 구성이 기준입니다. 저장해도 유지되며, 빌드를 다시 열면 새 기준이 됩니다.</p></details>
   </section>`;
 }
 
@@ -169,6 +171,14 @@ export function renderResultConditions(s) {
   const periodicBurst=hasPeriodicBurstSupport(s.report.components);
   const sharedDots=s.report.fullDps.dotAllocationGroups??[];
   const sharedReaping=s.report.fullDps.reapingAllocationGroups??[];
+  const overlaps=s.report.fullDps.dotWindowConflicts??s.report.assumedDps?.dotWindowConflicts??[];
+  const windowAssignments=overlaps.map(({id,start,stop,slots})=>{
+    const name=SS14_CARDS.records[id]?.name??'지속 대미지';
+    const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
+    return `<fieldset data-role="dot-window-overlap-${esc(id)}"><legend>${esc(name)} · ${time(start)}–${time(stop)}초 겹침</legend>
+      <p>겹친 시간에 대미지를 준 슬롯을 선택하세요.</p>
+      ${slots.map(index=>button(`${index+1}번 칸에 배정`,'assign-dot-window',`data-key="${esc(id)}" data-start="${start}" data-stop="${stop}" data-index="${index}"`)).join('')}</fieldset>`;
+  }).join('');
   const allocations=sharedDots.map(({id,total,slots,overflow})=>{
     const name=SS14_CARDS.records[id]?.name??'같은 지속 대미지';
     const applied=slots.filter(slot=>slot.uptime>0);
@@ -203,10 +213,13 @@ export function renderResultConditions(s) {
     ${hasManualConditions ? button('대상·스킬·효과 조건 초기화','clear-combat-conditions') : ''}
     ${renderTrainingDummyPicker(inputs.dps?.enemy)}
     ${Number.isFinite(s.report.fullDps.fixedErosionResistance)?`<p>대상 부식 저항 ${number(s.report.fullDps.fixedErosionResistance)}% 고정 적용 중</p>`:''}
-    <details data-role="dock-enemy-defense"><summary>아머·저항 직접 입력</summary><dl class="native-condition-values">${Object.entries(SEASON_DPS_ENEMY_FIELDS).filter(([key])=>key!=='numbedStacks').map(([key, def]) =>
-      `<div><dt><label for="dock-enemy-${key}">${esc(def.label)}</label></dt><dd><input id="dock-enemy-${key}" type="number" step="any" min="${def.min}" max="${def.max}" data-season-edit="dps-input" data-key="enemy:${key}" value="${esc(inputs.dps?.enemy?.[key])}" placeholder="미입력"></dd></div>`).join('')}</dl></details>
+    <details data-role="dock-enemy-defense"><summary>아머·저항·심화 직접 입력</summary><dl class="native-condition-values">${Object.keys(SEASON_DPS_ENEMY_FIELDS).filter(key=>key!=='numbedStacks').map(key => {
+      const def = seasonDpsEnemyFieldDefinition(build, key);
+      return `<div><dt><label for="dock-enemy-${key}">${esc(def.label)}</label></dt><dd><input id="dock-enemy-${key}" type="number" step="any" min="${def.min}" max="${def.max}" data-season-edit="dps-input" data-key="enemy:${key}" value="${esc(inputs.dps?.enemy?.[key])}" placeholder="미입력"></dd></div>`;
+    }).join('')}</dl></details>
     ${renderFixedNumbedField(build,s.report,inputs.dps?.enemy?.numbedStacks)}
     ${periodicBurst ? renderSeasonDpsField(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(inputs.dps),'조건 탭') : ''}
+    ${windowAssignments}
     ${allocations}
     ${reapingAllocations}
     ${skillFields ? `${shareOverflow?`<p role="status">시전 배분 ${number(shareOverflow)}% / 최대 100%</p>`:''}<details data-role="dock-skill-conditions"${shareOverflow?' open':''}><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}

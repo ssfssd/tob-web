@@ -1,5 +1,6 @@
 import { describeSeasonOptionChange } from './seasonNumericStatsView.js';
 import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
+import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -41,10 +42,10 @@ export function renderResourceChanges(p,esc,{board=false,skill=false}={}){
   const rows=[...(p.resourceChanges??[]),...(p.resourceCosts??[]),...(p.resourceRecovery??[])];
   const castCosts=skill?rows.filter(row=>row.label==='시전당 MP'||row.label==='시전당 HP'):[];
   const [first,...rest]=castCosts.length?rows.filter(row=>!castCosts.includes(row)):rows;
-  const manaNote=p.manaObservationStale?`<p>MP 회복 조건이 바뀌었습니다. ${board?'적용':'교체'} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
+  const manaNote=p.manaObservationStale?`<p>${p.previous?'직전 변경 · ':''}MP 회복 조건이 바뀌었습니다. ${board?'적용':'교체'} 후 관측 MP 수지는 새 관측값이 필요합니다.</p>`:'';
   if(!first&&!castCosts.length)return manaNote;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
-  const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
+  const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
   const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
   return detailRows.length||manaNote||basisNote
     ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}</details>`
@@ -82,7 +83,6 @@ export function mobileDpsBar(s){
   const d=s.report.fullDps;
   const showAssumed=!d.supported&&assumed?.supported;
   const value=showAssumed?assumed.dps:d.dps;
-  const baseline=showAssumed?s.editComparison?.assumed?.baseline:s.editComparison?.baseline;
-  const change=baseline?.supported?baseline.delta:null;
-  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기"><span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):'확인 필요'}</b><small data-mobile-delta>${!s.pending.size&&Number.isFinite(change)&&change!==0?signed(change):''}</small></a>`;
+  const change=compactSeasonEditDelta(showAssumed?s.editComparison?.assumed:s.editComparison);
+  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기"><span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):'확인 필요'}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small></a>`;
 }

@@ -5,6 +5,16 @@ const link = r => /^https:\/\/tlidb\.com\/(en|ko)\//u.test(r?.sourceUrl ?? "")
   ? `<a href="${esc(r.sourceUrl)}" target="_blank" rel="noreferrer">SS14 근거</a>` : "";
 const cell = (label, value, key, suffix = "") => `<div class="native-stat-cell"><dt>${label}</dt><dd data-stat="${key}">${number(value)}${Number.isFinite(value) ? suffix : ""}</dd></div>`;
 const activeSlotLabel = index => index === 0 ? '주력 스킬' : '액티브 '+(index+1);
+function renderElixirRestoration(rows) {
+  if (!rows?.length) return '';
+  return `<details data-role="elixir-restoration"><summary>회복 영약</summary><table aria-label="영약 1회 회복량">
+    <thead><tr><th scope="col">영약</th><th scope="col">1회 회복량</th><th scope="col">기본 회복 시간</th></tr></thead><tbody>
+    ${rows.map(({name,resource,percent,baseDuration,receipt,level,perUse}) => {
+      const unit=resource==='mana'?'MP':'HP';
+      const amount=Number.isFinite(perUse) ? `${number(perUse)} ${unit}` : '확인 필요';
+      return `<tr><th scope="row">${esc(safeName(name))} · Lv.${number(level)} ${link(receipt)}</th><td>${amount}${Number.isFinite(percent)?` (최대 ${unit}의 ${number(percent)}%)`:''}</td><td>${number(baseDuration)}초</td></tr>`;
+    }).join('')}</tbody></table><p class="native-stat-note">표시량은 최대 HP·MP와 영약 효과 배율 기준입니다. 전투 중 실제 회복량은 사용 시점과 자원 잔량에 따라 달라집니다.</p></details>`;
+}
 function skillCosts(cost, key) {
   if(cost?.manaPerUse==null)return '';
   const values=[];
@@ -137,6 +147,7 @@ export function renderSeasonNumericStats(report) {
       ${mana.reservedManaPercent===null?`<button type="button" data-ss14-action="result-tab" data-tab="conditions">${manaReservations?.some(row=>Number.isInteger(row.supportIndex))?'봉인 조건 확인':'오라 조건 확인'}</button>`:''}
       ${manaBalance(budget, averaged, assumed, otherBudget, c.survival, costs, [...new Set(excluded)],
         displayedDps.scope==='ss14-thea-joint-combat')}</details>`:''}
+    ${renderElixirRestoration(stats.elixirRestoration)}
     <details data-role="numeric-character"><summary>속성·에너지</summary>
     <dl class="native-stat-list">${Object.entries({ strength: "힘", dexterity: "민첩", intelligence: "지혜" }).map(([key, label]) => cell(label,c.values[key],key)).join("")}
       <div class="native-stat-cell"><dt>스킬 에너지</dt><dd data-stat="skill-energy">${number(report.energy?.used)} / ${number(report.energy?.maximum)}</dd></div>

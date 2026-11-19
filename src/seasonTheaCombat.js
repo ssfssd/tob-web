@@ -103,10 +103,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const end = warmup + seconds;
   const dotWindows = new Map(report.fullDps.rows.filter(row=>row.dotWindows).map(row=>[row.rowIndex,row.dotWindows]));
   const dotBoundaries = [...new Set([...dotWindows.values()].flat(2))].sort((a,b)=>a-b);
-  const dotInEffect = (row,time) => !dotWindows.has(row.rowIndex)
-    || dotWindows.get(row.rowIndex).some(([start,stop])=>time>=start && time<stop);
-  const frostSources = new Map(report.fullDps.rows.filter(row=>row.combat?.frostSource && row.dotWindows?.length)
-    .map(row=>[row.rowIndex,{source:row.combat.frostSource,end:Math.max(...row.dotWindows.map(([,stop])=>stop))}]));
+  const dotWindowAt = (row,time) => dotWindows.get(row.rowIndex)?.find(([start,stop])=>time>=start && time<stop);
+  const dotInEffect = (row,time) => !dotWindows.has(row.rowIndex) || Boolean(dotWindowAt(row,time));
+  const frostRows = new Set(report.fullDps.rows.filter(row=>row.combat?.frostSource && row.dotWindows?.length).map(row=>row.rowIndex));
+  const frostSources = new Map();
   const reapingReadyAt = new Map();
   const reapedNativeRows = new Map();
   let reapingBoundary = false;
@@ -143,7 +143,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const blockers = new Set();
   let hasProjectileTie = false;
   let hasFissureTie = false;
-  let aggressionUntil = 0, affliction = enemy.affliction ?? 0, afflictionUntil = 0, gearNumbedUntil=0;
+  let affliction = enemy.affliction ?? 0;
+  let afflictionUntil = affliction > 0 ? rules.affliction.duration : 0;
+  let afflictionSourceBound = false;
+  let aggressionUntil = 0, gearNumbedUntil=0;
   // Native DoT uses the observed maintained rate, shared with Ignite ticks.
   let dotTriggerStart = 0, dotTriggerOccurrence = 1;
   let nextDotTrigger = nativeDot && dotRate > 0 ? 1 / dotRate : Infinity;
@@ -477,7 +480,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       clock = time; ailments.expire(time);
       for (let i = wilts.length - 1; i >= 0; i--) if (wilts[i].expires <= time + eps) wilts.splice(i, 1);
       if (aggressionUntil <= time + eps) aggressionUntil = 0;
-      if (afflictionUntil <= time + eps) { afflictionUntil = 0; affliction = 0; }
+      if (afflictionUntil <= time + eps) { afflictionUntil = 0; affliction = 0; afflictionSourceBound = false; }
     },
     advance(from, to, state) {
       currentTenacity = state.stacks.Tenacity; recentAgility = state.events.recentAgility > 0;
@@ -485,16 +488,29 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const r = getReport({ ...state, events: { ...state.events, ...ailmentState } });
       if (!r.fullDps.supported) r.fullDps.blockers.forEach(s => blockers.add(s));
       const delta = to - from, active = activeIgnites();
-      if (r.fullDps.rows.some(row => {
+      for (const row of r.fullDps.rows) {
+        if (!frostRows.has(row.rowIndex)) continue;
+        const window = dotWindowAt(row,from);
+        if (!window) continue;
         const frost = frostSources.get(row.rowIndex);
-        return frost && from < frost.end && row.combat?.frostSource !== frost.source;
-      })) blockers.add('동토의 시전자 대미지가 바뀌는 시간표는 적용 시점이 미확인입니다.');
+        const source = row.combat?.frostSource;
+        if (frost?.window !== window) frostSources.set(row.rowIndex,{window,source});
+        else if (source !== frost.source) blockers.add('동토의 시전자 대미지가 바뀌는 시간표는 적용 시점이 미확인입니다.');
+      }
       const native = r.fullDps.rows.filter(row => (row.combat?.hasDot || row.combat?.frostSource) && dotInEffect(row,from));
       const minionDots = row => (row.ailmentDps ?? 0) + (row.minionSkills ?? []).filter(a => a.persistent).reduce((sum,a) => sum + a.dps, 0);
+      // The module's observed uptime supplies no individual stack timestamps for ranking against player ignites.
+      if (active.some(effect => effect.damage > 0) && r.fullDps.rows.some(row => row.ailmentDps > 0)) {
+        blockers.add('플레이어와 소환체가 함께 부여한 점화·스코치의 적용 순서와 중첩 상한 계산은 미지원입니다.');
+      }
       const dotActive = active.length > 0 || wilts.length > 0 || r.fullDps.rows.some(row => minionDots(row) > 0)
         || native.some(row => row.combat.dotWithoutAffliction > 0 || row.combat.frostWithoutAffliction > 0);
-      if (dotActive) afflictionUntil = to + rules.affliction.duration;
-      const rate = afflictionUntil > from ? (input.afflictionRate ?? 0) + bonus('affliction_per_second') + (has("thea-affliction-gain") ? 10 * Math.min(18, state.stacks.Tenacity) : 0) : 0;
+      if (dotActive) {
+        afflictionUntil = to + rules.affliction.duration;
+        afflictionSourceBound = true;
+      }
+      // The starting target value carries no application rate until this build deals DoT.
+      const rate = afflictionSourceBound ? (input.afflictionRate ?? 0) + bonus('affliction_per_second') + (has("thea-affliction-gain") ? 10 * Math.min(18, state.stacks.Tenacity) : 0) : 0;
       const at = t => Math.min(100, affliction + rate * t);
       const integral = (a, b) => { const cap = rate > 0 ? clamp((100 - affliction) / rate, a, b) : b; return (affliction * (cap - a) + rate * (cap * cap - a * a) / 2) + 100 * (b - cap); };
       const ignite = active.length ? igniteTarget(r,active) : null;

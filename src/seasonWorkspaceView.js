@@ -15,7 +15,7 @@ import { formatAppDateTime } from "./dateTimePresentation.js";
 import { SEASON_COMPONENT_LABELS } from "./seasonComponents.js";
 import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition } from "./seasonDps.js";
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
@@ -451,7 +451,7 @@ function dpsControls(document, report, formValues, showDummy = false) {
     formValues[`dps-input:${key}`] ?? value ?? "", "SS14 DPS", limits);
   return `${showDummy ? renderTrainingDummyPicker(input?.enemy) : ""}<details data-role="season-dps-input"><summary>${showDummy ? "대상 방어·스킬 상세 조건" : "대상·스킬 조건"}</summary>
     ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><details><summary>구성 확인 기준</summary><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p></details>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
-    <fieldset><legend>대상</legend>${Object.entries(SEASON_DPS_ENEMY_FIELDS).filter(([key])=>key!=='numbedStacks').map(([key, def]) => field(`enemy:${key}`, def, input?.enemy?.[key])).join("")}
+    <fieldset><legend>대상</legend>${Object.keys(SEASON_DPS_ENEMY_FIELDS).filter(key=>key!=='numbedStacks').map(key => field(`enemy:${key}`, seasonDpsEnemyFieldDefinition(build,key), input?.enemy?.[key])).join("")}
       ${renderFixedNumbedField(build,report,formValues['dps-input:enemy:numbedStacks']??input?.enemy?.numbedStacks)}</fieldset>
     ${hasPeriodicBurstSupport(report.components)?field(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(input)):''}
     ${report.componentProjection.rows.filter(r => r.slateControls?.length).map(r => `<fieldset><legend>${escape(r.name)} · SS14 석판 옵션</legend>

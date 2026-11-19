@@ -15,7 +15,7 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
-import { SEASON_DPS_SKILL_FIELDS } from './seasonDps.js';
+import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowAssignment } from './seasonDps.js';
 import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
@@ -1498,6 +1498,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           api.flush();
           api.edit({kind:action,key:d.key});
           state.focusRole=`dot-allocation-${d.key}`;
+          return;
+        }
+        if (action === 'assign-dot-window') {
+          api.flush();
+          const conflicts=state.report.fullDps.dotWindowConflicts??state.report.assumedDps?.dotWindowConflicts??[];
+          const conflict=conflicts.find(row=>row.id===d.key && row.start===Number(d.start) && row.stop===Number(d.stop));
+          const edit=seasonDotWindowAssignment(state.document.targetBuild,conflict,Number(d.index));
+          if (!edit) throw new Error('겹친 구간이 바뀌었거나 시간표가 입력 한도를 넘었습니다. 적용 구간을 확인하세요.');
+          api.edit(edit);
+          state.focusField={edit:edit.kind,key:edit.key,inResults:true};
           return;
         }
         if (action === 'result-tab') {

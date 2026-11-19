@@ -104,15 +104,15 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
       const line=block?.split('\n').find(text=>text.endsWith('Ill Omen Cumulative Efficiency while Blur is active'));
       if (line) advancedElixirLine(line,0,advancedExtensionContext(build,row,`elixir:${index}`,fingerprint,control));
     }
+    const restoration = block?.match(/^Casts this skill and gains restoration:\nRestores ([\d.]+) % Max (Life|Mana) within ([\d.]+) s\nThis skill's Restoration Effect and Duration are also affected by Elixir Effect and Duration$/u);
+    if (restoration) {
+      row.restoration = { resource: restoration[2].toLowerCase(), percent: Number.isFinite(scale) ? Number(restoration[1]) * scale : null,
+        baseDuration: Number(restoration[3]), receipt: row.progressionReceipt ?? row.receipt };
+    }
     if (enabled === 0) { row.inactive.push({ reason: "입력한 영약 비활성 상태" }); continue; }
     if (enabled === "" || scale === "") continue;
     if (!block) { row.blockers.push({reason:`SS14 ${level}레벨 영약의 효과 수치가 필요합니다.`}); continue; }
-    const restoration = block.match(/^Casts this skill and gains restoration:\nRestores ([\d.]+) % Max (Life|Mana) within ([\d.]+) s\nThis skill's Restoration Effect and Duration are also affected by Elixir Effect and Duration$/u);
-    if (restoration) {
-      row.restoration = { resource: restoration[2].toLowerCase(), percent: Number(restoration[1]) * scale,
-        baseDuration: Number(restoration[3]), receipt: row.receipt };
-      continue;
-    }
+    if (restoration) continue;
     if (!block.startsWith("Casts this skill and gains an Elixir Effect:\n")) {
       row.blockers.push({ reason: "영약 회복 총량·지속시간 계산 미지원" }); continue;
     }

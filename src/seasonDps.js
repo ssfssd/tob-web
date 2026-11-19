@@ -49,6 +49,12 @@ export const SEASON_DPS_ENEMY_FIELDS = {
   affliction: { label: "적 심화 수치", min: 0, max: 100 },
   numbedStacks: FIXED_NUMBED_FIELD,
 };
+export function seasonDpsEnemyFieldDefinition(build, key) {
+  const field = SEASON_DPS_ENEMY_FIELDS[key];
+  if (key === 'affliction' && theaCombatEnabled(build) && build.ss14Inputs.theaCycle?.mode === 'automatic')
+    return { ...field, label: '전투 시작 시 적 심화 수치' };
+  return field;
+}
 export const SEASON_DPS_SKILL_FIELDS = {
   ...WEAPON_FIELDS, ...ADDED_FIELDS,
   ...SEASON_MINION_FIELDS,
@@ -160,6 +166,17 @@ function continuousDotWindows(value) {
     else merged.push([start, stop]);
   }
   return merged;
+}
+export function seasonDotWindowAssignment(build, conflict, winner) {
+  if (!conflict?.slots.includes(winner)) return null;
+  const loser = conflict.slots.find(slot => slot !== winner);
+  const ranges = dotWindowRanges(build.ss14Inputs.dps?.skills?.[loser]?.dotWindows);
+  if (!ranges) return null;
+  const {start,stop} = conflict;
+  const remaining = ranges.flatMap(([from,to]) => to <= start || from >= stop ? [[from,to]]
+    : [[from,Math.min(to,start)],[Math.max(from,stop),to]].filter(([a,b])=>a<b));
+  const value = remaining.length ? remaining.map(range=>range.join('-')).join(', ') : '없음';
+  return dotWindowRanges(value) ? {kind:'dps-input',key:`${loser}:dotWindows`,value} : null;
 }
 function observedTimeList(value) {
   if (typeof value !== 'string' || value.length > 4096) return null;
@@ -1199,6 +1216,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const dotAllocationGroups = [];
   const dotUptimeFields = {};
   const dotWindowIssues = new Map();
+  const dotWindowConflicts = [];
   const addWindowIssue = (reason, indices) => {
     blockers.push(reason);
     dotWindowIssues.set(reason,[...new Set([...(dotWindowIssues.get(reason)??[]),...indices])].sort((a,b)=>a-b));
@@ -1214,7 +1232,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         addPersistentRow(row.id,row);
       if(row.permafrostBreakdown)addPersistentRow(FROST_TERRA_ID,row);
     }
-    for (const group of persistentGroups.values()) {
+    for (const [id,group] of persistentGroups) {
       if (group.length < 2 && !group[0].dotWindows) continue;
       if (!combat) {
         blockers.push("자동 은총에서 동일 지속 스킬의 중첩 구간을 계산하려면 복합 계산을 켜세요.");
@@ -1228,16 +1246,19 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       const end = build.ss14Inputs.theaCycle.warmup + build.ss14Inputs.theaCycle.seconds;
       const windows = group.flatMap(row=>row.dotWindows.map(([start,stop])=>({start,stop,index:row.rowIndex}))).sort((a,b)=>a.start-b.start);
       const invalid = new Set();
-      let furthest;
+      let furthest, conflict;
       for (const window of windows) {
         if (window.stop>end+1e-8) invalid.add(window.index);
         if (furthest && window.start<furthest.stop) {
           invalid.add(window.index);
           invalid.add(furthest.index);
+          if (!conflict && furthest.index !== window.index && window.stop <= end + 1e-8 && furthest.stop <= end + 1e-8)
+            conflict = {id,start:window.start,stop:Math.min(window.stop,furthest.stop),slots:[furthest.index,window.index].sort((a,b)=>a-b)};
         }
         if (!furthest || window.stop>furthest.stop) furthest=window;
       }
       if (invalid.size) {
+        if (conflict) dotWindowConflicts.push(conflict);
         const scope=group.length===1?'지속 대미지':'동일 지속 스킬의';
         addWindowIssue(`${scope} 적용 구간은 겹치지 않게 측정 종료 시각 안에서 입력하세요.`,invalid);
         continue;
@@ -1283,6 +1304,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     ...(dotExclusiveUnconfirmed.length && { dotExclusiveUnconfirmed }),
     ...(dotAllocationGroups.length && { dotAllocationGroups }),
     ...(dotWindowIssues.size && { dotWindowIssues:Object.fromEntries(dotWindowIssues) }),
+    ...(dotWindowConflicts.length && { dotWindowConflicts }),
     manualResources,
     receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
       ...(sharedCommand?.receipt ? [sharedCommand.receipt] : []),

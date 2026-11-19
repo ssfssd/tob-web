@@ -166,6 +166,13 @@ export function calculateSeasonNumericStats(report) {
         criticalDamage: offense?.values.criticalDamage ?? null }, receipt: entry.receipt,
       blockers: [...new Set([...entry.blockers, ...(direct?.blockers ?? []), ...(offense?.blockers ?? [])])] };
   }));
+  const elixirRestoration = projection.rows.filter(row => row.restoration).map(row => {
+    const { resource, baseDuration, receipt } = row.restoration;
+    const percent = row.blockers.length ? null : row.restoration.percent;
+    const maximum = report.character.values[resource];
+    return { name: row.name, resource, percent, baseDuration, receipt, level: row.effectiveLevel,
+      perUse: finite(percent) && finite(maximum) ? round(maximum * percent / 100) : null };
+  });
   // Legacy catalog references intentionally retain their old status for source
   // comparison. The visible warning list must use the resolved current model,
   // not those generic migration disclaimers or missing flat-catalog aliases.
@@ -175,5 +182,5 @@ export function calculateSeasonNumericStats(report) {
     ...report.fullDps.blockers.map(reason=>({label:'전체 DPS',reason})),
   ] : report.blockers.filter(b=>b.path!=='season-rules');
   unresolved.push(...(projection.globalBlockers??[]).map(reason=>({reason})));
-  return { options, skills, excluded, unresolved:[...new Map(unresolved.map(r=>[`${r.path??''}:${r.reason}`,r])).values()], scope: "confirmed-options-only" };
+  return { options, skills, elixirRestoration, excluded, unresolved:[...new Map(unresolved.map(r=>[`${r.path??''}:${r.reason}`,r])).values()], scope: "confirmed-options-only" };
 }

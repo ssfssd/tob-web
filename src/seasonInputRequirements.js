@@ -153,7 +153,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     }));
   if(/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은/u.test(reason)) {
     if(reason.includes('적용 구간')) return (dps?.dotWindowIssues?.[reason]??[]).map(rowIndex=>({
-      section:'combat', label:`스킬 ${rowIndex+1} 적용 구간`, edit:'dps-input', key:`${rowIndex}:dotWindows`,
+      section:'combat', tab:'conditions', label:`스킬 ${rowIndex+1} 적용 구간`, edit:'dps-input', key:`${rowIndex}:dotWindows`,
     }));
     const confirm = reason.endsWith('슬롯별 유지율 배정을 확인하세요.');
     const affected = confirm ? dps?.dotExclusiveUnconfirmed : dps?.dotUptimeOverflow;
