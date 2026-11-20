@@ -117,7 +117,7 @@ function renderEncounterChanges(rows,role,{editable=false}={}){
   const value=(n,unit)=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:6})+unit:typeof n==='string'?esc(n)+(n==='없음'?'':unit):'미입력';
   return `<ul aria-label="달라진 전투 조건" data-role="${role}">${rows.map(({label,a,b,edit,key,tab,unit})=>
     `<li>${esc(label.replace(/ \(%\)$/u,''))} <strong>${value(a,unit)} → ${value(b,unit)}</strong>
-      ${editable?button('조건 수정',tab?'result-tab':'requirement',
+      ${editable&&edit?button('조건 수정',tab?'result-tab':'requirement',
         `${tab?'data-tab="conditions"':'data-section="combat"'} data-field="${esc(edit)}" data-field-key="${esc(key)}" aria-label="${esc(label)} 수정"`):''}</li>`).join('')}</ul>`;
 }
 
@@ -549,10 +549,20 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
 }
 export function renderSkillElixirDps(phases,index) {
   if (!phases?.states.length) return '';
-  const rows=phases.states.map(({active,uptime,dps,weightedDps})=>
-    `<tr><th scope="row">${esc(phases.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '))}</th><td>${number(uptime)}%</td><td>${number(dps)}</td><td>${number(weightedDps)}</td></tr>`).join('');
-  return calcGroup('영약 상태별 스킬 DPS','',
-    `<table class="slot-dps-table"><thead><tr><th scope="col">영약</th><th scope="col">시간 비중</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th></tr></thead><tbody>${rows}</tbody></table>`,
+  const {states,channelCostTotalOnly}=phases;
+  const showCosts=channelCostTotalOnly||states.some(row=>row.manaPerSecond>0||row.lifePerSecond>0);
+  const showLife=phases.lifePerSecond>0||states.some(row=>row.lifePerSecond>0);
+  const cost=(mana,life)=>{
+    const values=[['MP',mana],['HP',life]].filter(([label,value])=>Number.isFinite(value)&&(label==='MP'||showLife));
+    return values.length?values.map(([label,value])=>`${number(value)} ${label}`).join(' · '):'—';
+  };
+  const rows=states.map(({active,uptime,dps,weightedDps,manaPerSecond,lifePerSecond,weightedManaPerSecond,weightedLifePerSecond})=>
+    `<tr><th scope="row">${esc(phases.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '))}</th><td>${number(uptime)}%</td><td>${number(dps)}</td><td>${number(weightedDps)}</td>
+      ${showCosts?`<td>${cost(manaPerSecond,lifePerSecond)}${Number.isFinite(weightedManaPerSecond)||Number.isFinite(weightedLifePerSecond)?`<small class="elixir-mp-contribution">반영 ${cost(weightedManaPerSecond,weightedLifePerSecond)}</small>`:''}</td>`:''}</tr>`).join('');
+  const total=showCosts?`<tfoot><tr><th scope="row" colspan="4">평균 소모</th><td>${cost(phases.manaPerSecond,phases.lifePerSecond)}</td></tr></tfoot>`:'';
+  const note=channelCostTotalOnly?'<p>집중 스킬의 관측 차감 횟수는 전체 측정 구간의 값입니다.</p>':'';
+  return calcGroup(showCosts?'영약 상태별 스킬 DPS·소모':'영약 상태별 스킬 DPS','',
+    `<table class="slot-dps-table"><thead><tr><th scope="col">영약</th><th scope="col">시간 비중</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th>${showCosts?'<th scope="col">수동 소모/초</th>':''}</tr></thead><tbody>${rows}</tbody>${total}</table>${note}`,
     `skill-elixir-dps-${index}`);
 }
 function renderMoonStrikeForms(build, entry, row) {

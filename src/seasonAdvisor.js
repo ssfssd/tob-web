@@ -7,9 +7,10 @@ import { ADDED_FIELDS, WEAPON_FIELDS } from './seasonWeaponInputs.js';
 import { getSeasonSelectionRecord } from './seasonSelections.js';
 import { boundSeasonConditionGroups, exclusiveResourceStates, incompatibleNearbyEnemyStates } from './seasonEffectConditions.js';
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
-import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
+import { theaCombatEnabled, theaCombatInputValues, theaCombatKeys } from './seasonTheaCombatInputs.js';
 import { hasPeriodicBurstSupport, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaElixirTimingKeys } from './seasonTheaEvents.js';
+import { isThea } from './seasonTheaRevelation.js';
 import { observedSkillCostFields } from './seasonDps.js';
 
 export const SEASON_ADVISOR_METRICS = {
@@ -51,15 +52,78 @@ function extensionEncounterValues(build, report) {
     if (value === '' || !/^(?:module:|elixir:|ingredient:.*:(?:minion|rate)$)/u.test(key)) continue;
     const presence = /^module:([0-4]):active$/u.exec(key);
     const owner = presence ? build.skills?.active?.[Number(presence[1])]?.skillId : `${row.path}:${row.itemId}`;
-    entries.set(`${key}:${owner}:${control.sourcePageSha256}`, value);
+    entries.set(`${key}:${owner}:${control.sourcePageSha256}`, control);
   }
   return entries;
+}
+
+export function seasonExtensionEncounterChanges(left, right, leftReport, rightReport) {
+  const current=extensionEncounterValues(right,rightReport);
+  return [...extensionEncounterValues(left,leftReport)].flatMap(([identity,old])=>{
+    const control=current.get(identity);
+    return control && old.value!==control.value ? [{control,a:old.value,b:control.value}] : [];
+  });
 }
 
 export function sameObservedSkillCostBasis(before, after, index, metric) {
   const observation = report => (report?.[metric] ?? report?.fullDps)?.rows?.find(row=>row.rowIndex===index)?.castCostObservation;
   const a=observation(before), b=observation(after);
   return a?.status==='applied' && b?.status==='applied' && a.basis===b.basis;
+}
+
+const independentTheaElixirTiming = (left, right) => [0, 1].flatMap(index => {
+  const old = left.skills?.elixirs?.[index]?.skillId;
+  return old && old === right.skills?.elixirs?.[index]?.skillId ? [] : theaElixirTimingKeys(index);
+});
+
+export function seasonTheaEncounterChanges(left, right, leftReport, rightReport, metric) {
+  const relevantKeys = (build, report) => {
+    const mechanics = report.componentProjection.rows.flatMap(row => row.mechanics ?? []);
+    return new Set([...theaCombatKeys(build, mechanics, report),
+      ...mechanics.filter(m => m.kind === 'thea-event-input').map(m => m.key)]);
+  };
+  const oldKeys = relevantKeys(left, leftReport), newKeys = relevantKeys(right, rightReport);
+  const a = { ...theaCombatInputValues(left, leftReport), combatMode: Number(theaCombatEnabled(left)) };
+  const b = { ...theaCombatInputValues(right, rightReport), combatMode: Number(theaCombatEnabled(right)) };
+  const independentElixirTiming = independentTheaElixirTiming(left, right);
+  // Retained inputs matter only while both builds actually use the effect.
+  const shared = [...newKeys].filter(key => key !== 'combatMode' && oldKeys.has(key) && !independentElixirTiming.includes(key)
+    && !(metric === 'assumedDps' && key === 'scorchResistance'));
+  return ['combatMode', ...shared].flatMap(key => a[key] === b[key] ? [] : [{ key, a: a[key], b: b[key] }]);
+}
+
+export function seasonSharedSkillInputChanges(before, after, singleSkill) {
+  return [['hitChance',100],['useShare',singleSkill?100:undefined]].flatMap(([key,fallback])=>{
+    const a=before[key]??fallback, b=after[key]??fallback;
+    return a===b ? [] : [{key,a,b}];
+  });
+}
+
+const skillSlotId = (build,index) => (index<5 ? build.skills?.active?.[index] : build.skills?.passive?.[index-5])?.skillId;
+const usesTimedCombat = build => theaCombatEnabled(build) && build.ss14Inputs.theaCycle?.mode==='automatic';
+const dedicatedSkillInputs = new Set(['itemId','sourcePageSha256','hitChance','useShare','dotWindows','fissureTimes',
+  'channelCostTimes','periodicBurstUptime','observedSkillCostBasis','moonBaseManaCostBasis',...Object.keys(WEAPON_FIELDS)]);
+
+export function seasonSlotObservationChanges(left,right,leftReport,rightReport,index,metric) {
+  const a=left.ss14Inputs.dps?.skills?.[index]??{}, b=right.ss14Inputs.dps?.skills?.[index]??{};
+  const id=a.itemId??skillSlotId(left,index);
+  if (!id || id!==(b.itemId??skillSlotId(right,index))) return [];
+  const sameSource=!a.itemId||!b.itemId||a.sourcePageSha256===b.sourcePageSha256;
+  const timed=usesTimedCombat(left);
+  const compareObservedCosts=sameSource&&sameObservedSkillCostBasis(leftReport,rightReport,index,metric);
+  const leftSchedule=timed?seasonTimedSkillInputs(leftReport,index,metric):{};
+  const rightSchedule=timed?seasonTimedSkillInputs(rightReport,index,metric):{};
+  return Object.keys(a).flatMap(key=>{
+    if (dedicatedSkillInputs.has(key)||!Object.hasOwn(b,key)||a[key]===b[key]) return [];
+    if (!compareObservedCosts&&observedSkillCostFields.includes(key)) return [];
+    if (key==='moonBaseManaCost'&&(!sameSource||!Number.isFinite(a.moonBaseManaCostBasis)
+      ||a.moonBaseManaCostBasis!==b.moonBaseManaCostBasis||a.moonBaseManaCostBasis!==leftReport?.character?.values?.mana
+      ||b.moonBaseManaCostBasis!==rightReport?.character?.values?.mana)) return [];
+    if (sameSource&&(SEASON_UPTIME_INPUTS.includes(key)||Object.hasOwn(ADDED_FIELDS,key))) return [];
+    if (timed&&key==='fissureHits'||sameSource&&leftSchedule.channelCostTimes&&rightSchedule.channelCostTimes&&key==='channelCostRate') return [];
+    if (sameSource&&leftSchedule.reapingTimes&&rightSchedule.reapingTimes&&['reapingTimes','reapingRate','reapingMode'].includes(key)) return [];
+    return [{key,a:a[key],b:b[key]}];
+  });
 }
 
 // Build choices (hero, memories, skill identity and base rating) belong to the
@@ -70,50 +134,38 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     return metric==='assumedDps' ? Object.fromEntries(Object.entries(enemy??{}).filter(([key])=>
       !ASSUMED_DPS_IGNORED_DEFENSE_FIELDS.includes(key))) : enemy;
   };
-  const independentElixirTiming = [0,1].flatMap(index=>{
-    const old = left.skills?.elixirs?.[index]?.skillId;
-    return old && old===right.skills?.elixirs?.[index]?.skillId ? [] : theaElixirTimingKeys(index);
-  });
+  const independentElixirTiming = independentTheaElixirTiming(left, right);
+  const compareTheaEvents = isThea(left) && isThea(right) && leftReport && rightReport;
   const encounter = build => ({ character:Object.fromEntries(
     Object.entries(build.ss14Inputs.character??{}).filter(([key])=>key!=='observedManaRecovery')), enemy:target(build),
     blessings:build.ss14Inputs.blessings, heroCombat:build.ss14Inputs.heroCombat,
-    theaCycle:build.ss14Inputs.theaCycle, theaEvents:Object.fromEntries(
+    theaCycle:build.ss14Inputs.theaCycle, theaEvents:compareTheaEvents ? undefined : Object.fromEntries(
       Object.entries(build.ss14Inputs.theaEvents??{}).filter(([key])=>!independentElixirTiming.includes(key)
         && !(metric==='assumedDps'&&key==='scorchResistance'))),
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
+  if (compareTheaEvents && seasonTheaEncounterChanges(left, right, leftReport, rightReport, metric).length) return false;
   const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
   if(metric!=='assumedDps'&&leftBurst!==undefined&&rightBurst!==undefined&&leftBurst!==rightBurst
     && hasPeriodicBurstSupport(leftReport?.components)&&hasPeriodicBurstSupport(rightReport?.components))return false;
   const leftInputs = left.ss14Inputs.dps?.skills ?? {}, rightInputs = right.ss14Inputs.dps?.skills ?? {};
-  const slotId = (build, index) => (index < 5 ? build.skills?.active?.[index] : build.skills?.passive?.[index-5])?.skillId;
-  const timed = theaCombatEnabled(left) && left.ss14Inputs.theaCycle?.mode === 'automatic';
+  const timed = usesTimedCombat(left);
   const singleSkill = leftReport?.coupledSkills?.rows.length === 1 && rightReport?.coupledSkills?.rows.length === 1;
   for (const index of new Set([...Object.keys(leftInputs), ...Object.keys(rightInputs)])) {
     const a = leftInputs[index] ?? {}, b = rightInputs[index] ?? {};
-    const leftId = a.itemId ?? slotId(left, Number(index)), rightId = b.itemId ?? slotId(right, Number(index));
-    const sameSkill = leftId && leftId === rightId && (!a.itemId || !b.itemId || a.sourcePageSha256 === b.sourcePageSha256);
+    const leftId = a.itemId ?? skillSlotId(left, Number(index)), rightId = b.itemId ?? skillSlotId(right, Number(index));
+    if (leftId && rightId && seasonSharedSkillInputChanges(a,b,singleSkill).length) return false;
+    // Replacement requires its own source-bound observations, including cast rate.
+    if (leftId!==rightId) continue;
+    const sameSkill = leftId && (!a.itemId || !b.itemId || a.sourcePageSha256 === b.sourcePageSha256);
     // An absent optional flat-damage input supplies no damage. Entering a
     // positive value on the same skill changes the encounter assumption.
     if (sameSkill && Object.keys(ADDED_FIELDS).some(key => (a[key] ?? 0) !== (b[key] ?? 0))) return false;
-    if (sameSkill && ((a.hitChance ?? 100) !== (b.hitChance ?? 100)
-      || (a.useShare ?? (singleSkill ? 100 : undefined)) !== (b.useShare ?? (singleSkill ? 100 : undefined)))) return false;
-    const compareObservedCosts = sameSkill && sameObservedSkillCostBasis(leftReport,rightReport,Number(index),metric);
     const leftSchedule=timed?seasonTimedSkillInputs(leftReport,Number(index),metric):{};
     const rightSchedule=timed?seasonTimedSkillInputs(rightReport,Number(index),metric):{};
     if (sameSkill&&timed&&stable(leftSchedule)!==stable(rightSchedule)) return false;
     if (sameSkill&&seasonUptimeInputChanges(left,right,leftReport,rightReport,Number(index),metric).length) return false;
-    for (const key of Object.keys(a)) {
-      if (key==='observedSkillCostBasis' || (!compareObservedCosts && observedSkillCostFields.includes(key))) continue;
-      if (key==='moonBaseManaCostBasis'||key==='moonBaseManaCost'&&(!sameSkill||!Number.isFinite(a.moonBaseManaCostBasis)
-        || a.moonBaseManaCostBasis!==b.moonBaseManaCostBasis||a.moonBaseManaCostBasis!==leftReport?.character?.values?.mana
-        || b.moonBaseManaCostBasis!==rightReport?.character?.values?.mana)) continue;
-      if (sameSkill&&SEASON_UPTIME_INPUTS.includes(key)) continue;
-      if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
-      if (timed && key==='fissureHits' || sameSkill && leftSchedule.channelCostTimes && rightSchedule.channelCostTimes && key==='channelCostRate') continue;
-      if (sameSkill && leftSchedule.reapingTimes && rightSchedule.reapingTimes && ['reapingTimes','reapingRate','reapingMode'].includes(key)) continue;
-      if (Object.hasOwn(b,key) && a[key] !== b[key]) return false;
-    }
+    if (seasonSlotObservationChanges(left,right,leftReport,rightReport,Number(index),metric).length) return false;
   }
   // A shared manual state can move between item or board sources. An
   // automatic state follows the gear and is part of the build change.
@@ -134,11 +186,7 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
       if (Object.hasOwn(b.conditions ?? {}, condition) && value !== b.conditions[condition]) return false;
     }
   }
-  const rightExtensions = extensionEncounterValues(right, rightReport);
-  for (const [key, value] of extensionEncounterValues(left, leftReport)) {
-    if (rightExtensions.has(key) && value !== rightExtensions.get(key)) return false;
-  }
-  return true;
+  return !seasonExtensionEncounterChanges(left,right,leftReport,rightReport).length;
 }
 export function seasonTimedSkillInputs(report, index, metric) {
   const row=report?.fullDps?.rows?.find(r=>r.rowIndex===index);

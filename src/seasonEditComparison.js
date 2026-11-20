@@ -1,10 +1,11 @@
-import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, sameObservedSkillCostBasis, seasonTimedSkillInputs, seasonUptimeInputChanges } from './seasonAdvisor.js';
+import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, seasonExtensionEncounterChanges, seasonSharedSkillInputChanges, seasonSlotObservationChanges, seasonTheaEncounterChanges, seasonTimedSkillInputs, seasonUptimeInputChanges } from './seasonAdvisor.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels } from './seasonGearPicker.js';
 import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldDefinition, observedSkillCostFields } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldDefinition, seasonDpsSkillFieldKeys, observedSkillCostFields } from './seasonDps.js';
+import { seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { ADDED_FIELDS } from './seasonWeaponInputs.js';
-import { theaCombatEnabled, theaCombatInputValues, theaCombatKeys } from './seasonTheaCombatInputs.js';
+import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
 import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
 import { isThea } from './seasonTheaRevelation.js';
 import { SEASON_CHARACTER_INPUTS } from './seasonCharacter.js';
@@ -68,35 +69,33 @@ export function encounterInputChanges(before, after, metric) {
       add(label,oldInputs.theaCycle[key],inputs.theaCycle[key],'thea-cycle-input',key,null,'초');
   }
   if (isThea(old)&&isThea(current)) {
-    const previousMode=theaCombatEnabled(old), mode=theaCombatEnabled(current);
-    const enabled=value=>value?'예':'아니요';
-    const modeLabel=THEA_EVENT_FIELDS.combatMode.label;
-    add(modeLabel,enabled(previousMode),enabled(mode),'thea-event','combatMode');
-    const keys=(build,report)=>{
-      const mechanics=report.componentProjection.rows.flatMap(row=>row.mechanics??[]);
-      return new Set([...theaCombatKeys(build,mechanics,report),...mechanics.filter(m=>m.kind==='thea-event-input').map(m=>m.key)]);
-    };
-    const oldKeys=keys(old,before.report), currentKeys=keys(current,after.report);
-    const oldValues=theaCombatInputValues(old,before.report), values=theaCombatInputValues(current,after.report);
-    for (const key of currentKeys) {
-      if (!oldKeys.has(key)||(metric==='assumedDps'&&key==='scorchResistance')) continue;
-      const elixir=/^elixir([01])/u.exec(key);
-      if (elixir&&old.skills.elixirs?.[elixir[1]]?.skillId!==current.skills.elixirs?.[elixir[1]]?.skillId) continue;
+    const title=mode=>mode==='automatic'?'자동 주기 평균':'현재 상태 직접 설정';
+    add('은총 계산 방식',title(oldInputs.theaCycle?.mode),title(inputs.theaCycle?.mode),'thea-mode','mode');
+    for (const {key,a,b} of seasonTheaEncounterChanges(old,current,before.report,after.report,metric)) {
       const {label,boolean}=THEA_EVENT_FIELDS[key];
-      const format=value=>boolean&&Number.isInteger(value)?enabled(value):value;
-      add(label.replace(/ \(초\)$/u,''),format(oldValues[key]),format(values[key]),'thea-event',key,undefined,
+      const format=value=>boolean&&Number.isInteger(value)?(value?'예':'아니요'):value;
+      add(label.replace(/ \(초\)$/u,''),format(a),format(b),'thea-event',key,undefined,
         label.endsWith(' (%)')?'%':label.endsWith(' (초)')?'초':'');
     }
+  }
+  const extensions=new Set();
+  for(const {control,a,b} of seasonExtensionEncounterChanges(old,current,before.report,after.report)) {
+    if(extensions.has(control.key))continue;
+    extensions.add(control.key);
+    const text=value=>control.kind==='boolean'?(value?'예':'아니요'):value;
+    add(control.label,text(a),text(b),'extension-input',control.key,undefined,control.label.endsWith(' (%)')?'%':'');
   }
   const single=before.report.coupledSkills.rows.length===1&&after.report.coupledSkills.rows.length===1;
   const timed=theaCombatEnabled(old)&&oldInputs.theaCycle?.mode==='automatic';
   current.skills.active.forEach((slot,index)=>{
-    if(!slot?.skillId||slot.skillId!==old.skills.active[index]?.skillId)return;
+    const oldId=old.skills.active[index]?.skillId;
+    if(!slot?.skillId||!oldId)return;
     const a=oldInputs.dps?.skills?.[index]??{}, b=inputs.dps?.skills?.[index]??{};
-    for(const [key,fallback] of [['hitChance',100],['useShare',single?100:undefined]]) {
+    for(const {key,a:from,b:to} of seasonSharedSkillInputChanges(a,b,single)) {
       const label=SEASON_DPS_SKILL_FIELDS[key].label;
-      add(`${index+1}번 칸 · ${label}`,a[key]??fallback,b[key]??fallback,'dps-input',`${index}:${key}`,'conditions','%');
+      add(`${index+1}번 칸 · ${label}`,from,to,'dps-input',`${index}:${key}`,'conditions','%');
     }
+    if(slot.skillId!==oldId)return;
     for(const [key,{label}] of Object.entries(ADDED_FIELDS))
       add(`${index+1}번 칸 · ${label}`,a[key]??0,b[key]??0,'dps-input',`${index}:${key}`,'conditions');
     for(const {key,a,b} of seasonUptimeInputChanges(old,current,before.report,after.report,index,metric)) {
@@ -111,10 +110,17 @@ export function encounterInputChanges(before, after, metric) {
         add(`${index+1}번 칸 · ${label}`,text(from[key]),text(to[key]),'dps-input',`${index}:${key}`,'conditions','초');
       }
     }
-    if(sameObservedSkillCostBasis(before.report,after.report,index,metric)){
-      for(const key of observedSkillCostFields)
-        if(Number.isFinite(a[key])&&Number.isFinite(b[key]))
-          add(`${index+1}번 칸 · ${SEASON_DPS_SKILL_FIELDS[key].label}`,a[key],b[key],'dps-input',`${index}:${key}`,'conditions');
+    const observations=seasonSlotObservationChanges(old,current,before.report,after.report,index,metric);
+    if(observations.length) {
+      const entry=seasonSkillSlotCalculation(after.report,index);
+      const controls=seasonDpsSkillFieldKeys(entry,slot.skillId,current);
+      for(const {key,a:from,b:to} of observations) {
+        if(!SEASON_DPS_SKILL_FIELDS[key])continue;
+        const {label,choices}=seasonDpsSkillFieldDefinition(slot.skillId,key);
+        const text=value=>choices?.find(([id])=>id===value)?.[1]??value;
+        const editable=controls.includes(key)||observedSkillCostFields.includes(key);
+        add(`${index+1}번 칸 · ${label}`,text(from),text(to),editable?'dps-input':undefined,`${index}:${key}`,'conditions',label.endsWith(' (%)')?'%':'');
+      }
     }
   });
   return changes;

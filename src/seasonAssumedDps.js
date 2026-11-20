@@ -182,6 +182,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
     manualResources:estimate.manualResources,
     measuredResources:scenario.theaAverage?.supported===true,
     elixirUptime:scenario.elixirUptime,
+    timedElixirPhases:scenario.theaAverage?.elixirPhases,
     fixedNumbed:scenario.componentProjection.fixedNumbed,
     numbed:scenario.theaAverage?.numbedEffectAverage == null ? null : {
       uptime:scenario.theaAverage.numbedUptime, stacks:scenario.theaAverage.numbedAverage,

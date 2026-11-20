@@ -134,6 +134,10 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   const rows=first.rows.map(row=>{
     const samples=states.map(({value,weight})=>({value:value.rows.find(r=>r.rowIndex===row.rowIndex&&r.id===row.id),weight}));
     const stable=(key)=>samples.every(({value})=>value?.[key]===row[key])?row[key]:null;
+    const channel=averageChannelCost(samples);
+    const manaPerSecond=channel?channel.manualManaPerSecond:weighted(samples,r=>r?.manualManaPerSecond);
+    const lifePerSecond=channel?channel.manualLifePerSecond:weighted(samples,r=>r?.manualLifePerSecond);
+    const channelCostTotalOnly=Boolean(channel&&channel.channelCost.rate!==0);
     const routes = supported ? states.map(({direct,weight,active},index)=>{
       const entry=samples[index].value;
       const trace=entry.conversionTrace??direct.find(skill=>skill.rowIndex===row.rowIndex&&skill.id===row.id)?.trace;
@@ -154,9 +158,15 @@ export function applyObservedElixirUptime(build,report,calculateState) {
             : [{trace:skill?.trace?.filter(effect=>effect.stage==='added-damage')}];
           return {active,uptime:100*weight,groups,sources:skill?.addedDamageSources};
         })},
-        elixirDpsStates:{names:varyingNames,states:states.map(({active,weight},index)=>{
-          const dps=samples[index].value.values.dps;
-          return {active,uptime:100*weight,dps,weightedDps:Number.isFinite(dps)?dps*weight:null};
+        elixirDpsStates:{names:varyingNames,manaPerSecond,lifePerSecond,channelCostTotalOnly,states:states.map(({active,weight},index)=>{
+          const sample=samples[index].value;
+          const dps=sample.values.dps;
+          const mana=channelCostTotalOnly?null:sample.manualManaPerSecond;
+          const life=channelCostTotalOnly?null:sample.manualLifePerSecond;
+          return {active,uptime:100*weight,dps,weightedDps:Number.isFinite(dps)?dps*weight:null,
+            manaPerSecond:mana,lifePerSecond:life,
+            weightedManaPerSecond:Number.isFinite(mana)?mana*weight:null,
+            weightedLifePerSecond:Number.isFinite(life)?life*weight:null};
         })},
       }),
       dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
@@ -167,9 +177,8 @@ export function applyObservedElixirUptime(build,report,calculateState) {
       frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,
       permafrostHitDps:weighted(samples,value=>value?.permafrostHitDps),
       manaPerUse:stable('manaPerUse'),lifePerUse:stable('lifePerUse'),
-      manualManaPerSecond:weighted(samples,r=>r?.manualManaPerSecond),
-      manualLifePerSecond:weighted(samples,r=>r?.manualLifePerSecond),
-      ...averageChannelCost(samples),
+      manualManaPerSecond:manaPerSecond,manualLifePerSecond:lifePerSecond,
+      ...(channel&&{channelCost:channel.channelCost}),
       values:{...row.values,manualRate:weighted(samples,r=>r?.values.manualRate),
         ...Object.fromEntries(damageFieldsFor(row).map(key=>[key,supported?weighted(samples,r=>r?.values[key]??0):null]))}};
   });

@@ -140,7 +140,8 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
     const extra = e.stat === 'minion_physical_damage_as_erosion_damage' && e.operation === 'gain_percent_of_source';
     if (conversion || extra) {
       const source=report.componentProjection.rows.find(row=>row.path===e.path);
-      const effectSource={ path: e.path, itemId: e.itemId, name: source?.name ?? e.effectSource?.name };
+      const effectSource={ path: e.path, itemId: e.itemId, name: source?.name ?? e.effectSource?.name,
+        stat:e.stat,sourceText:e.sourceText };
       if (conversion) damageEffects.push({ ...e, ...conversion, operation: 'set', optionalConversionSource: true, effectSource });
       else if (profile.type === 'physical') damageEffects.push({ ...e, stat: 'skill-physical-damage-as-erosion', operation: 'add', effectSource });
       continue;

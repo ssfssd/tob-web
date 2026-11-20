@@ -151,6 +151,8 @@ const sourceStats = {
   physical_damage: "물리 대미지", elemental_damage: "원소 대미지", area_damage: "범위 대미지", projectile_damage: "투사체 대미지",
   physical_damage_as_fire:"물리 대미지에서 화염 추가 획득",physical_damage_as_cold:"물리 대미지에서 냉기 추가 획득",
   physical_damage_as_lightning:"물리 대미지에서 번개 추가 획득",
+  minion_physical_damage_to_erosion_damage:"소환체 물리 → 부식 전환",
+  minion_physical_damage_as_erosion_damage:"소환체 물리 → 부식 추가 획득",
   cast_speed: "시전 속도", attack_speed: "공격 속도", strength: "힘", dexterity: "민첩", intelligence: "지혜",
   projectile_speed: "투사체 속도", movement_speed: "이동 속도", all_attributes: "모든 속성",
   max_terra_charges: "지면 에너지 최대 중첩 수", terra_charge_restoration_speed: "지면 에너지 회복 속도",
@@ -1131,7 +1133,8 @@ function renderCalculationNotes(s) {
 }
 function renderObservedElixirUptime(s) {
   const assumed=!s.report.fullDps.supported&&s.report.assumedDps?.supported;
-  const uptime=assumed?s.report.assumedDps.elixirUptime:s.report.elixirUptime;
+  const uptime=assumed?(s.report.assumedDps.timedElixirPhases??s.report.assumedDps.elixirUptime)
+    :(s.report.theaAverage?.elixirPhases??s.report.elixirUptime);
   if(!uptime?.supported)return '';
   const fmt=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:2});
   const mp=value=>Number.isFinite(value)?fmt(value):'확인 필요';
@@ -1140,18 +1143,20 @@ function renderObservedElixirUptime(s) {
   const combinedChannelCost=uptime.states.some(row=>row.channelCostTotalOnly);
   const partial=uptime.states.length>1;
   const mpByState=row=>{
+    if(uptime.timed&&!Number.isFinite(row.manaPerSecond))return '—';
     const value=row.channelCostTotalOnly?row.manaExcludingCombinedChannels:row.manaPerSecond;
     const contribution=row.channelCostTotalOnly?row.weightedManaExcludingCombinedChannels:row.weightedManaPerSecond;
     if(row.channelCostTotalOnly&&value===undefined)return '—';
     return mp(value)+(partial&&Number.isFinite(contribution)?`<small class="elixir-mp-contribution">반영 ${fmt(contribution)}</small>`:'');
   };
-  return `<details data-role="observed-elixir-uptime"><summary>영약 유지율 · ${basis}</summary>
+  return `<details data-role="observed-elixir-uptime"><summary>${uptime.timed?'전투 시간표의 영약 가동률':'영약 유지율'} · ${basis}</summary>
     <ul>${uptime.rows.map(row=>`<li>${esc(row.name)} · ${fmt(row.uptime)}%</li>`).join('')}</ul>
     <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">수동 소모 MP/초${combinedChannelCost?'<small class="elixir-mp-contribution">상태별 집중 제외</small>':''}</th></tr></thead>
       <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${fmt(row.weightedDps)}</td><td>${mpByState(row)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th scope="row" colspan="3">${basis}</th><td>${fmt(result.dps)}</td><td>${mp(result.manualResources?.manaPerSecond)}</td></tr></tfoot></table>
-    ${combinedChannelCost?'<p>집중 스킬의 MP 소모는 전체 관측 차감 횟수로 계산해 합계에 포함합니다.</p>':''}
-    ${button('영약 조건 편집','requirement','data-section="combat" data-focus-role="native-extension-input"')}</details>`;
+    ${uptime.timed?'<p>지속 대미지와 후속타는 대미지가 발생한 시점의 영약 상태에 집계합니다.</p>':''}
+    ${combinedChannelCost||uptime.combinedChannelCost?'<p>집중 스킬의 MP 소모는 전체 관측 차감 횟수로 계산해 합계에 포함합니다.</p>':''}
+    ${button('영약 조건 편집','requirement',`data-section="combat" data-focus-role="${uptime.timed?'season-thea-controls':'native-extension-input'}"`)}</details>`;
 }
 function renderAssumedDps(s, primary = false) {
   const estimate=s.report.assumedDps;

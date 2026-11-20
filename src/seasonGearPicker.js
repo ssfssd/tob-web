@@ -11,6 +11,8 @@ import { getSkillEnergyUsage } from './skillRuntimeModel.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
 import { SEASON_DAMAGE_TYPE_LABELS, seasonDamageComposition, seasonDamageTypeComposition, seasonNumbedDamageRows } from './seasonDps.js';
 import { compareSeasonUptimeChanges } from './seasonUptimeDetails.js';
+import { seasonWeaponProfile } from './seasonWeaponProfile.js';
+import { findItemById } from './catalog.js';
 
 const indexes = new Map(SS14_CURRENT_DATABASE.inventory.filter(r=>r.category==='gear').map(r=>[r.runtimeId,r.indexes]));
 const labels = {Claw:'클로',Dagger:'단검',Sword:'검',Axe:'도끼',Hammer:'해머',Wand:'마법 지팡이',Rod:'지팡이',Scepter:'지팡이',Cane:'지팡이',Pistol:'권총',Bow:'활',Crossbow:'석궁',Musket:'머스킷',Fire_Cannon:'화포',Tin_Staff:'주석 지팡이',Cudgel:'무사의 스틱',STR:'힘',DEX:'민첩',INT:'지혜',Legendary_Gear:'레전드',Craft:'제작'};
@@ -55,6 +57,18 @@ function gearOptionsForSlots(report, slots) {
 export function gearOptionComparisons(before, after, slots) {
   const beforeOptions=gearOptionsForSlots(before,slots), afterOptions=gearOptionsForSlots(after,slots);
   return [...new Set([...beforeOptions.keys(),...afterOptions.keys()])].map(key=>({before:beforeOptions.get(key),after:afterOptions.get(key)}));
+}
+
+function weaponComparisons(before, after, slots) {
+  const profile = (build, index) => {
+    const id = build.gear?.slots?.[index]?.itemId;
+    const weapon = findItemById(id)?.tags?.includes('mainHand');
+    return { id, weapon, values: weapon ? seasonWeaponProfile(build,index,{individual:true}).values : {} };
+  };
+  return slots.filter(index=>index<2).flatMap(index=>{
+    const from=profile(before,index), to=profile(after,index);
+    return from.weapon||to.weapon ? [{index,from,to}] : [];
+  });
 }
 function skillDamageRoutes(report, dps, rowIndex) {
   const row=dps.rows.find(row=>row.rowIndex===rowIndex);
@@ -228,14 +242,14 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
       return from.toFixed(2)===to.toFixed(2)?[]:[{label:SEASON_DAMAGE_TYPE_LABELS[type],from,to}];
     }) : [];
   const manualUsageChanges=after[metric].rows.flatMap(row=>{
-    const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
+    const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex);
     const from=old?.measuredManualUses, to=row.measuredManualUses;
     if(!row.supported||!old?.supported||!from||!to||from.seconds!==to.seconds)return [];
     const fromMana=old.manualManaPerSecond, toMana=row.manualManaPerSecond;
     const fromLife=old.manualLifePerSecond, toLife=row.manualLifePerSecond;
     const display=value=>Number.isFinite(value)?value.toFixed(2):null;
     return display(from.count)!==display(to.count)||display(fromMana)!==display(toMana)||display(fromLife)!==display(toLife)
-      ? [{index:row.rowIndex,id:row.id,from,to,fromMana,toMana,fromLife,toLife}] : [];
+      ? [{index:row.rowIndex,id:row.id,...(old.id!==row.id&&{beforeId:old.id}),from,to,fromMana,toMana,fromLife,toLife}] : [];
   });
   return {
     skillDpsChanges:skillDpsChanges(before[metric],after[metric]),
@@ -371,6 +385,7 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
       ...(energyChanged?{energyChange:{before:beforeEnergy,after:afterEnergy}}:{})};
   }
   return {comparison,offhandRemoved,assumedComparison,stats,options,dpsBasis,
+    ...(slots.some(index=>index<2)&&{weaponComparisons:weaponComparisons(document.targetBuild,next.targetBuild,slots)}),
     ...(comparable?compareSeasonDamageBreakdown(report,after,dpsBasis):{skillDpsChanges:[],skillSpeedChanges:[],manualUsageChanges:[],numbedDamageChanges:[],uptimeChanges:[]}),
     ...compareSeasonResourceCosts(report,after,dpsBasis,{allActive:gear,rowIndex:skillEdit?edit.rowIndex:undefined}),
     ...(!comparable&&(gear||skillEdit)?{damageRoutes:damageRouteChanges(report,after,beforeDps,afterDps)}:{}),

@@ -14,6 +14,7 @@ const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "nethe
 // These are portions of existing damage totals and are never added to DPS.
 const contributionKeys = ["numbedHitDps", "numbedDotDps", "numbedReapingDps", "numbedMinionDps", "minionHitDps", "moduleIgniteDps"];
 const recordedKeys = [...damageKeys, ...contributionKeys];
+const primaryDamageKeys = new Set(damageKeys.filter(key=>!['dps','specialDps','igniteReapingDps','minionDeteriorationDps'].includes(key)));
 const sum = a => a.reduce((n, v) => n + v, 0);
 function timelineRandom(seed) {
   let state = seed >>> 0;
@@ -49,6 +50,30 @@ function measureElixirUptime(elixir,{warmup,seconds}) {
   return {...elixir,activeSeconds,uptime:100*activeSeconds/seconds};
 }
 
+function summarizeTimedElixirs(build,report,options,results,dps,resources) {
+  const elixirs=timedElixirs(build,theaCombatInputValues(build,report));
+  if (!elixirs.length) return null;
+  const rows=elixirs.map(elixir=>({name:report.componentProjection.rows.find(row=>row.elixirState?.index===elixir.i)?.name??`영약 ${elixir.i+1}`,
+    uptime:measureElixirUptime(elixir,options).uptime}));
+  const masks=[...new Set(results.flatMap(run=>[...run.elixirPhases.keys()]))].sort((a,b)=>a-b);
+  const average=(mask,key)=>sum(results.map(run=>run.elixirPhases.get(mask)?.[key]??0))/results.length;
+  const knownMana=Number.isFinite(resources?.manaPerSecond);
+  const combinedChannelCost=resources?.channels?.some(channel=>channel.rate!==0&&!channel.times);
+  const measuredMana=sum(masks.map(mask=>average(mask,'mana')))/options.seconds;
+  const showMana=knownMana&&!combinedChannelCost&&Math.abs(measuredMana-resources.manaPerSecond)<1e-6;
+  const states=masks.flatMap(mask=>{
+    const seconds=average(mask,'seconds');
+    if (!(seconds>0)) return [];
+    const damage=average(mask,'damage'), mana=average(mask,'mana');
+    return [{active:elixirs.map(({i})=>Number(Boolean(mask&(1<<i)))),uptime:100*seconds/options.seconds,
+      dps:damage/seconds,weightedDps:damage/options.seconds,manaPerSecond:showMana?mana/seconds:null,
+      weightedManaPerSecond:showMana?mana/options.seconds:null}];
+  });
+  if (Math.abs(sum(states.map(state=>state.uptime))-100)>1e-6
+    || Math.abs(sum(states.map(state=>state.weightedDps))-dps)>Math.max(1e-6,Math.abs(dps)*1e-8)) return null;
+  return {supported:true,rows,states,timed:true,combinedChannelCost:Boolean(combinedChannelCost)};
+}
+
 export function createAilmentTimeline() {
   let ignites = [], numbed = [];
   return {
@@ -81,7 +106,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const gearNumbedCritical=sum(gearEffects.filter(e=>e.stat==='gear_numbed_critical_bonus').map(e=>e.value));
   const elixirs=timedElixirs(build,input);
   let clock = 0;
-  const elixirState = time => Object.fromEntries(elixirs.map(e => [`elixir${e.i}`, Number(time + eps >= e.start && (time - e.start + eps) % e.interval < e.duration)]));
+  const elixirActive=(e,time)=>time+eps>=e.start&&(time-e.start+eps)%e.interval<e.duration;
+  const elixirState = time => Object.fromEntries(elixirs.map(e => [`elixir${e.i}`, Number(elixirActive(e,time))]));
+  const elixirPhases=new Map();
+  const phaseAt=time=>{
+    if (!elixirs.length) return null;
+    const mask=elixirs.reduce((state,e)=>state|(elixirActive(e,time)?1<<e.i:0),0);
+    if (!elixirPhases.has(mask)) elixirPhases.set(mask,{seconds:0,damage:0,mana:0});
+    return elixirPhases.get(mask);
+  };
   const nextElixir = time => Math.min(Infinity, ...elixirs.map(e => time + eps < e.start ? e.start : e.duration >= e.interval ? Infinity
     : Math.min(e.start + (Math.floor((time - e.start + eps) / e.interval) + 1) * e.interval,
       e.start + Math.floor((time - e.start + eps) / e.interval) * e.interval + e.duration > time + eps
@@ -213,7 +246,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     for (const e of linked.filter(e => e.inputKey === key && predicate(e))) consumed = ctx.runtime.trigger(e, time, ctx.stacks, ctx.caps, ctx.expires) || consumed;
     return consumed;
   };
-  const recordDamage = (row, key, amount, time) => { if (inMeasurement(time)) rows.get(row)[key] += amount; };
+  const accumulateDamage=(row,key,amount,phase)=>{
+    rows.get(row)[key]+=amount;
+    if (phase&&primaryDamageKeys.has(key)) phase.damage+=amount;
+  };
+  const recordDamage = (row, key, amount, time) => { if (inMeasurement(time)) accumulateDamage(row,key,amount,phaseAt(time)); };
   const recordCastCost = (index, row, time, ctx, channelCharge = false) => {
     const separatelyObserved = !channelCharge && row?.channelCost?.times;
     if (manaTrigger) {
@@ -235,6 +272,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (cost && Number.isFinite(row?.manaPerUse) && Number.isFinite(row?.lifePerUse)) {
       cost.mana += row.manaPerUse;
       cost.life += row.lifePerUse;
+      const phase=phaseAt(time);
+      if (phase) phase.mana+=row.manaPerUse;
     } else costs.delete(index);
   };
   const omenDamage = (amount, time, currentReport, from = time, cumulative = null) => {
@@ -480,7 +519,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (event.kind === "multi" && event.index === event.max) runTriggers("multistrikeRate", time, ctx);
   }
   return {
-    blockers, counts, measuredCounts, manualUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows,
+    blockers, counts, measuredCounts, manualUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows, elixirPhases,
     get hasProjectileTie() { return hasProjectileTie; },
     get hasFissureTie() { return hasFissureTie; },
     result() { return { numbedAverage: numbedArea / seconds, numbedEffectAverage: numbedEffectArea / seconds, scorchUptime: 100 * scorchArea / seconds,
@@ -530,6 +569,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const ignite = active.length ? igniteTarget(r,active) : null;
       const lo = Math.max(0, warmup - from), hi = Math.min(delta, warmup + seconds - from), w = Math.max(0, hi - lo);
       if (w) {
+        const phase=phaseAt(from);
+        if (phase) phase.seconds+=w;
         for (const row of r.fullDps.rows) {
           const channel = channelCosts.get(row.rowIndex);
           if (!channel) continue;
@@ -551,14 +592,14 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         numbedArea += ailments.numbed() * w; if (active.some(e => e.scorch)) scorchArea += w;
         for (const effect of active) {
           const amount = effect.damage * ignite.multiplier * (w + integral(lo, hi) / 100 * ignite.afflictionEffect);
-          rows.get(effect.row)[effect.scorch ? "scorchDps" : "igniteDps"] += amount;
+          accumulateDamage(effect.row,effect.scorch?'scorchDps':'igniteDps',amount,phase);
           recordTypes(effect.row,{fire:amount},1);
         }
         for (const row of native) {
           const weight = w + integral(lo, hi) / 100 * row.combat.afflictionEffect;
-          rows.get(row.rowIndex).dotDps += row.combat.dotWithoutAffliction * weight;
+          accumulateDamage(row.rowIndex,'dotDps',row.combat.dotWithoutAffliction*weight,phase);
           rows.get(row.rowIndex).numbedDotDps += (row.combat.numbedDotWithoutAffliction ?? 0) * weight;
-          rows.get(row.rowIndex).permafrostDps += (row.combat.frostWithoutAffliction ?? 0) * weight;
+          accumulateDamage(row.rowIndex,'permafrostDps',(row.combat.frostWithoutAffliction??0)*weight,phase);
           recordTypes(row.rowIndex,row.combat.persistentByType,weight);
         }
         // Minion action rates are explicit final rates. Integrate their own
@@ -568,7 +609,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           const dotTime = w + integral(lo,hi) / 100;
           const baseAffliction = 1 + (enemy.affliction ?? 0) / 100;
           const totals = rows.get(row.rowIndex);
-          totals.minionDps += direct * w + dots / baseAffliction * dotTime;
+          accumulateDamage(row.rowIndex,'minionDps',direct*w+dots/baseAffliction*dotTime,phase);
           const moduleIgnite = (row.values.moduleIgniteDps ?? 0) / baseAffliction * dotTime;
           totals.moduleIgniteDps += moduleIgnite;
           if (!row.moduleTimeline) totals.minionHitDps += row.values.minionHitDps * w;
@@ -582,7 +623,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         }
         for (const wilt of wilts) {
           const amount = wilt.damage * r.fullDps.rows.find(row => row.rowIndex === wilt.row).wiltTargetBase * (w + integral(lo,hi) / 100);
-          rows.get(wilt.row).minionDps += amount;
+          accumulateDamage(wilt.row,'minionDps',amount,phase);
           accumulateMinionTypes(wilt.row, {erosion:amount}, 1);
         }
       }
@@ -853,6 +894,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const ailmentResults = supported ? results.map(r => r.result()) : [];
   const averageAilment = key => supported ? sum(ailmentResults.map(r => r[key])) / results.length : null;
   const lightningHits = averageAilment('playerLightningHits');
+  const manualResources=manualResourceBalance(rows,recovery,build.ss14Inputs.dps?.skills);
+  const elixirPhases=supported?summarizeTimedElixirs(build,report,options,results,dps,manualResources):null;
   report.theaAverage = { supported, ...options, samples: 128, estimated: true, combat: true, dps, standardError, uptime,
     projectileTie: supported && (anyProjectileTie || anyFissureTie) ? { arrivalsFirstDps: dps, newCastFirstDps: alternateAvailable ? sum(alternateTotals) / results.length : null } : null,
     ...(anyFissureTie && {fissureTie:true}),
@@ -864,12 +907,13 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     igniteUptime: averageAilment('igniteUptime'),
     numbedUptime: averageAilment('numbedUptime'),
     elixirUptimes:supported?timedElixirs(build,theaCombatInputValues(build,report)).map(elixir=>measureElixirUptime(elixir,options)):[],
+    elixirPhases,
     playerNumbedHits: lightningHits > 0 ? { lightningHits, boostedHits:averageAilment('playerNumbedHits'), bonusDps:sum(rows.map(row=>row.values.numbedHitDps)) } : null,
     counts: averageCounts('counts'), measuredCounts: averageCounts('measuredCounts'),
     extraBlessings: averageBlessings('eventTotals'), measuredBlessings: averageBlessings('measuredEventTotals'),
     blockers: [...new Set(blockers)], receipt: rules.receiptSha256 };
   report.fullDps = { ...report.fullDps, supported, rows, dps, scope: "ss14-thea-joint-combat", blockers: [...new Set(blockers)],
-    manualResources: manualResourceBalance(rows, recovery, build.ss14Inputs.dps?.skills),
+    manualResources,
     receipts: [...report.fullDps.receipts, ...Object.values(rules.pages)],
     limitation: "입력한 시전 간격으로 축복 소모·매직 버스트·연속 공격·점화·스코치·마취를 같은 시간표에서 128회 계산합니다. 점화는 높은 대미지 중첩부터 적용하며, 마취는 각 중첩의 만료와 번개 명중 임계값을 계산합니다. 표준오차는 모의 계산 평균의 안정성 지표이며 실전 오차 범위가 아닙니다. 아래 속성·크리티컬 상세는 전투 시작 상태입니다." };
   report.fullDpsSupported = supported; report.summary.dps = dps;

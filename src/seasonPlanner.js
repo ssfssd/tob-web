@@ -77,6 +77,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   const state = { document, documents: loaded.documents, section: "overview", overlay: null, dirty: !!draft?.recovered, pending: new Map(), error, notice: draft?.recovered?(draft.copied?'미저장 변경을 복구 사본으로 열었습니다.':'미저장 변경을 복구했습니다.'):'', draftError:draft?.error??'', report: null,
     history: createSeasonEditHistory(), gearIndex: 0, skillIndex: 0, supportIndex: null, picker: null, logImport: null, slateEditor:createSlateEditorState(), resultTab:'stats', analysisMetric:null, analysis:null };
   let savedTarget = document ? JSON.stringify((savedDocument??document).targetBuild) : "", logRequest = 0;
+  let rankingRequested = false;
   if(draft?.recovered&&savedDocument)state.history.record(savedDocument.targetBuild,document.targetBuild);
   function persistDraft(){
     if(!draft||!state.document)return;
@@ -530,6 +531,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     },
     async rank(){
       if(state.pending.size||state.upgrades?.busy)return;
+      rankingRequested=true;
       const group=state.upgradeGroup??'all';
       const replacement=group==='replacement'||group==='manaReplacement';
       const source=state.upgradeSource??'all';
@@ -566,6 +568,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (!next) throw new Error("저장한 빌드를 찾을 수 없습니다.");
       state.document = next; state.documents = loaded.documents; state.pending.clear(); state.dirty = false; state.overlay = null; state.fromOverview=false; state.error = "";
       state.rankTrialOrigin=null;
+      rankingRequested=false;
       state.calculationIndex=0;
       state.history.clear(); state.supportIndex = null; state.picker = null; savedTarget = JSON.stringify(next.targetBuild);
       savedDocument=next;
@@ -1608,7 +1611,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             state.focusRole = d.focusRole;
             if(d.tab==='conditions'&&d.field)state.focusField={edit:d.field,key:d.fieldKey,inResults:true};
           }
-          if(d.tab==='analysis'&&!state.upgrades)void api.rank();
+          if(d.tab==='analysis'&&rankingRequested&&!state.upgrades&&!state.showComparisonReasons)void api.rank();
           return;
         }
         if (action==='support-matrix-category'||action==='support-matrix-selected') {
@@ -1624,7 +1627,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           return;
         }
         if(action==='rank-options'||action==='rank-gear'){void api.rank();return;}
-        if(action==='rank-cancel'){state.upgrades=null;return;}
+        if(action==='rank-cancel'){rankingRequested=false;state.upgrades=null;return;}
         if(action==='compare-support-impact'){
           const rowIndex=Number(d.index);
           if(state.supportImpact?.rowIndex===rowIndex)state.supportImpact=null;

@@ -3,6 +3,7 @@ import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
 import { seasonSupportKoreanCard } from './seasonSupport.js';
+import { SEASON_DAMAGE_TYPE_LABELS } from './seasonDps.js';
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
@@ -72,9 +73,10 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const usageValue=({count,seconds},mana,life,showLife)=>`${fmt(count)}회 / ${speed(seconds)}초${Number.isFinite(mana)?`<small> · ${fmt(mana)} MP/초</small>`:''}${showLife&&Number.isFinite(life)?`<small> · ${fmt(life)} HP/초</small>`:''}`;
   const usage=p.manualUsageChanges?.length?`<table class="slot-dps-table" data-role="manual-usage-preview"><caption>측정 구간 수동 사용</caption>
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
-    <tbody>${p.manualUsageChanges.map(({index,id,from,to,fromMana,toMana,fromLife,toLife})=>{
+    <tbody>${p.manualUsageChanges.map(({index,id,beforeId,from,to,fromMana,toMana,fromLife,toLife})=>{
       const showLife=fromLife>0||toLife>0;
-      return `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))}</th><td>${usageValue(from,fromMana,fromLife,showLife)}</td><td>${usageValue(to,toMana,toLife,showLife)}</td></tr>`;
+      const name=beforeId?`${skillName(beforeId)} → ${skillName(id)}`:skillName(id);
+      return `<tr><th scope="row">${esc(slotName(index)+' · '+name)}</th><td>${usageValue(from,fromMana,fromLife,showLife)}</td><td>${usageValue(to,toMana,toLife,showLife)}</td></tr>`;
     }).join('')}</tbody></table>`:'';
   const numbed=p.numbedDamageChanges?.length?`<table class="slot-dps-table" data-role="numbed-damage-preview"><caption>${p.dpsBasis==='assumedDps'?'마취 기여 · 방어 전 DPS':'마취 기여 DPS'}</caption>
     <thead><tr><th scope="col">대미지</th>${headers}<th scope="col">변화</th></tr></thead>
@@ -130,6 +132,24 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
     : `<p data-role="slot-resource-preview">${esc(summary)}</p>`;
 }
 
+function renderWeaponComparisons(comparisons) {
+  const cell=(profile, keys)=>{
+    if (!profile.weapon) return profile.id ? '해당 없음' : '미장착';
+    const values=keys.map(key=>profile.values[key]);
+    return values.every(Number.isFinite) ? values.map(fmt).join('–') : '미확인';
+  };
+  return (comparisons??[]).map(({index,from,to})=>{
+    const damage=Object.entries(SEASON_DAMAGE_TYPE_LABELS).flatMap(([type,label])=>{
+      const min=`weapon${type}Min`, max=`weapon${type}Max`;
+      return type==='physical'||from.values[max]>0||to.values[max]>0 ? [[`${label} 대미지`,min,max]] : [];
+    });
+    const rows=[...damage,['초당 공격','weaponSpeed'],['크리티컬 수치','baseCriticalRating']];
+    return `<table class="slot-dps-table" data-role="weapon-stat-comparison-${index}"><caption>${index===0?'메인':'서브'} 무기 수치</caption>
+      <thead><tr><th scope="col">항목</th><th scope="col">장착 전</th><th scope="col">장착 후</th></tr></thead>
+      <tbody>${rows.map(([label,...keys])=>`<tr><th scope="row">${label}</th><td>${cell(from,keys)}</td><td>${cell(to,keys)}</td></tr>`).join('')}</tbody></table>`;
+  }).join('');
+}
+
 export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,extraDetails=''}={}){
   const line=(label,a,b)=>`<li>${label} · ${fmt(a)} → ${fmt(b)} (${signed(b-a)})</li>`;
   const contributions=p.options.map(describeSeasonOptionChange).filter(Boolean).map(change=>`<li>${esc(change)}</li>`).join('');
@@ -146,7 +166,7 @@ export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,
   const resources=renderResourceChanges(p,esc,{skill:showResourcesInline});
   const changes=`${showDps?'':table}${renderDamageBreakdown(p,esc)}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${contributions?'<h4>옵션</h4><ul>'+contributions+'</ul>':''}${showResourcesInline?'':resources}${extraDetails}`;
   const details=changes?`<details><summary>변경 수치</summary>${changes}${showDps?'':blocked}</details>`:blocked;
-  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${showDps?table:''}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
+  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${showDps?table:''}${renderWeaponComparisons(p.weaponComparisons)}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
   return body?`<section aria-label="장착 전 수치 비교">${body}</section>`:'';
 }
 export function shelfTools(kind,index,filled,button,candidate=false){

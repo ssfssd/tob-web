@@ -142,15 +142,17 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   const local = projected.flatMap(r => r.minionEffects ?? []);
   const outgoing = [], physicalAsErosion = [];
   const globalMinionEffects = [];
+  const sourceOf=effect=>({path:effect.path,itemId:effect.itemId,name:effect.effectSource?.name,
+    stat:effect.stat,sourceText:effect.sourceText});
   for (const effect of effects.filter(e => e.stat.startsWith("minion_") && !SEASON_GEAR_LEVEL_STATS.has(e.stat))) {
     const conversion = seasonMinionDamageConversion(effect);
     if (conversion && valid({ min: 0, max: 100 }, effect.value)) {
       if (effect.receipt) row.receipts.push(effect.receipt);
-      outgoing.push({ sourceType: conversion.sourceDependency.split(' ')[0], targetType: conversion.stat.split('-')[1], value: effect.value,
-        path: effect.path, itemId: effect.itemId, name: effect.effectSource?.name });
+      outgoing.push({ sourceType: conversion.sourceDependency.split(' ')[0], targetType: conversion.stat.split('-')[1],
+        value: effect.value, effectSource:sourceOf(effect) });
     } else if (effect.stat === 'minion_physical_damage_as_erosion_damage' && effect.operation === 'gain_percent_of_source' && Number.isFinite(effect.value) && effect.value >= 0) {
       if (effect.receipt) row.receipts.push(effect.receipt);
-      physicalAsErosion.push(effect.value);
+      physicalAsErosion.push(effect);
     } else globalMinionEffects.push({ ...effect, stat: effect.stat.slice(7) });
   }
   const minionEffects = [...globalMinionEffects, ...local,
@@ -248,20 +250,26 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     }
     const paths = { [type]: [{ min: 1, max: 1, types: [type] }] };
     const addPool = (target, portion, types, randomElement) => (paths[target] ??= []).push({ min: portion, max: portion, types, randomElement });
+    const actionName = DATA.koActions.records[action.itemId].name;
+    const addGain=(target,value,types,effectSource)=>{
+      if (!(value>0)) return;
+      addPool(target,value/100,types);
+      row.conversionTrace.push({stage:'gained-as-extra',sourceType:type,targetType:target,resolvedValue:value,actionName,effectSource});
+    };
     const groups = new Map();
     const addConversion = (sourceType, targetType, value, effectSource) => {
       if (!groups.has(sourceType)) groups.set(sourceType, []);
       groups.get(sourceType).push({ sourceType, targetType, value, effectSource });
     };
     if (!persistent) {
-      for (const { sourceType, targetType, value, ...source } of outgoing) addConversion(sourceType, targetType, value, source);
+      for (const { sourceType, targetType, value, effectSource } of outgoing) addConversion(sourceType, targetType, value, effectSource);
       if (profile.conversion) addConversion('physical', profile.conversion[2].toLowerCase(), Number(profile.conversion[1]),
         { itemId: profile.card.itemId, name: DATA.ko.records[profile.card.itemId].name });
       if (type === "physical") {
         for (const e of minionEffects.filter(e => e.stat === "physical_as_random_elemental")) {
           for (const element of elementalDamage) addPool(element, e.value / 300, [type, element], element);
         }
-        for (const value of physicalAsErosion) if (value > 0) addPool('erosion', value / 100, ['erosion']);
+        for (const effect of physicalAsErosion) addGain('erosion',effect.value,['erosion'],sourceOf(effect));
       }
     }
     for (const line of lines) {
@@ -286,8 +294,8 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       else reasons.push(`소환체 스킬의 조건 계산 미지원: ${action.name} · ${line}`);
     }
     // Added-as uses the original cold pool before conversion.
-    if (!persistent && type === "cold" && profile.actions.some(a => a.itemId === "Firebird")) addPool('fire', .1 * b?.moduleFirebird, ['cold', 'fire']);
-    const actionName = DATA.koActions.records[action.itemId].name;
+    if (!persistent && type === "cold" && profile.actions.some(a => a.itemId === "Firebird"))
+      addGain('fire',10*b?.moduleFirebird,['cold','fire'],{itemId:'Firebird',name:DATA.koActions.records.Firebird.name});
     routeSeasonDamagePaths(paths, groups, ({ sourceType, targetType, value, effectSource }, ratio) => {
       if (ratio > 0) row.conversionTrace.push({ stage: 'conversion', sourceType, targetType, resolvedValue: value,
         effectivePercent: ratio * 100, actionName, effectSource: { ...effectSource,

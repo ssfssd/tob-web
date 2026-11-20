@@ -43,6 +43,11 @@ export function seasonEffectSources(report) {
     }
     return applied;
   });
+  for (const row of report.fullDps?.rows??[]) {
+    if(!row.supported||!row.minionSkills)continue;
+    const routes=row.elixirDamageRoutes?.states.flatMap(state=>state.groups.flatMap(group=>group.trace))??row.conversionTrace??[];
+    trace.push(...routes.map(effect=>({...effect,rowIndex:row.rowIndex})));
+  }
   const absent = skills.flatMap(skill=>[
     ...excludedSeasonHitRoutes(skill),
     ...(skill.offenseBasis?.excluded??[]).filter(effect=>effect.reason==='no-hit-damage-not-applied'&&!effect.affectsCompletion),
