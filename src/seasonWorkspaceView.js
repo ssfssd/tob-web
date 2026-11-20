@@ -13,7 +13,7 @@ import { SEASON_CONFIGURATION_GROUPS, compareSeasonConfigurations } from "./seas
 import { seasonSupportOptions, seasonSupportKoreanCard } from "./seasonSupport.js";
 import { formatAppDateTime } from "./dateTimePresentation.js";
 import { SEASON_COMPONENT_LABELS } from "./seasonComponents.js";
-import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
+import { matchingNearbyEnemyCounts, nearbyEnemyConditionValue, nearbyEnemyCountInput, nearbyEnemyCountLabel, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
 import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, SEASON_DPS_PARTS } from "./seasonDps.js";
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
@@ -243,11 +243,10 @@ export function renderNearbyEnemyField(controls) {
   const selected = saved && controls.every(c=>c.value!=='')
     && [...choices.values()].find(group=>group.length===matches.length && group.every(n=>matches.includes(n)));
   const pending = saved && !selected;
-  const labels = {'0':'없음','1':'한 명','2':'두 명 이상','0,2':'한 명이 아님','1,2':'한 명 이상'};
   return `<label>주변 적 수<select data-season-edit="${nearbyEnemyCountInput}" data-key="${nearbyEnemyCountInput}" aria-label="주변 적 수">
     ${pending?`<option value="unresolved" disabled selected>${matches.length?'일부 입력됨':'조건 충돌'}</option>`:''}
     <option value=""${saved?'':' selected'}>미입력</option>${[...choices.values()].map(group=>
-      `<option value="${group[0]}"${selected===group?' selected':''}>${labels[group.join(',')]}</option>`).join('')}</select></label>`;
+      `<option value="${group[0]}"${selected===group?' selected':''}>${nearbyEnemyCountLabel(group)}</option>`).join('')}</select></label>`;
 }
 
 export function observedManaInputState(document, report) {

@@ -5,6 +5,10 @@ import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDe
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { ADDED_FIELDS } from './seasonWeaponInputs.js';
 import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
+import { SEASON_CHARACTER_INPUTS } from './seasonCharacter.js';
+import { SEASON_BLESSINGS, blessingConditionValue, blessingLabel } from './seasonBlessings.js';
+import { boundSeasonConditions, matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyCountLabel, nearbyEnemyGroups } from './seasonEffectConditions.js';
+import { isAuraActivationControl } from './seasonNetherModifiers.js';
 
 function encounterInputChanges(before, after, metric) {
   const old=before.document.targetBuild, current=after.document.targetBuild;
@@ -13,6 +17,40 @@ function encounterInputChanges(before, after, metric) {
     if (a!==b) changes.push({label,a,b,edit,key,tab,unit});
   };
   const oldInputs=old.ss14Inputs, inputs=current.ss14Inputs;
+  for (const [key,{label}] of Object.entries(SEASON_CHARACTER_INPUTS)) {
+    if (key==='observedManaRecovery') continue;
+    add(label,oldInputs.character?.[key],inputs.character?.[key],'character-input',key);
+  }
+  if (inputs.theaCycle?.mode!=='automatic') {
+    for (const key of SEASON_BLESSINGS)
+      add(`${blessingLabel(key)} 중첩`,oldInputs.blessings?.[key],inputs.blessings?.[key],'blessing-input',key);
+  }
+  const manualConditions=(report,bindings)=>{
+    const groups=new Map();
+    for (const entry of boundSeasonConditions(report.componentProjection,bindings,(row,control)=>!isAuraActivationControl(row,control))) {
+      if (!groups.has(entry.group)) groups.set(entry.group,new Map());
+      const values=groups.get(entry.group);
+      if (!values.has(entry.value)) values.set(entry.value,entry);
+    }
+    return groups;
+  };
+  const oldConditions=manualConditions(before.report,oldInputs.componentConditions);
+  const currentConditions=manualConditions(after.report,inputs.componentConditions);
+  const nearbyCounts=groups=>matchingNearbyEnemyCounts(nearbyEnemyGroups.flatMap(group=>
+    [...(groups.get(group)?.values()??[])].map(({control})=>control)));
+  const oldCounts=nearbyCounts(oldConditions), counts=nearbyCounts(currentConditions);
+  if (oldCounts.length && counts.length && !oldCounts.some(count=>counts.includes(count))) {
+    add('주변 적 수',nearbyEnemyCountLabel(oldCounts),nearbyEnemyCountLabel(counts),nearbyEnemyCountInput,nearbyEnemyCountInput,'conditions');
+  }
+  for (const [group,values] of currentConditions) {
+    if (nearbyEnemyGroups.includes(group)) continue;
+    const oldValues=oldConditions.get(group);
+    if (oldValues?.size!==1||values.size!==1) continue;
+    const {control,row,value}=values.values().next().value;
+    if (after.report.blessings.enabled && blessingConditionValue(control,{Focus:0,Agility:0,Tenacity:0})!==undefined) continue;
+    const visible=value=>control.kind==='count'?value:Boolean(value)!==!!control.inverted?'충족':'미충족';
+    add(control.label??`${row.name} 효과 조건`,visible(oldValues.keys().next().value),visible(value),'component-condition',control.key);
+  }
   if (metric==='fullDps'&&hasPeriodicBurstSupport(before.report.components)&&hasPeriodicBurstSupport(after.report.components)) {
     const {label,choices}=SEASON_DPS_SKILL_FIELDS.periodicBurstUptime;
     const state=dps=>choices.find(([value])=>value===readPeriodicBurstUptime(dps))?.[1];

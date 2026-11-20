@@ -62,7 +62,7 @@ export const SEASON_NATIVE_GEAR_STATS = new Set([...SEASON_GEAR_LEVEL_STATS,...S
   ...['', 'attack_', 'spell_', 'projectile_', ...['physical','cold','fire','lightning','erosion'].map(t=>`${t}_skill_`)]
     .flatMap(prefix=>['rating','damage','lucky','unlucky','very_lucky'].map(s=>`${prefix}critical_strike_${s}`)),
   'max_spell_burst','spell_burst_charge_speed','spell_burst_hit_damage',
-  'damage_lucky','damage_unlucky','damage_very_lucky','erosion_resistance_penetration','elemental_resistance_penetration','melee_damage',
+  'damage_lucky','damage_unlucky','damage_very_lucky','erosion_resistance_penetration','elemental_resistance_penetration','melee_damage','aura_effect',
   'skill_damage','channeled_skill_damage','melee_physical_damage','erosion_area_damage',
   'damage','hit_damage','spell_damage','attack_damage','elemental_damage','physical_damage','fire_damage','cold_damage','lightning_damage','erosion_damage',
   'projectile_damage','area_damage','damage_over_time','attack_speed','cast_speed','fire_penetration','cold_penetration','lightning_penetration','max_lightning_damage',

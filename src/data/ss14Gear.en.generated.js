@@ -6049,8 +6049,13 @@ export const SS14_GEAR_EN = {
       "flavorReceipt": {
         "sourceUrl": "https://tlidb.com/en/Hanging_Two-Tone_Mask",
         "sourcePageSha256": "fafe227f9f9f541293910775c69125a33afd33148ba719aa04ab65e61ab71e21",
-        "sourceHtmlClass": "fst-italic",
-        "lines": []
+        "sourceHtmlClass": "flavourText",
+        "evidencePageSha256": "c6db9891e4bbe10868becfc7a032acae879112b6818f6e9b167167e40b31d141",
+        "lines": [
+          "I watch you through the holes of this upside-down mask.",
+          "You sing into my ear and whisper from afar.",
+          "You are so far away, yet so close."
+        ]
       },
       "koreanTextVerified": false,
       "calculationReady": false

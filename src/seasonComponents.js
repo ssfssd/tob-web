@@ -515,7 +515,8 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
     + (support ? 0 : seasonRevelationLevelBonus(build,levelRows,record));
   rows.splice(elixirRowStart, 0, ...seasonExtensionRows(build,{parseLines:parseSeasonComponentLines,requireBindings,netherElixirBonus,levelBonus,part:'elixirs',relatedRows:rows}));
   applyNetherAggression(rows);
-  applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation,levelBonus);
+  applyNetherModifiers(rows,build,parseSeasonComponentLines,gearSealCompensation,levelBonus,
+    gearLevelEffects.filter(effect=>effect.stat==='aura_effect'&&effect.operation==='add_percent'));
   applySeasonCurses(rows,build,levelBonus);
   const fixedNumbed=projectFixedNumbed(rows,build,gearNumbedEffect);
   // Imported documents may contain inconsistent answers for one physical state.

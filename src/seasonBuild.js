@@ -339,7 +339,8 @@ function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN
       ? "SS14 항목 원문은 연결됐지만 선택 효과·레벨·배치의 계산 연결은 미완료입니다."
       : "선택 구성별 수치 내역과 별개로 이 참조의 전체 효과 연결은 미완료입니다."] };
   });
-  const gearEffects = components.filter(c => c.category === "gear").flatMap(c => c.calculations ?? []).flatMap(validSeasonGearEffects);
+  const gearEffects = components.filter(c => c.category === "gear").flatMap(c => c.calculations ?? []).flatMap(entry=>
+    validSeasonGearEffects(entry).map(effect=>({...effect,path:`gear.slots.${entry.slotIndex}`})));
   const gearNumbedEffect=netherSum(gearEffects.filter(e=>e.operation==='add_percent'&&e.unit==='percent'&&e.value>=0),"numbed_effect");
   const componentProjection = projectSeasonComponents(build, {
     gearSealCompensation: netherSum(gearEffects, "sealed_mana_compensation"), gearLevelEffects: gearEffects, gearNumbedEffect,

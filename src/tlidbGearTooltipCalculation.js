@@ -833,7 +833,7 @@ function flavorLineEvidence(sourceText, receipt) {
     evidence: {
       sourceUrl: receipt.sourceUrl,
       contentSha256: receipt.networkContentSha256,
-      sourceHtmlClass: "fst-italic",
+      sourceHtmlClass: receipt.sourceHtmlClass ?? "fst-italic",
     },
   };
 }
@@ -1036,10 +1036,13 @@ export function parseTlidbGearTooltip(item, { locale = "en", season = "SS13", fl
   }
 
   const identity = rollIdentity(item, verifiedLocale);
+  const flavorEvidence = flavorReceipt?.sourceHtmlClass === "flavourText"
+    ? /^[a-f0-9]{64}$/u.test(flavorReceipt.evidencePageSha256 ?? "") && flavorReceipt.evidencePageSha256
+    : flavorReceipt?.sourceHtmlClass === "fst-italic" && flavorReceipt.sourcePageSha256;
   const seasonalFlavor = season === "SS14" && flavorReceipt?.sourceUrl === verifiedLocale.sourceUrl
     && flavorReceipt.sourcePageSha256 === verifiedLocale.sourcePageSha256
-    && flavorReceipt.sourceHtmlClass === "fst-italic" && Array.isArray(flavorReceipt.lines)
-    ? { ...flavorReceipt, networkContentSha256: flavorReceipt.sourcePageSha256, protectMechanicalLines: true } : null;
+    && flavorEvidence && Array.isArray(flavorReceipt.lines)
+    ? { ...flavorReceipt, networkContentSha256: flavorEvidence, protectMechanicalLines: true } : null;
   return parseExactTooltipText(
     lines.join("\n"),
     identity,

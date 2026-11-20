@@ -56,8 +56,8 @@ const resolveBuff=(slot,card)=>resolveSeasonSkillLevel({id:slot.skillId,category
 const warcryDamage = /^\+?([\d.]+) % additional (damage|Ailment Damage) dealt by (Slash-Strike|Demolisher) skills (?:for each|per) enemy affected, stacking up to 8 times$/u;
 const demolisherRecovery = /^\+[\d.]+ % Demolisher Charge Recovery Speed for each enemy affected, stacking up to 8 times$/u;
 
-export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,levelBonus) {
-  const originals=rows.flatMap(r=>r.effects),sources=stat=>rows.filter(r=>r.effects.some(e=>e.stat===stat));
+export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,levelBonus,gearAuraEffects=[]) {
+  const originals=[...rows.flatMap(r=>r.effects),...gearAuraEffects],sources=stat=>rows.filter(r=>r.effects.some(e=>e.stat===stat));
   const amount=stat=>netherSum(originals,stat);
   const fixedSupportMultiplier=seasonSupportManaMultiplier(originals);
   const hasNether=rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
@@ -138,7 +138,8 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
         push(row,'minion_damage',Number(line.match(/[\d.]+/u)[0])*stacks*multiplier,'more',line);continue;
       }
       const parsed=parseLines(line,1,{path:row.path,sourcePageSha256:card.sourcePageSha256,conditions:build.ss14Inputs?.componentConditions});
-      row.effects.push(...parsed.effects.map(e=>({...e,value:e.value*multiplier,path:row.path,group:row.group,receipt:card,derivedFrom:sources(stat).map(r=>r.path)})));
+      row.effects.push(...parsed.effects.map(e=>({...e,value:e.value*multiplier,path:row.path,group:row.group,receipt:card,
+        derivedFrom:[...new Set([...sources(stat).map(r=>r.path),...(aura?gearAuraEffects.map(e=>e.path):[])])]})));
       row.blockers.push(...parsed.blockers);row.conditionControls.push(...parsed.conditions);
     }
     if(fear&&card.sourceRecordKey==='Precise_Fearless')push(row,'double_damage_chance',5*multiplier);

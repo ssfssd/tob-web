@@ -18,7 +18,7 @@ import { seasonAppliedOverlevelMultiplier } from './seasonSkillLevels.js';
 const outsideScope = new Set([...SEASON_LOCAL_WEAPON_STATS, ...SEASON_GLOBAL_FLAT_STATS, ...SEASON_GEAR_LEVEL_STATS, ...SEASON_GEAR_COST_STATS, ...SEASON_GEAR_NUMBED_STATS, ...SEASON_GEAR_NUMBED_MODIFIERS, ...SEASON_DEFENSIVE_STATS, ...SEASON_MINION_STATS, ...SEASON_BLESSING_CAP_STATS, 'max_vorax_gear_equipped', "strength", "dexterity", "intelligence", "all_stats", "all_attributes",
   "weapon_critical_strike_rating", "weapon_attack_speed", "spell_lightning_damage_min", "spell_lightning_damage_max",
   "spell_projectile_skill_levels", "all_skill_levels", "jump_count", "blessing_duration", "physical_damage_taken", "life_regeneration_flat", "elemental_ailment_avoidance", "cooldown_recovery_speed", "skill_effect_duration", "skill_duration",
-  "max_life", "max_mana", "max_energy_shield", "gear_energy_shield", "gear_armor", "gear_evasion", "sealed_mana_compensation",
+  "max_life", "max_mana", "max_energy_shield", "gear_energy_shield", "gear_armor", "gear_evasion", "sealed_mana_compensation", "aura_effect",
   "armor", "evasion", "movement_speed", "projectile_speed", "fire_resistance", "cold_resistance",
   "lightning_resistance", "erosion_resistance", "elemental_resistance", "all_resistance",
   "critical_strike_rating", "spell_critical_strike_rating", "attack_critical_strike_rating",

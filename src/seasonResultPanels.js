@@ -80,9 +80,9 @@ export function renderEditDpsComparison(s, compact = false) {
     const change = compactSeasonEditDelta(assumed || comparison);
     if (change) return `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교"><p>${change.previous?'직전 대비':'기준 대비'} <strong class="${change.value.delta>0?'is-increase':'is-decrease'}">${deltaText(change.value)}</strong></p></section>`;
     if (baseline.supported) return '';
-    const hasDps = s.report.fullDps.supported || Number.isFinite(baseline.value) || Number.isFinite(baseline.baseValue) || Number.isFinite(previous?.baseValue)
+    const hasComparison = encounterChanges?.length || s.report.fullDps.supported || Number.isFinite(baseline.value) || Number.isFinite(baseline.baseValue) || Number.isFinite(previous?.baseValue)
       || baseline.encounterMatches===false && s.report.assumedDps?.supported;
-    return hasDps ? `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">${button(baseline.encounterMatches===false?'전투 조건 변경':'비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"')}</section>` : '';
+    return hasComparison ? `<section class="native-edit-comparison is-compact" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">${button(baseline.encounterMatches===false?'전투 조건 변경':'비교 보류 이유', 'result-tab', 'data-tab="analysis" data-show-reasons="true"')}</section>` : '';
   }
   const changedInputs=(rows,role)=>{
     if(!rows?.length)return '';

@@ -22,23 +22,32 @@ export function matchingNearbyEnemyCounts(controls) {
   return [0,1,2].filter(count=>controls.every(c=>c.value==='' || c.value===nearbyEnemyConditionValue(c,count)));
 }
 
+export function nearbyEnemyCountLabel(counts) {
+  return { '0':'없음', '1':'한 명', '2':'두 명 이상', '0,2':'한 명이 아님', '1,2':'한 명 이상' }[counts.join(',')];
+}
+
 export function incompatibleNearbyEnemyStates(left, right = left) {
   const [present, alone] = nearbyEnemyGroups;
   return !!(left.get(present)?.has(0) && right.get(alone)?.has(1)
     || right.get(present)?.has(0) && left.get(alone)?.has(1));
 }
 
-export function boundSeasonConditionGroups(projection, bindings, include = () => true) {
-  const groups = new Map();
+export function* boundSeasonConditions(projection, bindings, include = () => true) {
   for (const row of projection?.rows ?? []) for (const control of row.conditionControls ?? []) {
     if (!include(row,control)) continue;
     const {key, conditionGroup, sourcePageSha256, value} = control;
     const binding = bindings?.[key];
     if (control.automatic || !sourcePageSha256 || binding?.sourcePageSha256 !== sourcePageSha256
       || !Number.isFinite(value) || binding.value !== value) continue;
-    const group = conditionGroup ?? key;
+    yield { row, control, group: conditionGroup ?? key, value: control.inverted ? 1 - value : value };
+  }
+}
+
+export function boundSeasonConditionGroups(projection, bindings, include) {
+  const groups = new Map();
+  for (const {group,value} of boundSeasonConditions(projection,bindings,include)) {
     const values = groups.get(group) ?? new Set();
-    values.add(control.inverted ? 1 - value : value);
+    values.add(value);
     groups.set(group, values);
   }
   return groups;
