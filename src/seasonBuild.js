@@ -37,6 +37,8 @@ import { resolveSeasonGearConditions } from './seasonGearConditions.js';
 import { craftOptions } from './seasonItemCraft.js';
 
 export const SS14_BUILD_MODEL = "tlidb-ss14-build-preview-v1";
+const FIEND_CROWN_LUCKY = 'Minions gain Lucky upon a Critical Strike';
+const FIEND_CROWN_LUCKY_KO = '소환체 크리티컬 행운';
 const labels = { hero: "히어로", heroTraits: "히어로 특성", heroMemory: "히어로 추억", heroMemoryAffixes: "추억 옵션", skills: "스킬", supports: "보조", gear: "장비", talents: "재능", talentTrees: "재능 패널", spirits: "정령", destiny: "운명", slates: "신격의 석판", divinityAffixes: "석판 옵션", modularization: "모듈", elixirs: "영약", ingredients: "영약 재료", prisms: "프리즘", inverseImages: "역상" };
 const nonempty = (value) => Array.isArray(value) ? value.length > 0 : value && typeof value === "object" ? Object.keys(value).length > 0 : Boolean(value);
 
@@ -104,7 +106,7 @@ export function projectSeasonGearRollValues(item, slot, targetEffects) {
   return values;
 }
 
-function inspectGear(item, slot, records, { targetBinding, isTarget = false, sourceSlot = slot, sourceSeason = "SS13", build, slotIndex, noTerra = false, observedVoltage = false, noReaping = false, icePulseScope, rollsOnly = false } = {}) {
+function inspectGear(item, slot, records, { targetBinding, isTarget = false, sourceSlot = slot, sourceSeason = "SS13", build, slotIndex, noTerra = false, observedVoltage = false, noReaping = false, noMinionTarget = false, icePulseScope, rollsOnly = false } = {}) {
   const record = corrosionCard(records?.[item.id],isTarget?targetBinding:null);
   if (!record || record.status !== "collected-preview" || record.season !== "SS14"
     || record.sourceRecordKey !== item.tlidbText?.en?.sourceRecordKey) return { status: "unavailable", reasons: ["SS14 동일 장비 카드 미확보"] };
@@ -130,14 +132,24 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
     stat: effect.stat, sourceText: effect.sourceText, value: rollValues?.[effect.roll.key] ?? "" }));
   const corrosion = targetBinding?.corrosion ? {corrosion:targetBinding.corrosion} : {};
   if (rollsOnly) return {receipt, controls, ...corrosion};
+  const fiendCrown = record.sourceRecordKey==='Fiend_Crown' && record.sourceSeasonEvidence?.verificationComplete;
   const inactive = !isTarget ? [] : [
     ...(noTerra ? inactiveKinglyTerraOptions(parsed,record) : []),
     ...(observedVoltage ? observedKinglyTerraOptions(parsed,record) : []),
     ...(noReaping ? inactiveSunsetReapingOptions(parsed,record) : []),
+    ...(noMinionTarget && fiendCrown && parsed.blockers.some(blocker=>blocker.sourceText===FIEND_CROWN_LUCKY)
+      ? [{sourceText:FIEND_CROWN_LUCKY,reason:'이 빌드에는 효과를 받을 소환체가 없습니다.'}] : []),
     ...inactiveIcePulseOptions(parsed,record,icePulseScope),
   ];
   const inactiveLines = new Set(inactive.map(effect=>effect.sourceText));
-  const parsedBlockers = parsed.blockers.filter(effect=>!inactiveLines.has(effect.sourceText));
+  const koreanCard=SS14_CARDS.records[item.id];
+  const crownConflict=fiendCrown && koreanCard?.season==='SS14' && koreanCard.koreanTextVerified
+    && koreanCard.detail?.split('\n').includes(FIEND_CROWN_LUCKY_KO);
+  const parsedBlockers = parsed.blockers.filter(effect=>!inactiveLines.has(effect.sourceText)).map(effect=>
+    crownConflict&&effect.sourceText===FIEND_CROWN_LUCKY?{...effect,
+      reason:'소환체 행운 원문 충돌: 한국어는 크리티컬 행운, 영어는 크리티컬 적중 시 행운 획득입니다. 적용 범위와 지속 시간 미확인.',
+      sourceConflict:[{language:'한국어',url:koreanCard.sourceUrl},{language:'영어',url:receipt.sourceUrl}],
+    }:effect);
   const conditional = resolveSeasonGearConditions(parsed.effects.filter(effect=>!inactiveLines.has(effect.sourceText)).map(e => ({ ...e,
     value: e.roll ? Number.isFinite(rollValues?.[e.roll.key]) && rollValues[e.roll.key] >= e.roll.min && rollValues[e.roll.key] <= e.roll.max
       ? rollValues[e.roll.key] : null : e.value })), build,
@@ -145,8 +157,8 @@ function inspectGear(item, slot, records, { targetBinding, isTarget = false, sou
   const mapped = mapTlidbTooltipEffects(conditional.effects.filter(e => !SEASON_LOCAL_WEAPON_STATS.has(e.stat) && !SEASON_GLOBAL_FLAT_STATS.has(e.stat) && !logMechanicStats.has(e.stat) && !SEASON_NATIVE_GEAR_STATS.has(e.stat) && !isObservedTerraGearEffect(e)));
   const resolution = resolveTlidbTooltipEffects(mapped.effects, { rollValues });
   const reasons = [...parsedBlockers, ...conditional.blockers, ...mapped.blockers, ...resolution.excluded];
-  const effectReasons = [...new Set(conditional.blockers.map(issue=>issue.reason))];
-  if (parsedBlockers.length || mapped.blockers.length || resolution.excluded.length)
+  const effectReasons = [...new Set([...conditional.blockers,...parsedBlockers.filter(issue=>issue.sourceConflict)].map(issue=>issue.reason))];
+  if (parsedBlockers.some(issue=>!issue.sourceConflict) || mapped.blockers.length || resolution.excluded.length)
     effectReasons.push("SS14 장비 효과·조건·선택 수치 해석 미완료");
   // Keep the native parser vocabulary for the season-neutral damage evaluator.
   // Mapped character-stat names must not be fed into the skill evaluator.
@@ -256,6 +268,16 @@ function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN
           const card=selectedCards[category]?.[id];
           return card?.season==='SS14' && !/\breap(?:s|ed|ing)?\b/iu.test(card.detail??'');
         });
+      const noMinionTarget=sourceKey==='Fiend_Crown' && !nonempty(build.customAffixes)
+        && !slots.some(slot=>slot.modularization) && !build.skills?.elixirs?.some(slot=>slot?.skillId)
+        && !inputs.normalized.gear.slots.some(slot=>nonempty(slot?.crafts))
+        && !Object.values(build.ss14Inputs?.gear??{}).some(binding=>binding?.logGear||binding?.corrosion)
+        && inputs.references.every(({category,id})=>{
+          if(id===item.id)return true;
+          const card=selectedCards[category]?.[id];
+          return card?.season==='SS14' && Boolean(card.detail) && !card.tags?.some(tag=>/summon|minion|modular/iu.test(tag))
+            && !/\b(?:summon\w*|minions?|modulariz\w*|spirit magi|synthetic troops?)\b/iu.test(card.detail);
+        });
       let icePulseScope;
       if (sourceKey==='Ice_Pulse' && !build.skills?.elixirs?.some(slot=>slot?.skillId)) {
         const hasTrigger = inputs.normalized.gear.slots.some((slot,index)=>{
@@ -293,7 +315,7 @@ function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN
       }
       const gearSlots = inputs.normalized.gear.slots.flatMap((slot, index) => slot?.itemId === item.id ? [{ index, slot }] : []);
       const calculations = gearSlots.map(({ index, slot }) => ({ slotIndex: index, ...inspectGear(item, slot, gear.records, {
-        isTarget: build?.patchSnapshot?.season === "SS14", targetBinding: build?.ss14Inputs?.gear?.[index], build, slotIndex: index, noTerra,observedVoltage,noReaping,icePulseScope,
+        isTarget: build?.patchSnapshot?.season === "SS14", targetBinding: build?.ss14Inputs?.gear?.[index], build, slotIndex: index, noTerra,observedVoltage,noReaping,noMinionTarget,icePulseScope,
         sourceSlot: sourceInputs.normalized.gear.slots[index],
         sourceSeason: sourceBuild?.patchSnapshot?.season,
       }) }));

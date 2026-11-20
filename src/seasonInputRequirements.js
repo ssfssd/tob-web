@@ -145,7 +145,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
   if(reason.includes('초당 MP 소모율을 입력하세요.')) return [{section:'combat',label:'MP 소모율 입력',edit:'thea-event',key:'manaRate'}];
   if(reason.startsWith('스킬 시전 시간 배분의 합이 100%를 초과'))
     return [{tab:'conditions',role:'cast-share-allocation',label:'스킬별 시전 배분 수정'}];
-  if(/^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간)/u.test(reason)) return [{section:'combat',role:'season-thea-controls',label:'복합 계산 켜기'}];
+  if(/^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간)/u.test(reason))
+    return [{section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
   if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계')||reason.includes(SEASON_DPS_SKILL_FIELDS.reapingOverlap.label)){
     const overflow=reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계');
     const issue=reason.includes('미입력')?'missing':'requires-full-uptime';

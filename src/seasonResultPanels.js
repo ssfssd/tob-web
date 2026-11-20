@@ -205,6 +205,23 @@ export function renderResultConditions(s) {
   const periodicBurst=hasPeriodicBurstSupport(s.report.components);
   const sharedDots=s.report.fullDps.dotAllocationGroups??[];
   const sharedReaping=s.report.fullDps.reapingAllocationGroups??[];
+  const sharedWindows=new Map();
+  for(const group of [...s.report.fullDps.dotWindowGroups??[],...s.report.assumedDps?.dotWindowGroups??[]]) {
+    const slots=sharedWindows.get(group.id)??new Map();
+    for(const slot of group.slots)slots.set(slot.rowIndex,slot);
+    sharedWindows.set(group.id,slots);
+  }
+  const groupedWindowRows=new Set();
+  const windowInputs=[...sharedWindows].map(([id,slots])=>{
+    const name=SS14_CARDS.records[id]?.name??'지속 대미지';
+    const fields=[...slots.values()].sort((a,b)=>a.rowIndex-b.rowIndex).flatMap(({rowIndex,itemId})=>{
+      if(groupedWindowRows.has(rowIndex))return [];
+      groupedWindowRows.add(rowIndex);
+      return [renderSeasonDpsField(`${rowIndex}:dotWindows`,{...SEASON_DPS_SKILL_FIELDS.dotWindows,
+        label:`${rowIndex+1}번 칸 · ${SS14_CARDS.records[itemId]?.name??name} 적용 구간 (초)`},inputs.dps?.skills?.[rowIndex]?.dotWindows??'','지속 구간')];
+    });
+    return fields.length?`<fieldset data-role="dot-window-inputs-${esc(id)}"><legend>${esc(name)} · 슬롯별 적용 구간</legend>${fields.join('')}</fieldset>`:'';
+  }).join('');
   const {overlaps,bounds:outOfBounds}=seasonDotWindowRepairs(s.report);
   const time=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:3});
   const windowAssignments=overlaps.map(({id,start,stop,slots})=>{
@@ -240,7 +257,8 @@ export function renderResultConditions(s) {
   }).join('');
   const skillFields = s.report.coupledSkills.rows.filter(row => row.rowIndex < 5).map(row => {
     const component = s.report.components.find(c => c.category === 'skills' && c.id === row.id);
-    const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!(key==='useShare'&&showShares)&&!sharedDots.some(group=>
+    const keys = skillConditionKeys(s,row.rowIndex,row.id).filter(key=>!(key==='useShare'&&showShares)
+      &&!(key==='dotWindows'&&groupedWindowRows.has(row.rowIndex))&&!sharedDots.some(group=>
       group.slots.some(slot=>slot.rowIndex===row.rowIndex&&(key===slot.field||key==='dotExclusive')))
       && !(key==='reapingOverlap'&&sharedReaping.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex))));
     const dpsRow=s.report.fullDps.rows.find(entry=>entry.rowIndex===row.rowIndex);
@@ -268,7 +286,7 @@ export function renderResultConditions(s) {
     ${renderFixedNumbedField(build,s.report,inputs.dps?.enemy?.numbedStacks)}
     <details data-role="dock-mana-observation"><summary>관측 MP 자연 회복</summary>${renderObservedManaInput(s.document,s.report)}</details>
     ${periodicBurst ? renderSeasonDpsField(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(inputs.dps),'조건 탭') : ''}
-    ${windowBounds}${windowAssignments}
+    ${windowBounds}${windowAssignments}${windowInputs}
     ${allocations}
     ${reapingAllocations}
     ${castShares}
@@ -288,6 +306,9 @@ function renderUpgradeRanking(s){
   const replacement=group==='replacement';
   const equipment=replacement||group==='legendary';
   const source=s.upgradeSource??'all';
+  const canAssemble=replacement&&source==='shelf'&&(s.replacementSlot??'all')==='all';
+  const lockEquipment=canAssemble&&s.assembleEquipment;
+  const locked=s.lockedEquipmentSlots??[];
   const slots=(selected)=>[['all','전체 부위'],...SEASON_GEAR_SLOT_LABELS.map((n,i)=>[String(i),n])].map(([v,n])=>`<option value="${v}"${v===selected?' selected':''}>${esc(n)}</option>`).join('');
   const active=s.document.targetBuild.skills?.active??[];
   const damageRows=s.report[preferredSeasonDpsMetric(s.report)]?.rows;
@@ -361,11 +382,13 @@ function renderUpgradeRanking(s){
     ${equipment||group==='gear'||group==='craft'?`<label>장비 부위<select ${replacement?'data-replacement-slot':'data-upgrade-slot'}>${slots((replacement?s.replacementSlot:s.upgradeSlot)??'all')}</select></label>`:''}
     ${equipment?`<label>후보 출처<select data-upgrade-source>${Object.entries(GEAR_UPGRADE_SOURCES).map(([key,label])=>`<option value="${key}"${key===source?' selected':''}>${label}</option>`).join('')}</select></label>`:''}
     ${equipment&&source!=='shelf'?`<label class="analysis-roll-toggle"><input type="checkbox" data-upgrade-corrosion${s.includeUpgradeCorrosion?' checked':''}>침식 효과도 비교</label>`:''}
-    ${replacement&&source==='shelf'&&(s.replacementSlot??'all')==='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-equipment${s.assembleEquipment?' checked':''}>보관함 장비 조합도 비교</label>`:''}
+    ${canAssemble?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-equipment${s.assembleEquipment?' checked':''}>보관함 장비 조합도 비교</label>`:''}
+    ${lockEquipment?`<details data-role="equipment-locks"><summary>유지할 장비 부위${locked.length?' · '+locked.length+'개':''}</summary>
+      ${SEASON_GEAR_SLOT_LABELS.map((label,index)=>`<label class="analysis-roll-toggle"><input type="checkbox" data-role="locked-equipment-slot-${index}" data-lock-equipment-slot="${index}"${locked.includes(index)?' checked':''}>${esc(label)}</label>`).join('')}</details>`:''}
     ${group==='gear'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-rolls${s.assembleRolls?' checked':''}>현재 옵션의 범위 조합 비교</label>`:''}
     ${group==='craft'&&s.upgradeSlot&&s.upgradeSlot!=='all'?`<label class="analysis-roll-toggle"><input type="checkbox" data-assemble-craft${s.assembleCraft?' checked':''}>제작 옵션 조합도 비교</label>`:''}
     ${skillAnalysis?`<label>액티브 스킬<select data-upgrade-skill><option value="all"${skillReplacement?' disabled':''}${chosenSkill?'':' selected'}>${skillReplacement?'교체할 스킬 칸 선택':'전체 액티브'}</option>${skillOptions.map(({id,label})=>`<option value="${id}"${id===s.upgradeSkill?' selected':''}>${esc(label)}</option>`).join('')}${skillUnavailable&&!skillReplacement?`<option value="" selected disabled>분석할 스킬을 다시 선택하세요</option>`:''}</select></label>`:''}
-    ${button('분석 시작',replacement?'rank-gear':'rank-options',s.pending.size||job?.busy||skillUnavailable?'disabled':'')}
+    ${button('분석 시작',replacement?'rank-gear':'rank-options',s.pending.size||job?.busy||skillUnavailable||lockEquipment&&locked.length===SEASON_GEAR_SLOT_LABELS.length?'disabled':'')}
     <div data-upgrade-results>${content}</div>
     <details><summary>분석 기준</summary><p>${skillReplacement?'같은 칸에서 기본 레벨, 시전 시간 배분, 적중률을 유지하고 전체 빌드 DPS를 비교합니다. 연결할 수 없는 보조는 해제됩니다.':group==='unit'?'SS14에서 확인한 옵션을 하나씩 1단위 추가해 계산합니다.':equipment?'도감은 옵션 범위 상한, 보관함은 저장된 수치를 사용합니다.':group==='gearImpact'?'장비를 한 부위씩 해제해 DPS와 MP·HP 변화를 비교합니다.':group==='gear'?'옵션 수치를 한 단위씩 바꿉니다. 범위 조합은 양 끝값을 차례로 비교합니다.':group==='craft'?'제작창의 T1 기본값을 사용합니다. 한 부위의 조합은 가장 큰 상승을 주는 변경부터 한 칸씩 적용해 다시 비교합니다.':'선택한 수치나 레벨을 한 단계 바꿔 DPS를 비교합니다.'}</p></details></section>`;
 }
@@ -501,11 +524,12 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
   const route=(trace,states,hands,index)=>states?renderElixirDamageRoutes(states,index)
     :hands?renderWeaponDamageRoutes(hands,index):renderSkillConversion(trace,index);
   const name=id=>{
+    if(id===null)return '빈 칸';
     const card=SS14_CARDS.records[id];
     return card?.season==='SS14'&&card.koreanTextVerified?card.name:'한국어 이름 미제공';
   };
   return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,beforeId,previous,current,previousStates,currentStates,previousHands,currentHands})=>{
-    const skill=beforeId?`${name(beforeId)} → ${name(id)}`:name(id);
+    const skill=beforeId!==undefined?`${name(beforeId)} → ${name(id)}`:name(id);
     const empty=' · 적용 없음';
     return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <div><b>${esc(before)}</b>${route(previous,previousStates,previousHands,`${role}-before-${index}`)||empty}</div>

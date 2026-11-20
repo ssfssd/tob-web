@@ -1400,6 +1400,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const dotWindowIssues = new Map();
   const dotWindowConflicts = [];
   const dotWindowBounds = [];
+  const dotWindowGroups = [];
   const addWindowIssue = (reason, indices) => {
     blockers.push(reason);
     dotWindowIssues.set(reason,[...new Set([...(dotWindowIssues.get(reason)??[]),...indices])].sort((a,b)=>a-b));
@@ -1421,6 +1422,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         blockers.push("자동 은총에서 동일 지속 스킬의 중첩 구간을 계산하려면 복합 계산을 켜세요.");
         continue;
       }
+      if (group.length>1) dotWindowGroups.push({id,slots:group.map(row=>({rowIndex:row.rowIndex,itemId:row.id}))});
       const missing = group.filter(row=>!row.dotWindows).map(row=>row.rowIndex);
       if (missing.length) {
         addWindowIssue("동일 지속 스킬의 적용 구간을 각 칸에 입력하세요.",missing);
@@ -1489,6 +1491,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     ...(dotWindowIssues.size && { dotWindowIssues:Object.fromEntries(dotWindowIssues) }),
     ...(dotWindowConflicts.length && { dotWindowConflicts }),
     ...(dotWindowBounds.length && { dotWindowBounds }),
+    ...(dotWindowGroups.length && { dotWindowGroups }),
     manualResources,
     receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),
       ...(sharedCommand?.receipt ? [sharedCommand.receipt] : []),

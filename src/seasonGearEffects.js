@@ -73,7 +73,7 @@ export const SEASON_NATIVE_GEAR_STATS = new Set([...SEASON_GEAR_LEVEL_STATS,...S
 export const SEASON_DEFENSIVE_STATS = new Set(['max_life_as_energy_shield','damage_bypasses_energy_shield','damage_transferred_to_minion',
   'blur_rating','blur_avoidance','elemental_damage_taken','elemental_ailment_avoidance','max_frostbite_rating','injury_buffer',
   'max_life','max_mana','max_energy_shield','gear_armor','gear_evasion','gear_energy_shield','armor','evasion','movement_speed',
-  'fire_resistance','cold_resistance','lightning_resistance','erosion_resistance','elemental_resistance','all_resistance',
+  'fire_resistance','cold_resistance','lightning_resistance','erosion_resistance','elemental_resistance','all_resistance','minion_elemental_resistance',
   'max_elemental_resistance','max_fire_resistance','max_cold_resistance','max_lightning_resistance','max_erosion_resistance',
   'damage_taken','physical_damage_taken','life_regeneration_flat','mana_regeneration_flat','life_regeneration_percent','mana_regeneration_percent',
   'life_regeneration_speed','mana_regeneration_speed','energy_shield_charge_speed','energy_shield_charge_interval','reaping_shield_charge',

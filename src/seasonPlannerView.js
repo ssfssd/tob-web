@@ -181,11 +181,13 @@ export function renderEffectSources(s, path = null) {
       const percent = r.effect?.unit === "percent" || ["more", "add_percent"].includes(r.effect?.operation);
       const value = r.value === null ? "" : `${r.value.toLocaleString("ko-KR", { maximumFractionDigits: 4 })}${percent ? "%" : ""}${r.effect?.operation === "more" ? " 별도" : ""}`;
       const owner=r.name===r.origin?r.origin:r.origin+' · '+(r.name||'한국어 이름 미제공');
+      const links=r.sourceConflict?.filter(source=>/^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(source.url))
+        .map(source=>`<a href="${esc(source.url)}" target="_blank" rel="noreferrer">${esc(source.language)} 원문</a>`).join(' · ');
       return `<details class="native-effect-row" data-effect-state="${r.status}" data-role="effect-${esc(r.key)}"><summary><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${status[r.status]}</small><span class="native-effect-summary-owner">${esc(owner)}</span></summary>
         ${r.appliedTo?.length ? `<p>적용 스킬: ${esc(r.appliedTo.join(", "))}</p>` : ""}
         ${r.reason ? `<p>${/[가-힣]/u.test(r.reason) && !/\p{Script=Han}/u.test(r.reason) ? esc(r.reason) : "SS14 효과 또는 조건을 확인해야 합니다."}</p>` : ""}
         ${r.detail ? `<p class="native-effect-original">${r.group==='custom'?'입력값 · ':''}${esc(r.detail)}</p>` : "<p>한국어 원문 일부 미제공</p>"}
-        ${/^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(r.receipt?.sourceUrl ?? "") ? `<a href="${esc(r.receipt.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>` : ""}</details>`;
+        ${links || (/^https:\/\/tlidb\.com\/(?:en|ko)\//u.test(r.receipt?.sourceUrl ?? "") ? `<a href="${esc(r.receipt.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>` : "")}</details>`;
     }).join("") || "<p>이 슬롯에서 확인된 효과가 없습니다.</p>"}</div></section>`;
 }
 function drawerDps(s, comparison, action, status='', assumedComparison, energyChange) {
@@ -547,9 +549,11 @@ function slotEditor(s) {
   if (type === "extensions") {
     const original = s.document.targetBuild;
     const elixirs = nativeElixirOptions(), modules = nativeModuleOptions(), affixes = nativeModuleAffixes();
-    return `<div class="native-extension-selection"><section><h3>영약</h3><p>액티브 2·3번 칸</p>${[0, 1].map(i => {
+    return `<div class="native-extension-selection"><section><h3>영약</h3>${[0, 1].map(i => {
       const id = original.skills?.elixirs?.[i]?.skillId, choice = elixirs.find(o => o.id === id);
-      return `<fieldset><legend>영약 ${i + 1}</legend>${select(`영약 ${i + 1}`, `native-elixir-${i}`, "elixir-selection", id, elixirs, `data-slot="${i}"`, true)}${choice ? `<p>${esc(choice.detail)}</p>` : ""}</fieldset>`;
+      const activeIndex = choice ? original.skills.active.findIndex(slot => slot?.skillId === choice.itemId) : -1;
+      const placement = activeIndex >= 0 ? `액티브 ${activeIndex + 1}번 칸` : id ? '장착 위치 확인 필요' : '빈 액티브 칸에 장착';
+      return `<fieldset><legend>영약 ${i + 1}</legend>${select(`영약 ${i + 1}`, `native-elixir-${i}`, "elixir-selection", id, elixirs, `data-slot="${i}" aria-describedby="native-elixir-placement-${i}"`, true)}<p id="native-elixir-placement-${i}">${placement}</p>${choice ? `<p>${esc(choice.detail)}</p>` : ""}</fieldset>`;
     }).join("")}</section><section><h3>모듈화</h3>${[0, 1, 2, 3, 4].map(i => {
       const config = original.skills?.active?.[i]?.modularization;
       return `<details data-role="native-module-${i}"${config ? " open" : ""}><summary>액티브 ${i + 1} 모듈</summary>${select(`액티브 ${i + 1} 모듈`, `native-module-${i}`, "module-selection", config?.modularizationSkillId, modules, `data-slot="${i}"`, true)}${config ? [0, 1, 2].map(n => `${select(`모듈 ${i + 1} 옵션 ${n + 1}`, `native-module-${i}-${n}`, "module-option", config.moduleOptionIds[n], affixes, `data-slot="${i}" data-key="${n}"`, true)}<p>${esc(affixes.find(a => a.id === config.moduleOptionIds[n])?.detail ?? "")}</p>`).join("") : ""}</details>`;
@@ -1097,6 +1101,7 @@ export function renderNativeDps(s) {
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
     ${mobileDpsBar(s,esc(blockedStatus))}
     <div class="native-result-summary">${showEstimate ? renderAssumedDps(s, true) : ''}<small${showEstimate ? ' hidden' : ''}>전체 DPS</small><strong data-role="native-dps"${showEstimate ? ' hidden' : ''}>${status}</strong>
+    ${s.rankTrialOrigin?button('기준 빌드 분석으로 돌아가기','return-rank-origin'):''}
     ${renderEditDpsComparison(s, true)}
     ${dpsLink}
     ${s.pending.size ? `<div class="native-result-actions">${button('계산 적용', 'apply')}</div>` : ''}</div>
@@ -1134,14 +1139,18 @@ function renderObservedElixirUptime(s) {
   const result=assumed?s.report.assumedDps:s.report.fullDps;
   const combinedChannelCost=uptime.states.some(row=>row.channelCostTotalOnly);
   const partial=uptime.states.length>1;
-  const mpByState=row=>row.channelCostTotalOnly?'—':mp(row.manaPerSecond)
-    +(partial&&Number.isFinite(row.weightedManaPerSecond)?`<small class="elixir-mp-contribution">반영 ${fmt(row.weightedManaPerSecond)}</small>`:'');
+  const mpByState=row=>{
+    const value=row.channelCostTotalOnly?row.manaExcludingCombinedChannels:row.manaPerSecond;
+    const contribution=row.channelCostTotalOnly?row.weightedManaExcludingCombinedChannels:row.weightedManaPerSecond;
+    if(row.channelCostTotalOnly&&value===undefined)return '—';
+    return mp(value)+(partial&&Number.isFinite(contribution)?`<small class="elixir-mp-contribution">반영 ${fmt(contribution)}</small>`:'');
+  };
   return `<details data-role="observed-elixir-uptime"><summary>영약 유지율 · ${basis}</summary>
     <ul>${uptime.rows.map(row=>`<li>${esc(row.name)} · ${fmt(row.uptime)}%</li>`).join('')}</ul>
-    <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">수동 소모 MP/초</th></tr></thead>
+    <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">수동 소모 MP/초${combinedChannelCost?'<small class="elixir-mp-contribution">상태별 집중 제외</small>':''}</th></tr></thead>
       <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${fmt(row.weightedDps)}</td><td>${mpByState(row)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th scope="row" colspan="3">${basis}</th><td>${fmt(result.dps)}</td><td>${mp(result.manualResources?.manaPerSecond)}</td></tr></tfoot></table>
-    ${combinedChannelCost?'<p>집중 스킬의 MP 소모는 전체 관측 차감 횟수로 계산합니다.</p>':''}
+    ${combinedChannelCost?'<p>집중 스킬의 MP 소모는 전체 관측 차감 횟수로 계산해 합계에 포함합니다.</p>':''}
     ${button('영약 조건 편집','requirement','data-section="combat" data-focus-role="native-extension-input"')}</details>`;
 }
 function renderAssumedDps(s, primary = false) {

@@ -175,18 +175,26 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   });
   const recovery=(first.manualResources?.recovery??[]).map(r=>({...r,value:weighted(states,
     value=>value.manualResources?.recovery.find(row=>row.id===r.id)?.value)}));
+  const skillInputs=build.ss14Inputs.dps?.skills;
+  const combinedChannels=new Set(varying.length?states.flatMap(({value})=>(value.manualResources?.channels??[])
+    .filter(channel=>channel.rate!==0).map(channel=>channel.rowIndex)):[]);
   report.fullDps={...first,supported,rows,dps:supported?weighted(states,value=>value.dps):null,
     scope:'ss14-observed-elixir-uptime',
     blockers:[...new Set(states.flatMap(({value})=>value.blockers).concat(sameRows?[]:['영약 상태에 따라 공격 스킬 구성이 달라 전체 DPS를 평균낼 수 없습니다.']))],
-    manualResources:manualResourceBalance(rows,recovery,build.ss14Inputs.dps?.skills)};
+    manualResources:manualResourceBalance(rows,recovery,skillInputs)};
   report.elixirUptime={supported,rows:observed.map(row=>({path:row.path,name:row.name,uptime:row.elixirState.uptime})),
     ...(varying.length===1&&{activeDps:states[1].value.dps,inactiveDps:first.dps}),
     ...(varying.length===2&&{overlap}),
     states:states.map(({active,weight,value})=>{
-      const channelCostTotalOnly=varying.length>0&&value.rows.some(r=>r.channelCost&&r.channelCost.rate!==0);
+      const channelCostTotalOnly=combinedChannels.size>0;
       const manaPerSecond=channelCostTotalOnly?null:value.manualResources?.manaPerSecond;
+      const stateMana=channelCostTotalOnly
+        ? manualResourceBalance(value.rows.filter(row=>!combinedChannels.has(row.rowIndex)),[],skillInputs)?.manaPerSecond
+        : manaPerSecond;
       return {active:observed.map(row=>active[varying.indexOf(row)]??Number(row.elixirState.uptime===100)),
         uptime:100*weight,dps:value.dps,weightedDps:supported?value.dps*weight:null,
-        manaPerSecond,weightedManaPerSecond:Number.isFinite(manaPerSecond)?manaPerSecond*weight:null,channelCostTotalOnly};
+        manaPerSecond,weightedManaPerSecond:Number.isFinite(manaPerSecond)?manaPerSecond*weight:null,channelCostTotalOnly,
+        ...(channelCostTotalOnly&&{manaExcludingCombinedChannels:stateMana,
+          weightedManaExcludingCombinedChannels:Number.isFinite(stateMana)?stateMana*weight:null})};
     })};
 }

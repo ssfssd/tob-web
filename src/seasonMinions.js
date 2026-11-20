@@ -125,7 +125,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
       || build.ss14Inputs?.ruleReceipts?.[rule.sourceUrl] !== rule.sourcePageSha256) blockers.push("SS14 소환 스킬 주 속성 수치·공식 미확인");
     else { mainStatBonus += value * Number(rate) / 100; receipts.push(rule); }
   }
-  let increase = 0; let more = 1; let armorPenetration = 0;
+  let increase = 0; let more = 1; let armorPenetration = 0; let criticalDamageBonus = .5;
   const penetration = { fire: 0, cold: 0, lightning: 0, erosion: 0 };
   const damageEffects = [{ stat: 'cast-time', operation: 'set', value: 1 },
     { stat: `spell-${profile.type}-damage-min`, operation: 'set', value: b?.minionBaseMin },
@@ -134,6 +134,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
     operation: effect.operation === 'add_percent' ? 'add' : effect.operation, nonBlockingWhenDamageTypeUnavailable: true });
   for (const e of effects.filter(e => e.stat.startsWith("minion_") && !SEASON_GEAR_LEVEL_STATS.has(e.stat))) {
     if (e.receipt) receipts.push(e.receipt);
+    if (e.stat === 'minion_elemental_resistance' && e.operation === 'add_percent') continue;
     const conversion = seasonMinionDamageConversion(e);
     const typed = e.stat.match(/^minion_(physical|cold|lightning|fire|erosion)_damage$/u);
     const extra = e.stat === 'minion_physical_damage_as_erosion_damage' && e.operation === 'gain_percent_of_source';
@@ -151,6 +152,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
     if (e.stat === "minion_damage" && e.operation === "add_percent") increase += e.value;
     else if (e.stat === "minion_damage" && e.operation === "more") more *= 1 + e.value / 100;
     else if (e.stat === "minion_armor_penetration" && e.operation === "add_percent") armorPenetration += e.value;
+    else if (e.stat === "minion_critical_strike_damage" && e.operation === "add_percent") criticalDamageBonus += e.value / 100;
     else if (e.operation === 'add_percent' && /^minion_(fire|cold|lightning|erosion)_penetration$/u.test(e.stat)) penetration[e.stat.split('_')[1]] += e.value;
     else blockers.push(`소환체 효과 미지원: ${e.sourceText ?? e.stat}`);
   }
@@ -191,7 +193,7 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
     stateMultiplier = b?.growth >= 500 ? 1.5 : 1;
     penetration.cold += 15 * b?.frostEmpowerActive;
   }
-  const criticalMultiplier = 1 + Math.min(1, b?.minionCriticalRating / 10000) * .5;
+  const criticalMultiplier = 1 + Math.min(1, b?.minionCriticalRating / 10000) * criticalDamageBonus;
   const taken = (profile.damageForm === "Spell" ? effects.filter(e => e.stat === "spell_damage_taken").reduce((n, e) => n * (1 + e.value / 100), 1) : 1)
     * netherMore(effects,'enemy_all_damage_taken') * netherMore(effects,'enemy_hit_damage_taken');
   damageEffects.push({ stat: 'skill-damage', operation: 'add', value: increase });

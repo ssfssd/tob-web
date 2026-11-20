@@ -33,9 +33,10 @@ export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장
   const single=rows.length===1?rows[0]:null;
   const summary=single?` · ${single.from} → ${single.to}${single.toConfirmed?'':' (확인 필요)'}`:'';
   const value=(base,level,verified,growth)=>`Lv.${level}${verified?'':' (수치 미확인)'}${base!==level?`<small> · 기본 ${base}</small>`:''}${verified&&Number.isFinite(growth)?`<small> · 대미지 ×${fmt(growth)}</small>`:''}`;
-  const content=rows.map(({id,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth})=>{
+  const content=rows.map(({id,beforeId,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth})=>{
     const socket=Number.isInteger(supportIndex)?` · 보조 ${supportIndex+1}`:'';
-    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${skillName(id)}`)}</th><td>${value(fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(toBase,to,toConfirmed,toGrowth)}</td></tr>`;
+    const name=beforeId?`${skillName(beforeId)} → ${skillName(id)}`:skillName(id);
+    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${value(fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(toBase,to,toConfirmed,toGrowth)}</td></tr>`;
   }).join('');
   return `<details data-role="${esc(role)}"><summary>스킬 레벨${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
 }
@@ -72,6 +73,12 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const numbed=p.numbedDamageChanges?.length?`<table class="slot-dps-table" data-role="numbed-damage-preview"><caption>${p.dpsBasis==='assumedDps'?'마취 기여 · 방어 전 DPS':'마취 기여 DPS'}</caption>
     <thead><tr><th scope="col">대미지</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.numbedDamageChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
+  const skillNumbed=p.skillNumbedDamageChanges?.length?`<details data-role="skill-numbed-damage-preview"><summary>스킬별 마취 기여 · ${p.dpsBasis==='assumedDps'?'방어 전 DPS':'DPS'}</summary>
+    <table class="slot-dps-table"><thead><tr><th scope="col">스킬 · 대미지</th>${headers}<th scope="col">변화</th></tr></thead>
+    <tbody>${p.skillNumbedDamageChanges.map(({index,beforeId,afterId,label,from,to})=>{
+      const name=beforeId&&afterId&&beforeId!==afterId?`${skillName(beforeId)} → ${skillName(afterId)}`:skillName(afterId??beforeId);
+      return dpsRow(esc(`${slotName(index)} · ${name} · ${label}`),from,to,true);
+    }).join('')}</tbody></table></details>`:'';
   const numbedState=p.numbedStateChanges?.length?`<table class="slot-dps-table" data-role="numbed-state-preview"><caption>마취 적용 변화</caption>
     <thead><tr><th scope="col">수치</th>${headers}</tr></thead>
     <tbody>${p.numbedStateChanges.map(({label,from,to,unit})=>`<tr><th scope="row">${esc(label)}</th><td>${fmt(from)}${esc(unit)}</td><td>${fmt(to)}${esc(unit)}</td></tr>`).join('')}</tbody></table>`:'';
@@ -82,7 +89,7 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>${uptimeLabel}${uptimeDpsLabel}</caption>
     <thead><tr><th scope="col">효과</th>${headers}</tr></thead>
     <tbody>${p.uptimeChanges.map(({name,from,to,fromDps,toDps})=>`<tr><th scope="row">${esc(name)}</th><td>${uptimeValue(from,fromDps)}</td><td>${uptimeValue(to,toDps)}</td></tr>`).join('')}</tbody></table>`:'';
-  return skill+composition+types+speeds+usage+uptimes+numbedState+numbed;
+  return skill+composition+types+speeds+usage+uptimes+numbedState+numbed+skillNumbed;
 }
 
 export function renderResourceChanges(p,esc,{board=false,skill=false,action=board?'적용':'교체'}={}){
@@ -98,12 +105,22 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
       const name=beforeId&&afterId&&beforeId!==afterId?`${skillName(beforeId)} → ${skillName(afterId)}`:skillName(afterId??beforeId);
       return `<tr><th scope="row">${esc(`${slotName(index)} · ${name} · ${resource}/초`)}</th><td>${resourceValue(a,'',!beforeId)}</td><td>${resourceValue(b,'',!afterId)}</td></tr>`;
     }).join('')}</tbody></table></details>`:'';
-  if(!first&&!castCosts.length)return manaNote+perSkill;
+  const sealValue=row=>!row?'미장착':row.blocked?'확인 필요':row.active===false?'꺼짐':resourceValue(row.applied,'%');
+  const sealName=row=>row.name&&/[가-힣]/u.test(row.name)&&!/\p{Script=Han}/u.test(row.name)?row.name:'한국어 이름 미제공';
+  const reservations=p.manaReservationChanges?.length?`<details data-role="slot-mana-reservation-changes"><summary>오라·보조별 MP 봉인 변화</summary>
+    <table class="slot-dps-table"><thead><tr><th scope="col">오라·보조</th><th scope="col">${p.previous?'직전':'변경 전'}</th><th scope="col">변경 후</th></tr></thead>
+    <tbody>${p.manaReservationChanges.map(({a,b})=>{
+      const {rowIndex,supportIndex}=b??a;
+      const socket=Number.isInteger(supportIndex)?` · 보조 ${supportIndex+1}`:'';
+      const name=a&&b&&a.name!==b.name?`${sealName(a)} → ${sealName(b)}`:sealName(b??a);
+      return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${esc(sealValue(a))}</td><td>${esc(sealValue(b))}</td></tr>`;
+    }).join('')}</tbody></table></details>`:'';
+  if(!first&&!castCosts.length)return manaNote+perSkill+reservations;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
   const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
   const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
-  return detailRows.length||manaNote||basisNote||perSkill
-    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}${perSkill}</details>`
+  return detailRows.length||manaNote||basisNote||perSkill||reservations
+    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}${perSkill}${reservations}</details>`
     : `<p data-role="slot-resource-preview">${esc(summary)}</p>`;
 }
 

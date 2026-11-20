@@ -63,6 +63,7 @@ export function seasonEffectSources(report) {
     for (const [i, effect] of inactive.entries()) rows.push({ ...source, origin, effect, reason:effect.reason, key: `${source.path}:inactive:${i}`, status: "inactive", value: null });
     for (const [i, effect] of mechanics.entries()) rows.push({ ...source, origin, effect, key: `${source.path}:mechanic:${i}`, status: "mechanic", value: null });
     for (const [i, blocker] of blockers.entries()) rows.push({ ...source, origin, key: `${source.path}:blocked:${i}`, status: "blocked", value: null,
+      ...(blocker.sourceConflict&&{sourceConflict:blocker.sourceConflict}),
       reason: typeof blocker === "string" ? blocker : blocker.reason ?? "효과 또는 입력 확인 필요" });
   };
   for (const row of report.componentProjection?.rows ?? []) add(row, row.effects, row.blockers, row.inactive, row.mechanics);

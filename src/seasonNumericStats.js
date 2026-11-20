@@ -18,7 +18,7 @@ export const SEASON_STAT_LABELS = {
   minion_critical_strike_damage: "소환체 크리티컬 대미지", skill_area: "스킬 범위", projectile_quantity: "투사체 수량",
   cast_speed: "시전 속도", attack_speed: "공격 속도", movement_speed: "이동 속도", projectile_speed: "투사체 속도",
   cold_resistance: "냉기 저항", fire_resistance: "화염 저항", lightning_resistance: "번개 저항", erosion_resistance: "부식 저항",
-  elemental_resistance: "원소 저항", all_resistance: "모든 저항", cooldown_recovery_speed: "쿨타임 회복 속도",
+  elemental_resistance: "원소 저항", all_resistance: "모든 저항", minion_elemental_resistance: "소환체 원소 저항", cooldown_recovery_speed: "쿨타임 회복 속도",
   skill_effect_duration: "스킬 효과 지속 시간", skill_duration: "스킬 지속 시간", life_regeneration_flat: "HP 자연 회복",
   life_regeneration_percent: "최대 HP 비례 자연 회복", mana_regeneration_flat: "MP 자연 회복", mana_regeneration_percent: "최대 MP 비례 자연 회복",
   critical_strike_rating: "크리티컬 수치", spell_critical_strike_rating: "주술 크리티컬 수치", attack_critical_strike_rating: "공격 크리티컬 수치",

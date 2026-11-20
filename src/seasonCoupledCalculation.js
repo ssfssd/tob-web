@@ -59,7 +59,7 @@ export const seasonDirectDamageStat = stat => Object.hasOwn(damageStats, stat);
 
 export function calculateSeasonCoupledSkills(components, skills, componentProjection = { effects: [], rows: [] }, build = {}, {mana:maxMana,sealedMana} = {}) {
   const gear = components.filter((row) => row.category === "gear").flatMap((row) =>
-    (row.calculations ?? []).map(entry => ({ ...entry, itemId: row.id })));
+    (row.calculations ?? []).map(entry => ({ ...entry, itemId: row.id, itemName: row.name })));
   const blockers = [...(componentProjection.globalBlockers ?? [])];
   const effects = [];
   const omitted = [];
@@ -108,7 +108,11 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
   for (const row of componentProjection.rows.filter((row) => row.blockers.length)) omitted.push({
     path: row.path, reason: "component-effect-unresolved", blockers: row.blockers });
   for (const entry of gear) {
-    if (entry.status !== "mapped") { blockers.push("선택 장비의 SS14 효과·수치 연결이 미완료입니다."); continue; }
+    if (entry.status !== "mapped") {
+      const sourceConflict=entry.effectBlockers?.length&&entry.effectBlockers.every(issue=>issue.sourceConflict);
+      blockers.push(sourceConflict?`장비 · ${entry.itemName}: ${entry.reasons.join(' · ')}`:'선택 장비의 SS14 효과·수치 연결이 미완료입니다.');
+      continue;
+    }
     for (const effect of entry.rawEffects ?? []) {
       const conversion = seasonOutgoingDamageConversion(effect);
       if (/^(fire|cold|lightning)_damage_reflection$/u.test(effect.stat)) {

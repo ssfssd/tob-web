@@ -1,7 +1,7 @@
 import { matchingTrainingDummy } from "./seasonTrainingDummy.js";
 import { downloadJson } from "./downloadJson.js";
 import { isOfflineEdition, setPlannerHtml } from "./offlinePresentation.js";
-import { createSeasonWorkspace, resetSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
+import { createSeasonWorkspace, resetSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, saveSeasonWorkspaces, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
 import { prepareSeasonMigration } from "./seasonMigration.js";
 import { calculateEditorSeasonBuild } from "./seasonAssumedDps.js";
 import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources, renderBoardComparison, renderDrawerBar, renderSkillPickerFooter, renderSkillCandidateResult, renderEquippedSkillStats, skillSealSummary, nativeSaveStatus } from "./seasonPlannerView.js";
@@ -15,6 +15,7 @@ import { assertLocalLogAccess } from "./runtimePolicy.js";
 import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, showSlateFootprint, slatePreviewOffsets } from './seasonSlateEditor.js';
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
+import { inputDestinations } from './seasonInputRequirements.js';
 import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowTrim, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
 import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,copySeasonGearTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
 import { createSeasonEditComparison } from './seasonEditComparison.js';
@@ -23,7 +24,7 @@ import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem, openGearWor
 import { itemGearKind } from './seasonItemCraft.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels, previewSlotEdit } from './seasonGearPicker.js';
 import { observedManaInputState } from './seasonWorkspaceView.js';
-import { getSeasonSelectionOptions } from './seasonSelections.js';
+import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
 import {prismForm} from './seasonPrismEditor.js';
 import {inverseFields,inverseGeometry} from './seasonInverseImage.js';
@@ -538,7 +539,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       try{
         const result=await rankSeasonUpgrades(state.document,state.report,{slot:(replacement?state.replacementSlot:state.upgradeSlot)??'all',group,skill:state.upgradeSkill??'all',
           assemble:(replacement?state.assembleEquipment:group==='craft'?state.assembleCraft:group==='gear'&&state.assembleRolls)===true,source,
-          includeCorrosion:state.includeUpgradeCorrosion===true,
+          includeCorrosion:state.includeUpgradeCorrosion===true,lockedSlots:state.lockedEquipmentSlots,
           shelf:usesShelf?readShelf(storage):[],active,
           progress(checked,total){
             Object.assign(job,{checked,total});
@@ -556,13 +557,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.editComparison = editComparison.reset(state.document, state.report);
       state.notice = '현재 빌드를 자동 비교 기준으로 정했습니다.';
     },
-    open(id) {
-      if (state.dirty || state.pending.size) api.save();
+    open(id,{preserveCurrent=false}={}) {
+      if (!preserveCurrent && (state.dirty || state.pending.size)) api.save();
       const loaded = loadSeasonWorkspaces(storage);
       if (loaded.error) throw new Error(loaded.error);
       const next = loaded.documents.find(d => d.id === id);
       if (!next) throw new Error("저장한 빌드를 찾을 수 없습니다.");
       state.document = next; state.documents = loaded.documents; state.pending.clear(); state.dirty = false; state.overlay = null; state.fromOverview=false; state.error = "";
+      state.rankTrialOrigin=null;
       state.calculationIndex=0;
       state.history.clear(); state.supportIndex = null; state.picker = null; savedTarget = JSON.stringify(next.targetBuild);
       savedDocument=next;
@@ -571,6 +573,27 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.editComparison = editComparison.reset(state.document, state.report);
       state.notice=next.targetBuild.name+" 빌드를 열었습니다.";
       try { storage.setItem(ACTIVE_SEASON_WORKSPACE_KEY, id); } catch { state.notice = "빌드를 열었지만 다음 시작 선택은 저장하지 못했습니다."; }
+    },
+    openRequirement({section,tab,index=0,supportIndex,type,role,edit,key}) {
+      if(tab==='conditions'){
+        state.resultTab=tab;state.focusRole=role;
+        state.focusField=edit?{edit,key,inResults:true}:null;
+        return;
+      }
+      state.section=section;
+      if(section==='gear')state.gearIndex=index;
+      if(section==='skills'){state.skillIndex=index;state.supportIndex=null;}
+      state.overlay=type?{type,index}:null;
+      if(type==='memory')api.openMemory(index);
+      if(['talents','pact','divinity'].includes(section)){
+        if(section==='talents')state.talentIndex=index;
+        if(section==='pact')state.pactIndex=index;
+        api.openBoard(section);
+      }
+      if(section==='skills'&&(!type||type==='skills'))api.openSkill(index,supportIndex??null);
+      if(section==='gear'&&(!type||type==='gear'))api.openGear(index,false);
+      state.focusField=edit?{edit,key}:null;
+      state.focusRole=role;
     },
     async readBuildFile(file) {
       const panel = state.overlay;
@@ -1058,6 +1081,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if(input.hasAttribute?.('data-assemble-equipment')){
         state.assembleEquipment=input.checked;
         state.upgrades=null;api.render();return;
+      }
+      if(input.hasAttribute?.('data-lock-equipment-slot')){
+        const index=Number(input.dataset.lockEquipmentSlot);
+        if(!Number.isInteger(index)||!SEASON_GEAR_SLOT_LABELS[index])return;
+        const slots=new Set(state.lockedEquipmentSlots);
+        if(input.checked)slots.add(index);else slots.delete(index);
+        state.lockedEquipmentSlots=[...slots];
+        state.upgrades=null;state.focusRole=`locked-equipment-slot-${index}`;api.render();return;
       }
       if(input.hasAttribute?.('data-upgrade-source')){
         if(Object.hasOwn(GEAR_UPGRADE_SOURCES,input.value))state.upgradeSource=input.value;
@@ -1620,8 +1651,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const skill=action==='rank-skill-trial';
           const row=(skill?state.upgrades?.blockedSkills:state.upgrades?.blockedGear)?.[Number(d.index)];
           if(!row||state.pending.size)return;
+          const metric=state.upgrades.metric;
           const copy=skill?copySeasonSkillTrial(state.document,row):copySeasonGearTrial(state.document,row);
-          api.openImportedCopy(copy);
+          const origin=state.dirty||savedDocument?.id!==state.document.id
+            ? importSeasonWorkspace(exportSeasonWorkspace(state.document)) : null;
+          if(origin)origin.targetBuild.name=origin.targetBuild.name.slice(0,148)+' · 분석 기준 사본';
+          const originId=origin?.id??state.document.id;
+          saveSeasonWorkspaces(storage,origin?[origin,copy]:[copy]);
+          api.open(copy.id,{preserveCurrent:true});
+          state.rankTrialOrigin=originId;
           if(!skill&&state.report.fullDps.supported){
             api.openGear(row.edits[0].slotIndex,false);
             state.notice='장비 시험 사본을 열었습니다.';
@@ -1633,6 +1671,17 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.showDpsNotes=true;
           state.notice='시험 사본을 열었습니다. 전체 DPS 보류 이유를 확인하세요.';
           state.focusRole='calculation-requirements';
+          const result=state.report[metric??preferredSeasonDpsMetric(state.report)];
+          const destination=(result?.blockers??[]).flatMap(reason=>inputDestinations(state.report,reason,result)).find(link=>link.edit&&link.key);
+          if(destination){
+            api.openRequirement(destination);
+            state.notice='시험 사본을 열었습니다. 조건을 입력하면 DPS를 다시 계산합니다.';
+          }
+          return;
+        }
+        if(action==='return-rank-origin'&&state.rankTrialOrigin){
+          api.open(state.rankTrialOrigin);
+          state.section='overview';state.resultTab='analysis';state.focusRole='result-tab-analysis';
           return;
         }
         if (action === 'compare-builds') { api.compare(); return; }
@@ -1668,21 +1717,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             ...(d.type==='extensions'?{initial:{document:state.document,report:state.report}}:{}) };
         }
         else if (action === "requirement") {
-          state.section = d.section;
-          const index=Number(d.index)||0;
-          if(d.section==='gear')state.gearIndex=index;
-          if(d.section==='skills'){state.skillIndex=index;state.supportIndex=null;}
-          state.overlay = d.type ? { type: d.type, index } : null;
-          if(d.type==='memory')api.openMemory(index);
-          if(['talents','pact','divinity'].includes(d.section)){
-            if(d.section==='talents')state.talentIndex=index;
-            if(d.section==='pact')state.pactIndex=index;
-            api.openBoard(d.section);
-          }
-          if(d.section==='skills'&&(!d.type||d.type==='skills'))api.openSkill(index,/^[0-4]$/u.test(d.support??'')?Number(d.support):null);
-          if(d.section==='gear' && (!d.type || d.type==='gear')) api.openGear(index,false);
-          state.focusField=d.field?{edit:d.field,key:d.fieldKey}:null;
-          state.focusRole = d.focusRole;
+          api.openRequirement({section:d.section,index:Number(d.index)||0,supportIndex:/^[0-4]$/u.test(d.support??'')?Number(d.support):null,
+            type:d.type,role:d.focusRole,edit:d.field,key:d.fieldKey});
         }
         else if (action === "close") api.closeOverlay();
         else if (action === "picker-gear-kind") state.picker={gearKind:d.category,filter:'',candidate:'',query:state.picker?.query??''};

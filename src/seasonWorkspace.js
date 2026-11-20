@@ -812,18 +812,27 @@ export function loadSeasonWorkspaces(storage) {
   } catch { return { documents: [], error: "저장된 SS14 편집 문서를 읽을 수 없습니다. 기존 저장 내용은 변경하지 않았습니다." }; }
 }
 
-export function saveSeasonWorkspace(storage, document, { now = new Date() } = {}) {
-  if (!validDocument(document)) throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
+export function saveSeasonWorkspaces(storage, changes, { now = new Date() } = {}) {
+  if (!changes.every(validDocument) || new Set(changes.map(document=>document.id)).size!==changes.length)
+    throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
   const loaded = loadSeasonWorkspaces(storage);
   if (loaded.error) throw new Error(loaded.error);
-  const existing = loaded.documents.find((row) => row.id === document.id);
-  if ((existing?.revision ?? 0) !== document.revision || (existing && json(existing.sourceBuild) !== json(document.sourceBuild))) {
-    throw new Error("다른 탭에서 문서가 변경되었습니다. 저장 문서를 다시 열어 주세요.");
-  }
-  const saved = { ...structuredClone(document), revision: document.revision + 1, updatedAt: now.toISOString() };
-  const documents = existing ? loaded.documents.map((row) => row.id === saved.id ? saved : row) : [...loaded.documents, saved];
-  storage.setItem(SEASON_WORKSPACE_STORAGE_KEY, json({ schemaVersion: 1, documents }));
+  const documents=new Map(loaded.documents.map(document=>[document.id,document]));
+  const updatedAt=now.toISOString();
+  const saved=changes.map(document=>{
+    const existing=documents.get(document.id);
+    if((existing?.revision??0)!==document.revision || existing&&json(existing.sourceBuild)!==json(document.sourceBuild))
+      throw new Error("다른 탭에서 문서가 변경되었습니다. 저장 문서를 다시 열어 주세요.");
+    const next={...structuredClone(document),revision:document.revision+1,updatedAt};
+    documents.set(next.id,next);
+    return next;
+  });
+  storage.setItem(SEASON_WORKSPACE_STORAGE_KEY, json({ schemaVersion: 1, documents:[...documents.values()] }));
   return saved;
+}
+
+export function saveSeasonWorkspace(storage, document, options) {
+  return saveSeasonWorkspaces(storage,[document],options)[0];
 }
 
 export function exportSeasonWorkspace(document) {

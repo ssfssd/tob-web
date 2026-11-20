@@ -264,7 +264,7 @@ function resourceCandidates(document,report){
   }
   return candidates;
 }
-export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',includeCorrosion=false,active=()=>true,progress=()=>{}}={}){
+export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',includeCorrosion=false,lockedSlots=[],active=()=>true,progress=()=>{}}={}){
   const metric=preferredSeasonDpsMetric(report);
   const base={document,report},baseline=compareSeasonDpsSnapshots(base,base,metric);
   const result={metric,rows:[],resources:[],checked:0,blocked:0,total:0,reasons:baseline.reasons,base:baseline.baseValue};
@@ -304,16 +304,20 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
   const unit = group==='unit';
   if(impact)result.impacts=[];
   if(equipment&&!Object.hasOwn(GEAR_UPGRADE_SOURCES,source))throw Error('장비 추천의 후보 출처를 선택하세요.');
+  const assembleShelf=equipment&&assemble&&source==='shelf'&&slot==='all';
+  const locked=new Set(assembleShelf?lockedSlots:[]);
+  const previousOffhand=equipment && normalizeBuild(document.targetBuild).gear.slots[1]?.itemId;
+  const canReplace=({edits:[edit]})=>!locked.has(edit.slotIndex)
+    && !(previousOffhand&&locked.has(1)&&edit.slotIndex===0&&isTwoHandedWeapon(edit.value.item.itemId));
   const existingOptions=document.targetBuild.customAffixes?.trimEnd();
   const candidates=impact?wornGearCandidates(document,report)
     :unit?seasonUnitOptionLines().map(label=>({label,
       edits:[{kind:'custom-options',value:existingOptions?existingOptions+'\n'+label:label}]}))
-    :equipment?gearCandidates(document,slot,shelf,group==='legendary',source,false,includeCorrosion)
+    :equipment?gearCandidates(document,slot,shelf,group==='legendary',source,false,includeCorrosion).filter(canReplace)
     :group==='craft'?craftCandidates(document,slot)
     :skillReplacement?skillReplacementCandidates(document,report,selectedIndex)
     :optionCandidates(document,report,group,slot,selectedSkill);
   const resources=!equipment && group==='all'?resourceCandidates(document,report):[];
-  const previousOffhand=equipment && normalizeBuild(document.targetBuild).gear.slots[1]?.itemId;
   const ranges=assemble&&group==='gear'&&!equipment?optionCandidates(document,report,group,slot,skill,true):[];
   result.total=candidates.length+resources.length+ranges.reduce((sum,r)=>sum+r.bounds.length,0);
   let tick=0;
@@ -428,11 +432,11 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
   }
   if(edits.length)result.assembled={label:'장비 옵션 조합',detail:changes.join(' / '),edits,metric,value:combinedValue,delta:combinedValue-baseline.value,
     ...upgradeDetails(report,combinedReport,metric)};
-  if(equipment && assemble && source==='shelf' && slot==='all'){
+  if(assembleShelf){
     const [single]=result.rows;
     let seed=single && {edits:single.edits,details:[single.detail.replace(/ · 서브 무기 해제$/u,'')],value:single.value};
     const gear=normalizeBuild(document.targetBuild).gear.slots;
-    const possible=gearCandidates(document,'all',shelf,group==='legendary','shelf',true);
+    const possible=gearCandidates(document,'all',shelf,group==='legendary','shelf',true).filter(canReplace);
     const twoHanded=isTwoHandedWeapon(gear[0]?.itemId);
     const exact=exactEquipmentCombinations(possible,twoHanded);
     const combinations=()=>exact??equipmentPairs(possible,twoHanded);
@@ -463,7 +467,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     });
     while(!exact&&seed&&selectedSlots.size<SEASON_GEAR_SLOT_LABELS.length){
       const available=shelf.filter(item=>!selectedItems.has(item.id));
-      const choices=gearCandidates(combined,'all',available,group==='legendary','shelf').filter(({edits:[edit]})=>
+      const choices=gearCandidates(combined,'all',available,group==='legendary','shelf').filter(canReplace).filter(({edits:[edit]})=>
         !selectedSlots.has(edit.slotIndex) && !(edit.slotIndex===0 && selectedSlots.has(1) && isTwoHandedWeapon(edit.value.item.itemId)));
       result.total+=choices.length;
       let best;
