@@ -71,9 +71,13 @@ export function editNativeExtension(target, edit) {
     if (option && target.skills.elixirs?.some((s, j) => j !== i && s?.skillId === option.id)) throw new Error("같은 영약은 한 칸에만 선택하세요.");
     const oldIdentity = nativeElixirOptions().find(o => o.id === current);
     const oldHost = target.skills.active.findIndex(s => oldIdentity && s?.skillId === oldIdentity.itemId);
-    const hostIndex = edit.rowIndex ?? (oldHost >= 0 ? oldHost : i + 1);
-    if (!Number.isInteger(hostIndex) || hostIndex < 0 || hostIndex > 4) throw new Error("영약을 넣을 액티브 칸을 확인하세요.");
-    host(target, hostIndex, option?.itemId ?? null);
+    if (option || oldHost >= 0) {
+      const hostIndex = edit.rowIndex ?? (oldHost >= 0 ? oldHost
+        : [i+1,1,2,3,4,0].find(index => !target.skills.active[index]?.skillId));
+      if (hostIndex === undefined) throw new Error("빈 액티브 칸이 없습니다. 교체할 칸의 스킬 편집에서 영약을 선택하세요.");
+      if (!Number.isInteger(hostIndex) || hostIndex < 0 || hostIndex > 4) throw new Error("영약을 넣을 액티브 칸을 확인하세요.");
+      host(target, hostIndex, option?.itemId ?? null);
+    }
     clearTheaElixirTiming(target.ss14Inputs,i);
     target.skills.elixirs ??= [];
     target.skills.elixirs[i] = option ? { bottleId: i === 0 ? "base" : "special", skillId: option.id, ingredientIds: [] } : null;

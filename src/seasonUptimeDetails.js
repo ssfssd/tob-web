@@ -1,7 +1,7 @@
 import { blessingConditionValue, blessingLabel } from './seasonBlessings.js';
 import { combatNumbedEnabled } from './seasonTheaCombatInputs.js';
 import { seasonNumbedDamageRows } from './seasonDps.js';
-import { periodicBurstLinks, readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { PERIODIC_BURST_INPUT, periodicBurstLinks, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 
 export const uptimeFields = {
   dotUptime: ['지속 대미지', '효과가 끝나기 전에 같은 대상에게 다시 적용하면 100%를 유지할 수 있습니다. 지속 대미지 DPS에 유지율을 곱합니다.'],
@@ -63,6 +63,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
     const permafrost = field==='permafrostUptime';
     const windowed = (dot || permafrost) && !!row?.dotWindows;
     const details = permafrost ? permafrostUptime : uptimeFields[field];
+    const input=windowed?'dotWindows':field==='moduleDotUptime'?`moduleRate${actionIndex}`:field;
     const contribution = (scenario, entry) => {
       if (!scenario.fullDps.supported || !entry) return null;
       const {values}=entry;
@@ -80,6 +81,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
       name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
       setting:percent(windowed?windowUptime(original?.dotWindows?original:row,saved):saved),
       assumed:percent(windowed?windowUptime(row,assumed):assumed),
+      input:{edit:'dps-input',key:`${rowIndex}:${input}`},
       method:windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':duplicate&&assumed===undefined?'이 칸이 대미지를 준 시간의 비율을 입력하세요. 적용되지 않는 칸은 0%입니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':duplicate&&assumed===0?'중복 슬롯에 지정한 0%를 유지합니다.':details[1],
       contribution:contribution(estimate,row),
       inputContribution:contribution(report,original),
@@ -91,6 +93,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
     const state=selected=>selected===0?'미적용':selected!==100?'미정':burst.length>1?'중첩 확인 필요':`적용 · 공격·시전 속도 +${percent(value)}`;
     lines.push({key:'periodic-burst',name:'간헐적 폭발',buffState:true,
       setting:state(readPeriodicBurstUptime(build.ss14Inputs.dps)),assumed:state(100),
+      input:{edit:'dps-input',key:PERIODIC_BURST_INPUT},
       method:`보조 대상 이동 스킬을 쓰면 ${count(interval)}초 간격으로 버프를 얻습니다. 다음 이동 스킬을 쓴 뒤 ${count(duration)}초 동안 속도가 증가합니다. DPS에는 선택한 순간의 속도를 반영합니다.`});
   }
   for (const row of estimate.fullDps.rows) {
@@ -147,8 +150,10 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
             +(timing?' 방어 전 DPS에는 측정 구간 내내 영약을 적용합니다.':'')});
         continue;
       }
-      const saved=report.componentProjection.rows.find(r=>r.path===row.path)?.elixirState;
+      const original=report.componentProjection.rows.find(r=>r.path===row.path);
+      const saved=original?.elixirState, key=`elixir:${row.elixirState.index}:uptime`;
       lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name, setting:Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
+        ...(original?.extensionControls?.some(control=>control.key===key)&&{input:{edit:'extension-input',key}}),
         method:'영약 효과가 끝나기 전에 갱신하면 유지됩니다. 방어 전 계산은 활성 상태의 효과 배율을 사용합니다.'});
     }
     for (const key of row.heroControls ?? []) {

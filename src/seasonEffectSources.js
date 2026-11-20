@@ -31,7 +31,11 @@ export function seasonEffectSources(report) {
   const rows = [];
   const skills=report.coupledSkills?.rows??[];
   const trace = skills.flatMap(skill => {
-    const applied=(skill.trace??[]).map(t=>({...t,rowIndex:skill.rowIndex}));
+    const hands=skill.offenseBasis?.weaponHands??[];
+    const handEffects=hands.flatMap(hand=>[...(hand.conversionTrace??[]),...(hand.addedDamageTrace??[])]);
+    const uniqueHandEffects=new Map(handEffects.map(effect=>[effect.inputIndex,effect]));
+    const applied=[...(skill.trace??[]),...uniqueHandEffects.values()]
+      .map(t=>({...t,rowIndex:skill.rowIndex}));
     const accepted=applied.some(t=>t.stage==='added-damage'&&t.stat==='added-damage-effectiveness'&&t.contribution?.max>0);
     if (accepted) for (const {source,effects,min,max} of skill.addedDamageSources??[]) {
       if (!source.path||!Number.isFinite(min)||!Number.isFinite(max)||min>max||max<=0) continue;

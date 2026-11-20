@@ -147,6 +147,13 @@ export function applyObservedElixirUptime(build,report,calculateState) {
       ...(routes.length===1&&routes[0].groups.length===1&&{conversionTrace:routes[0].groups[0].trace}),
       ...(varying.length&&routes.length&&{
         elixirDamageRoutes:{names:varyingNames,states:routes},
+        elixirAddedDamage:{names:varyingNames,states:states.map(({direct,active,weight},index)=>{
+          const skill=direct.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
+          const hands=samples[index].value.weaponHands;
+          const groups=hands?.length?hands.map(hand=>({slotIndex:hand.slotIndex,trace:hand.addedDamageTrace}))
+            : [{trace:skill?.trace?.filter(effect=>effect.stage==='added-damage')}];
+          return {active,uptime:100*weight,groups,sources:skill?.addedDamageSources};
+        })},
         elixirDpsStates:{names:varyingNames,states:states.map(({active,weight},index)=>{
           const dps=samples[index].value.values.dps;
           return {active,uptime:100*weight,dps,weightedDps:Number.isFinite(dps)?dps*weight:null};
@@ -175,10 +182,11 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   report.elixirUptime={supported,rows:observed.map(row=>({path:row.path,name:row.name,uptime:row.elixirState.uptime})),
     ...(varying.length===1&&{activeDps:states[1].value.dps,inactiveDps:first.dps}),
     ...(varying.length===2&&{overlap}),
-    states:states.map(({active,weight,value})=>({
-      active:observed.map(row=>active[varying.indexOf(row)]??Number(row.elixirState.uptime===100)),
-      uptime:100*weight,dps:value.dps,weightedDps:supported?value.dps*weight:null,
-      manaPerSecond: varying.length && value.rows.some(r=>r.channelCost && r.channelCost.rate!==0)
-        ? null : value.manualResources?.manaPerSecond,
-    }))};
+    states:states.map(({active,weight,value})=>{
+      const channelCostTotalOnly=varying.length>0&&value.rows.some(r=>r.channelCost&&r.channelCost.rate!==0);
+      const manaPerSecond=channelCostTotalOnly?null:value.manualResources?.manaPerSecond;
+      return {active:observed.map(row=>active[varying.indexOf(row)]??Number(row.elixirState.uptime===100)),
+        uptime:100*weight,dps:value.dps,weightedDps:supported?value.dps*weight:null,
+        manaPerSecond,weightedManaPerSecond:Number.isFinite(manaPerSecond)?manaPerSecond*weight:null,channelCostTotalOnly};
+    })};
 }

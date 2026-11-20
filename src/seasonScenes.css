@@ -615,6 +615,8 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .slot-dps-table :is(td,th) {padding:5px 3px;text-align:end;overflow-wrap:anywhere;border-bottom:1px solid #414345}
 .slot-dps-table th:first-child {text-align:start}
 .slot-dps-table thead th {color:#c6c6c4;font-weight:400}
+.elixir-mp-contribution {display:block}
+[data-role="native-uptime-details"] li button {margin-inline-start:.5rem}
 .craft-families {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px}
 .craft-families section {min-width:0}
 .craft-families h3 {display:flex;justify-content:space-between;align-items:baseline;margin:8px 0}

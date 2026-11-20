@@ -1124,10 +1124,10 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const weaponHands = offense?.values.weaponHands?.map(hand=>{
       const handPools=pools.filter(p=>p.weaponSlot===hand.slotIndex);
       const multiplier=hand.hitMultiplier*attributeAndTaken;
-      const {weaponSpeedBase,weaponSpeed,conversionTrace}=basis.weaponHands[hand.slotIndex];
+      const {weaponSpeedBase,weaponSpeed,conversionTrace,addedDamageTrace}=basis.weaponHands[hand.slotIndex];
       return {...hand,weaponSpeedBase,weaponSpeed,landedHit:meanHit(handPools,hand)*multiplier,
         landedLightning:meanHit(handPools.filter(p=>p.type==='lightning'),hand)*multiplier,
-        conversionTrace};
+        conversionTrace,addedDamageTrace};
     });
     const landedHit = weaponHands ? weaponHands.reduce((sum,hand)=>sum+hand.landedHit,0)/2
       : mean * offense?.values.attributeMultiplier * criticalMultiplier * takenMultiplier;

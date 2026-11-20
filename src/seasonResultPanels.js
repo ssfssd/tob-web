@@ -409,7 +409,7 @@ function hitModifierSources(trace, operation) {
       conversionSource(e.effectSource??undefined)];
   });
 }
-function renderAddedHitSources(trace, directSources) {
+function renderAddedHitSources(trace, directSources, hand, rolePrefix='') {
   const efficiency=trace?.find(e=>e.stage==='added-damage'&&e.stat==='added-damage-effectiveness');
   const addRow=(type,min,max,source)=>[`${damageTypes[type]} 추가 대미지 · 전환 전`,min===max?number(min):`${number(min)} – ${number(max)}`,conversionSource(source)];
   const sources=(trace??[]).flatMap(e=>{
@@ -428,7 +428,20 @@ function renderAddedHitSources(trace, directSources) {
       if(Number.isFinite(min)&&Number.isFinite(max)&&min<=max&&max>0) sources.push(addRow(type,min*scale,max*scale,source));
     }
   }
-  return calcGroup('추가 대미지 효율·출처','',calcRows(sources),'hit-added-sources');
+  const title=hand===undefined?'추가 대미지 효율·출처':`${hand===0?'메인':'서브'} 무기 · 추가 대미지 효율·출처`;
+  return calcGroup(title,'',calcRows(sources),rolePrefix+(hand===undefined?'hit-added-sources':`hit-added-sources-${hand}`));
+}
+function renderElixirAddedDamage(data) {
+  if(!data)return '';
+  const renderEntry=({groups,sources},prefix)=>groups.map(({slotIndex,trace})=>renderAddedHitSources(trace,sources,slotIndex,prefix)).join('');
+  const entries=data.states.map(state=>renderEntry(state));
+  if(!entries.some(Boolean))return '';
+  if(entries.every(entry=>entry===entries[0]))
+    return calcGroup('모든 영약 상태의 추가 적중 출처','',entries[0],'elixir-added-hit-sources');
+  return calcGroup('영약 상태별 추가 적중 출처','',data.states.map(({active,uptime},index)=>
+    calcGroup(data.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '),number(uptime)+'%',
+      renderEntry(data.states[index],`elixir-phase-${index}-`)||'<p>적용된 추가 적중 없음</p>',`elixir-added-hit-phase-${index}`)).join(''),
+    'elixir-added-hit-sources');
 }
 export function renderSkillConversion(trace,index) {
   const conversions=(trace??[]).filter(e=>e.stage==='conversion'&&e.effectivePercent>0&&damageTypes[e.sourceType]&&damageTypes[e.targetType]);
@@ -712,7 +725,7 @@ export function renderSkillCalculation(s) {
       calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
   }
   if(averagedElixir)
-    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
+    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}${renderElixirAddedDamage(displayRow?.elixirAddedDamage)}</section>`;
   const useRate=assumed?displayRow?.useRate:direct?.offenseBasis?.rate;
   const criticalChance=critical?.effectiveCriticalChance;
   const summary=displayRow?.supported?[
@@ -725,7 +738,8 @@ export function renderSkillCalculation(s) {
     const label=hand.slotIndex===0?'메인 무기':'서브 무기';
     return calcRows([[`${label} 적중당 평균 대미지`,number(hand.landedHit)],
       [`${label} 크리티컬 확률`,number(hand.effectiveCriticalChance)+'%']])
-      + renderSkillConversion(hand.conversionTrace,`${index}-weapon-${hand.slotIndex}`);
+      + renderSkillConversion(hand.conversionTrace,`${index}-weapon-${hand.slotIndex}`)
+      + renderAddedHitSources(hand.addedDamageTrace,addedDamageSources,hand.slotIndex);
   }).join('')+`<p><a href="${DUAL_WIELD_ATTACK_SOURCE}" target="_blank" rel="noopener noreferrer">쌍수 공격 도움말</a></p>`,'selected-skill-dual-wield');
   const trace=assumed?displayRow?.conversionTrace:row?.conversionTrace??direct?.trace;
   const conversion=renderSkillConversion(trace,index);

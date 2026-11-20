@@ -329,12 +329,14 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         if (rotations.every(e=>e.complete && e.hit.projectileHits===1 && e.dot.dps===0
           && !e.reaping && !e.spellBurst && !e.luckyDamage && !e.doubleDamage && !e.tripleDamage
           && !e.critical?.conditionalDamageMultiplier && (e.actionRate??e.hit.rate)===(evaluation.actionRate??evaluation.hit.rate))) {
+          const sourceOf=effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null});
           weaponHands = rotations.map((e,i)=>({slotIndex:i, baseCriticalRating:candidateHands[i].baseCriticalRating,
             weaponSpeedBase:candidateHands[i].weaponSpeedBase, weaponSpeed:candidateHands[i].weaponSpeed,
             receipts:candidateHands[i].receipts, hitDps:e.hit.dps, pools:e.hit.pools, excluded:e.excluded,
             levelGrowthMultiplier:seasonAppliedOverlevelMultiplier(e.applied),
             conversionTrace:e.applied.filter(effect=>['conversion','gained-as-extra'].includes(effect.stage))
-              .map(effect=>({...effect,effectSource:evaluatedEffects[effect.inputIndex]?.effectSource??null}))}));
+              .map(sourceOf),
+            addedDamageTrace:e.applied.filter(effect=>effect.stage==='added-damage').map(sourceOf)}));
         } else reasons.push('쌍수 교대 공격의 두 무기 적중·공격 속도를 확인할 수 없습니다.');
       }
       // A verified cold-only pool cannot benefit from a fire/lightning-only
@@ -371,7 +373,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         'supported-skill-elemental-damage', 'supported-skill-ailment-damage', 'supported-skill-damage-over-time'].includes(e.stat))
         .map(e => e.operation === 'add' && e.unit === 'percent' ? { ...e, operation: 'add_percent' } : e),
       damageStages: supported && !weaponHands ? evaluation.damageStages : null,
-      addedDamageSources: supported && !weaponHands ? addedDamageSources : [],
+      addedDamageSources: supported ? addedDamageSources : [],
       offenseBasis: supported ? { hitDps: alternatingHitDps??evaluation.hit.dps, dotDps: evaluation.dot.dps, weaponHands, moonStrike,
         cadence:evaluation.cadence,
         cadenceTrace:evaluation.applied.filter(effect=>effect.stage==='cadence'||effect.stage==='cooldown')

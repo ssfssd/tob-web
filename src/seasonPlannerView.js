@@ -1132,11 +1132,16 @@ function renderObservedElixirUptime(s) {
   const mp=value=>Number.isFinite(value)?fmt(value):'확인 필요';
   const basis=assumed?'방어 전 DPS':'전체 DPS';
   const result=assumed?s.report.assumedDps:s.report.fullDps;
+  const combinedChannelCost=uptime.states.some(row=>row.channelCostTotalOnly);
+  const partial=uptime.states.length>1;
+  const mpByState=row=>row.channelCostTotalOnly?'—':mp(row.manaPerSecond)
+    +(partial&&Number.isFinite(row.weightedManaPerSecond)?`<small class="elixir-mp-contribution">반영 ${fmt(row.weightedManaPerSecond)}</small>`:'');
   return `<details data-role="observed-elixir-uptime"><summary>영약 유지율 · ${basis}</summary>
     <ul>${uptime.rows.map(row=>`<li>${esc(row.name)} · ${fmt(row.uptime)}%</li>`).join('')}</ul>
-    <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">MP/초</th></tr></thead>
-      <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${fmt(row.weightedDps)}</td><td>${mp(row.manaPerSecond)}</td></tr>`).join('')}</tbody>
+    <table class="slot-dps-table" aria-label="영약 상태별 DPS 기여와 MP"><thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비율</th><th scope="col">상태 DPS</th><th scope="col">반영 DPS</th><th scope="col">수동 소모 MP/초</th></tr></thead>
+      <tbody>${uptime.states.map(row=>`<tr><th scope="row">${row.active.map((on,i)=>on?esc(uptime.rows[i].name):'').filter(Boolean).join(' · ')||'없음'}</th><td>${fmt(row.uptime)}%</td><td>${fmt(row.dps)}</td><td>${fmt(row.weightedDps)}</td><td>${mpByState(row)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><th scope="row" colspan="3">${basis}</th><td>${fmt(result.dps)}</td><td>${mp(result.manualResources?.manaPerSecond)}</td></tr></tfoot></table>
+    ${combinedChannelCost?'<p>집중 스킬의 MP 소모는 전체 관측 차감 횟수로 계산합니다.</p>':''}
     ${button('영약 조건 편집','requirement','data-section="combat" data-focus-role="native-extension-input"')}</details>`;
 }
 function renderAssumedDps(s, primary = false) {
@@ -1152,7 +1157,8 @@ function renderAssumedDpsDetails(s) {
       ${estimate.uptimeDetails?.length?`<ul>${estimate.uptimeDetails.map(row=>{
         const amounts=[['입력 조건',row.inputContribution],['방어 전',row.contribution]]
           .filter(([,value])=>Number.isFinite(value)).map(([label,value])=>`${label} ${fmt(value)} DPS`);
-        return `<li><b>${esc(row.name)}</b><br>${row.setting===row.assumed?`${row.buffState?'':'적용 '}${esc(row.assumed)}`:`입력 ${esc(row.setting)} → 방어 전 ${esc(row.assumed)}`}${amounts.length?`<br>${amounts.join(' · ')}`:''}<br>${esc(row.method)}</li>`;
+        const edit=row.input?button('조건 수정','requirement',`data-section="combat" data-field="${esc(row.input.edit)}" data-field-key="${esc(row.input.key)}" aria-label="${esc(row.name)} 조건 수정"`):'';
+        return `<li><b>${esc(row.name)}</b>${edit}<br>${row.setting===row.assumed?`${row.buffState?'':'적용 '}${esc(row.assumed)}`:`입력 ${esc(row.setting)} → 방어 전 ${esc(row.assumed)}`}${amounts.length?`<br>${amounts.join(' · ')}`:''}<br>${esc(row.method)}</li>`;
       }).join('')}</ul>`:''}
       ${button('전투 조건 보기','result-tab','data-tab="conditions"')}</details>`:''}`;
 }
