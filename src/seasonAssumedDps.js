@@ -196,6 +196,8 @@ export function calculateEditorSeasonBuild(build, options = {}) {
           cadence:direct?.offenseBasis?.cadence,
           cadenceTrace:direct?.offenseBasis?.cadenceTrace,
           hitModifierTrace:direct?.trace?.filter(e=>e.stage==='damage-modifier'&&e.appliesToHit),
+          addedDamageTrace:direct?.trace?.filter(e=>e.stage==='added-damage'),
+          addedDamageSources:direct?.addedDamageSources,
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
         manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(castCostObservation&&{castCostObservation}),...(reaping&&{reaping}),...(fissure&&{fissure}),
         ...(dotBreakdown&&(!scenario.theaAverage||estimate.scope==='ss14-thea-joint-combat')&&{dotBreakdown})};

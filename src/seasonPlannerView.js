@@ -1,4 +1,5 @@
 import { normalizeBuild } from "./engine.js";
+import { SEASON_DAMAGE_TYPE_LABELS } from './seasonDps.js';
 import { findItemById } from "./catalog.js";
 import { getIngameHeroArt } from "./ingameHeroArt.js";
 import { talentTreeIcon } from "./ingameUiAssets.js";
@@ -162,6 +163,11 @@ const sourceStats = {
   "spell-cold-damage-min": "최소 냉기 대미지", "spell-cold-damage-max": "최대 냉기 대미지", "added-damage-effectiveness": "추가 대미지 효율",
   "cast-time": "시전 시간", "mana-cost": "MP 소모", "cooldown": "쿨타임", "projectile-quantity": "투사체 수량",
 };
+function addedDamageSourceStat(stat) {
+  const match=/^(?:(?:spell|attack)_(physical|fire|cold|lightning|erosion)_damage_|supported-skill-added-(physical|fire|cold|lightning|erosion)-damage-)(min|max)$/u.exec(stat);
+  if(!match)return undefined;
+  return `${match[3]==='min'?'최소':'최대'} ${SEASON_DAMAGE_TYPE_LABELS[match[1]??match[2]]} 추가 대미지`;
+}
 export function renderEffectSources(s, path = null) {
   const rows = seasonEffectSources(s.report).filter(r => !path || r.path === path);
   const status = { direct: "직접 대미지 반영", selected: "선택 수치", inactive: "조건 미충족", "not-applicable":"해당 없음", blocked: "확인 필요", mechanic: "특수 효과 규칙" };
@@ -170,6 +176,7 @@ export function renderEffectSources(s, path = null) {
     ${s.report.theaAverage ? "<p>아래 수치는 전투 시작 상태입니다. 전체 DPS는 선택한 시간 동안의 평균입니다.</p>" : ""}
     <div class="native-effect-list">${rows.map((r, i) => {
       const stat = r.effect?.stat ?? "", label = sourceStats[stat] ?? sourceStats[stat.replace(/^skill-/u, "").replaceAll("-", "_")]
+        ?? addedDamageSourceStat(stat)
         ?? (r.status === "mechanic" ? "발동·특수 효과" : r.status === "blocked" ? "미확인 효과" : `선택 효과 ${i + 1}`);
       const percent = r.effect?.unit === "percent" || ["more", "add_percent"].includes(r.effect?.operation);
       const value = r.value === null ? "" : `${r.value.toLocaleString("ko-KR", { maximumFractionDigits: 4 })}${percent ? "%" : ""}${r.effect?.operation === "more" ? " 별도" : ""}`;

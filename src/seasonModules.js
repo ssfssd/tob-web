@@ -407,6 +407,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     for (const action of row.minionSkills) for (const [type, value] of Object.entries(action.damageByType))
       row.minionDamageByType[type] = (row.minionDamageByType[type] ?? 0) + value;
     if (row.ailmentDps > 0) row.minionDamageByType.fire = (row.minionDamageByType.fire ?? 0) + row.ailmentDps;
+    if (row.explosionDps > 0) row.minionDamageByType.true = row.explosionDps;
   }
   row.values.minionHitDps = row.supported ? row.minionSkills.reduce((total, action) => total + (action.persistent ? 0 : action.dps), 0) : null;
   if (row.elementalProtocol) row.values.moduleIgniteDps = row.supported ? row.ailmentDps : null;

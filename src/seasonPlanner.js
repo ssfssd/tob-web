@@ -21,7 +21,7 @@ import { createSeasonEditComparison } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
 import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem, openGearWorkshop } from './seasonItemWorkshop.js';
 import { itemGearKind } from './seasonItemCraft.js';
-import { compareSeasonResourceCosts, previewSlotEdit } from './seasonGearPicker.js';
+import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels, previewSlotEdit } from './seasonGearPicker.js';
 import { observedManaInputState } from './seasonWorkspaceView.js';
 import { getSeasonSelectionOptions } from './seasonSelections.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
@@ -488,7 +488,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const loaded = loadSeasonWorkspaces(storage);
       if (loaded.error) throw new Error(loaded.error);
       state.documents = loaded.documents;
-      state.analysis = recommendSeasonWorkspaces(state.document, loaded.documents, state.analysisMetric ?? preferredSeasonDpsMetric(state.report));
+      state.analysis = recommendSeasonWorkspaces(state.document, loaded.documents, state.analysisMetric ?? preferredSeasonDpsMetric(state.report), {
+        baselineReport:state.report,
+        describeDpsChange:(before,after,dpsBasis)=>({
+          dpsBasis,
+          levels:compareSeasonSkillLevels(before,after),
+          ...compareSeasonDamageBreakdown(before,after,dpsBasis),
+          ...compareSeasonResourceCosts(before,after,dpsBasis,{allActive:true}),
+        }),
+      });
     },
     compareSupportImpact(rowIndex) {
       const skill = [...state.document.targetBuild.skills.active, ...state.document.targetBuild.skills.passive][rowIndex];
@@ -504,8 +512,14 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const resources=preview.dpsBasis===metric?preview:
             compareSeasonResourceCosts(state.report,preview.candidate.report,metric,{rowIndex});
           const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaObservationStale}=resources;
+          const {dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
+            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
+          const breakdown=preview.comparison.supported&&dpsBasis===metric ? {
+            dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
+            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,numbedStateChanges,uptimeChanges,
+          } : null;
           rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,
-            resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaObservationStale}});
+            breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaObservationStale}});
         } catch (error) {
           rows.push({supportIndex, id:support.supportId, comparison:{supported:false,reasons:[error.message]}});
         }

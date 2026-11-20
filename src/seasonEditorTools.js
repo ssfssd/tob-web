@@ -86,8 +86,8 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
 }
 
 export function renderResourceChanges(p,esc,{board=false,skill=false,action=board?'적용':'교체'}={}){
-  const resourceValue=(value,unit)=>amount(value)+(Number.isFinite(value)?unit:'');
-  const resourceText=({label,a,b,unit=''})=>`${label} ${resourceValue(a,unit)} → ${resourceValue(b,unit)}`;
+  const resourceValue=(value,unit,empty)=>empty?'미장착':amount(value)+(Number.isFinite(value)?unit:'');
+  const resourceText=({label,a,b,unit='',aEmpty,bEmpty})=>`${label} ${resourceValue(a,unit,aEmpty)} → ${resourceValue(b,unit,bEmpty)}`;
   const rows=[...(p.resourceChanges??[]),...(p.resourceCosts??[]),...(p.resourceRecovery??[])];
   const castCosts=skill?rows.filter(row=>row.label==='시전당 MP'||row.label==='시전당 HP'):[];
   const [first,...rest]=castCosts.length?rows.filter(row=>!castCosts.includes(row)):rows;
@@ -96,7 +96,7 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
     <table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${p.previous?'직전':'변경 전'}</th><th scope="col">변경 후</th></tr></thead>
     <tbody>${p.skillResourceChanges.map(({index,beforeId,afterId,resource,a,b})=>{
       const name=beforeId&&afterId&&beforeId!==afterId?`${skillName(beforeId)} → ${skillName(afterId)}`:skillName(afterId??beforeId);
-      return `<tr><th scope="row">${esc(`${slotName(index)} · ${name} · ${resource}/초`)}</th><td>${beforeId?amount(a):'—'}</td><td>${afterId?amount(b):'—'}</td></tr>`;
+      return `<tr><th scope="row">${esc(`${slotName(index)} · ${name} · ${resource}/초`)}</th><td>${resourceValue(a,'',!beforeId)}</td><td>${resourceValue(b,'',!afterId)}</td></tr>`;
     }).join('')}</tbody></table></details>`:'';
   if(!first&&!castCosts.length)return manaNote+perSkill;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';

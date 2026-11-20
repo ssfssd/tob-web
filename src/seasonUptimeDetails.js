@@ -28,14 +28,21 @@ export function compareSeasonUptimeChanges(before, after, metric) {
   const damage=metric==='assumedDps'?'contribution':'inputContribution';
   const unit=(row)=>row.buffState?'state':row[key].endsWith('%')?'percent':row.timedReaping&&row[key].endsWith('회')?'count':null;
   const rows=(report)=>new Map((report.assumedDps?.uptimeDetails??[])
-    .filter(row=>row.key&&unit(row)).map(row=>[row.key,row]));
+    .filter(row=>row.key).map(row=>[row.key,row]));
   const previous=rows(before), current=rows(after);
-  const absent={buffState:true,[key]:'미장착'};
   return [...new Set([...current.keys(),...previous.keys()])].flatMap(id=>{
-    let old=previous.get(id), row=current.get(id);
-    if (old?.buffState && !row) row={...absent,name:old.name};
-    if (row?.buffState && !old) old=absent;
-    if (!old||!row||unit(old)!==unit(row)) return [];
+    const old=previous.get(id), row=current.get(id);
+    if (!old||!row) {
+      const present=old??row;
+      const hasKnownSkillUptime=id.startsWith('skill:')&&unit(present)==='percent'&&before[metric]?.supported&&after[metric]?.supported;
+      if (!present.buffState&&!hasKnownSkillUptime) return [];
+      const absent=present.buffState?'미장착':'미적용';
+      const missingDps=Number.isFinite(present[damage])?0:undefined;
+      return [{name:present.name,from:old?.[key]??absent,to:row?.[key]??absent,
+        fromDps:old?old[damage]:missingDps,toDps:row?row[damage]:missingDps,
+        ...(present.buffState&&{buffState:true})}];
+    }
+    if (!unit(old)||unit(old)!==unit(row)) return [];
     const fromDps=old[damage], toDps=row[damage];
     const contributionChanged=Number.isFinite(fromDps)&&Number.isFinite(toDps)&&count(fromDps)!==count(toDps);
     return old[key]!==row[key]||contributionChanged ? [{name:row.name,from:old[key],to:row[key],fromDps,toDps,...(row.buffState&&{buffState:true})}] : [];

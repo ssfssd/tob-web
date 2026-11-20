@@ -217,12 +217,12 @@ export function compareSeasonDpsSnapshots(before, after, metric = 'fullDps') {
 
 // An explicitly bounded comparison of saved inputs, never a full-build or cost
 // optimizer. Unknown changes and different combat scenarios cannot be ranked.
-export function recommendSeasonWorkspaces(document, candidates, metric = "life") {
+export function recommendSeasonWorkspaces(document, candidates, metric = "life", { baselineReport, describeDpsChange } = {}) {
   if (!Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
   exportSeasonWorkspace(document);
   const dpsMetric = metric === 'fullDps' || metric === 'assumedDps';
-  const calculate = metric === 'assumedDps' ? calculateEditorSeasonBuild : calculateSeasonBuild;
-  const baseline = calculate(document.targetBuild, { sourceBuild: document.sourceBuild });
+  const calculate = metric === 'assumedDps' || dpsMetric && describeDpsChange ? calculateEditorSeasonBuild : calculateSeasonBuild;
+  const baseline = baselineReport ?? calculate(document.targetBuild, { sourceBuild: document.sourceBuild });
   const baseValue = metricValue(baseline, metric);
   const baselineReasons = validationReasons(document, baseline);
   if (!Number.isFinite(baseValue)) baselineReasons.push("기준 문서의 선택 지표가 미지원입니다.");
@@ -232,9 +232,10 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life")
     const row = { id: candidate.id, name: candidate.targetBuild?.name ?? "문서 확인 필요", value: null, delta: null, reasons };
     if (seen.has(candidate.id)) reasons.push("중복 후보 문서입니다.");
     seen.add(candidate.id);
+    let report;
     try {
       exportSeasonWorkspace(candidate);
-      const report = calculate(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
+      report = calculate(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
       reasons.push(...validationReasons(candidate, report));
       if (stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
       if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,metric)
@@ -244,8 +245,11 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life")
         !== report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id) reasons.push("서로 다른 스킬의 직접 DPS는 비교하지 않습니다.");
       row.value = metricValue(report, metric);
       if (!Number.isFinite(row.value)) reasons.push("후보의 선택 지표가 미지원입니다.");
-      if (!reasons.length) row.delta = row.value - baseValue;
     } catch { reasons.push("SS14 후보 문서 형식 검증 실패"); }
+    if (!reasons.length) {
+      row.delta = row.value - baseValue;
+      if (dpsMetric && describeDpsChange) row.changes=describeDpsChange(baseline,report,metric);
+    }
     return row;
   });
   const eligible = rows.filter((r) => !r.reasons.length).sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));

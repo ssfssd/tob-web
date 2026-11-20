@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDamageTypeComposition, SEASON_DAMAGE_TYPE_LABELS as damageTypes, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDamageTypeComposition, seasonDamageTypeParts, SEASON_DAMAGE_TYPE_LABELS as damageTypes, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, renderObservedManaInput } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -71,7 +71,8 @@ export function renderEditDpsComparison(s, compact = false) {
   if (!comparison || compact && !comparison.changed) return '';
   if (s.pending.size) return '<section data-role="native-edit-comparison" hidden></section>';
   const assumed = preferredSeasonDpsMetric(s.report)==='assumedDps' && comparison.assumed;
-  const {baseline,previous,resources,breakdown,levelChanges,levelsFromPrevious,encounterChanges,previousEncounterChanges} = assumed || comparison;
+  const selected=assumed||comparison;
+  const {baseline,previous,previousDetails,encounterChanges,previousEncounterChanges} = selected;
   const metricLabel = assumed ? '방어 전 DPS' : 'DPS';
   const comparisonText = value => value.supported ? deltaText(value)
     : value.encounterMatches === false ? '전투 조건 변경' : '비교 보류';
@@ -93,16 +94,25 @@ export function renderEditDpsComparison(s, compact = false) {
   };
   const showPrevious=previous&&!previous.supported&&(JSON.stringify(previous.reasons)!==JSON.stringify(baseline.reasons)
     || previousEncounterChanges?.length&&JSON.stringify(previousEncounterChanges)!==JSON.stringify(encounterChanges));
-  const labels={before:breakdown?.previous?'직전':'기준',after:'현재'};
-  const damage=breakdown?renderDamageBreakdown(breakdown,esc,labels)+renderDamageRouteChanges(breakdown.damageRoutes,labels):'';
+  const renderDetails=({resources,breakdown,levelChanges,levelsFromPrevious},latest=false)=>{
+    const labels={before:levelsFromPrevious?'직전':'기준',after:'현재'};
+    const levels=renderSkillLevelChanges(levelChanges,esc,latest?{...labels,role:'edit-previous-levels'}:labels);
+    const costs=resources?renderResourceChanges(resources,esc,{board:true}):'';
+    const damage=breakdown?renderDamageBreakdown(breakdown,esc,labels)+renderDamageRouteChanges(breakdown.damageRoutes,
+      latest?{...labels,role:'edit-previous-routes'}:labels):'';
+    if(latest){
+      const body=costs+levels+damage;
+      return body?`<details data-role="edit-previous-details"><summary>직전 대비 변경 수치</summary>${body}</details>`:'';
+    }
+    return costs+levels+(damage?`<details data-role="edit-damage-breakdown"><summary>${breakdown.previous?'직전 대비':'기준 대비'} 변경 수치</summary>${damage}</details>`:'');
+  };
   return `<section class="native-edit-comparison" data-role="native-edit-comparison" aria-label="편집 전후 DPS 비교">
     <h2>편집 전후 자동 비교</h2>
     ${comparison.changed ? `<p>기준 대비 <strong class="${baseline.supported ? baseline.delta > 0 ? 'is-increase' : baseline.delta < 0 ? 'is-decrease' : '' : ''}">${comparisonText(baseline)}</strong></p>
       ${previous ? `<p class="native-stat-note">직전 변경 ${comparisonText(previous)}</p>` : ''}` : ''}
     <dl class="native-condition-values"><div><dt>기준 ${metricLabel}</dt><dd>${number(baseline.baseValue)}</dd></div><div><dt>현재 ${metricLabel}</dt><dd>${number(baseline.value)}</dd></div></dl>
-        ${resources?renderResourceChanges(resources,esc,{board:true}):''}
-        ${renderSkillLevelChanges(levelChanges,esc,{before:levelsFromPrevious?'직전':'기준',after:'현재'})}
-        ${damage?`<details data-role="edit-damage-breakdown"><summary>${breakdown.previous?'직전 대비':'기준 대비'} 변경 수치</summary>${damage}</details>`:''}
+        ${renderDetails(selected)}
+        ${previousDetails?renderDetails(previousDetails,true):''}
         ${!baseline.supported ? `<details${s.showComparisonReasons?' open':''}><summary>기준 비교 보류 이유</summary>${changedInputs(encounterChanges,'baseline-encounter-changes')}${renderReasons(s,baseline.reasons)}</details>` : ''}
         ${showPrevious ? `<details><summary>직전 변경 비교 보류 이유</summary>${changedInputs(previousEncounterChanges,'previous-encounter-changes')}${renderReasons(s,previous.reasons)}</details>` : ''}
         ${button('현재 빌드를 비교 기준으로', 'reset-comparison')}
@@ -399,6 +409,27 @@ function hitModifierSources(trace, operation) {
       conversionSource(e.effectSource??undefined)];
   });
 }
+function renderAddedHitSources(trace, directSources) {
+  const efficiency=trace?.find(e=>e.stage==='added-damage'&&e.stat==='added-damage-effectiveness');
+  const addRow=(type,min,max,source)=>[`${damageTypes[type]} 추가 대미지 · 전환 전`,min===max?number(min):`${number(min)} – ${number(max)}`,conversionSource(source)];
+  const sources=(trace??[]).flatMap(e=>{
+    if(e.stage!=='added-damage')return [];
+    const type=/^supported-skill-added-(physical|fire|cold|lightning|erosion)-damage-min$/u.exec(e.stat)?.[1];
+    const {min,max}=e.contribution??{};
+    if(!type||!Number.isFinite(min)||!Number.isFinite(max)||max<=0)return [];
+    return [addRow(type,min,max,e.effectSource??undefined)];
+  });
+  const factor=Number.isFinite(efficiency?.resolvedValue)&&efficiency.contribution?.max>0;
+  if(!factor&&!sources.length)return '';
+  if(factor){
+    const scale=efficiency.resolvedValue/100;
+    sources.unshift(['추가 대미지 효율',number(efficiency.resolvedValue)+'%',conversionSource(efficiency.effectSource??undefined)]);
+    for(const {type,min,max,source} of directSources??[]){
+      if(Number.isFinite(min)&&Number.isFinite(max)&&min<=max&&max>0) sources.push(addRow(type,min*scale,max*scale,source));
+    }
+  }
+  return calcGroup('추가 대미지 효율·출처','',calcRows(sources),'hit-added-sources');
+}
 export function renderSkillConversion(trace,index) {
   const conversions=(trace??[]).filter(e=>e.stage==='conversion'&&e.effectivePercent>0&&damageTypes[e.sourceType]&&damageTypes[e.targetType]);
   const route=e=>`${damageTypes[e.sourceType]} → ${damageTypes[e.targetType]}`;
@@ -609,8 +640,9 @@ export function renderSkillCalculation(s) {
     critical:report.offense.rows.find(r=>r.rowIndex===index&&r.id===id)?.values, pools:row?.pools, takenMultiplier:row?.takenMultiplier,
     cadence:direct?.offenseBasis?.cadence, cadenceTrace:direct?.offenseBasis?.cadenceTrace,
     skillLevel:seasonSkillCalculationLevel(report,index), excludedHitRoutes:excludedSeasonHitRoutes(direct), hitModifierTrace:direct?.trace,
+    addedDamageTrace:direct?.trace, addedDamageSources:direct?.addedDamageSources,
   };
-  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, excludedHitRoutes,hitModifierTrace}=detail??{};
+  const {damageStages:stages, hasHitPools, critical, pools, takenMultiplier, excludedHitRoutes,hitModifierTrace,addedDamageTrace,addedDamageSources}=detail??{};
   const skillLevel=detail?.skillLevel??seasonSkillCalculationLevel(report,index);
   const v=displayRow?.values??{};
   const averaged=assumed?report.assumedDps.measuredResources:!!report.theaAverage;
@@ -644,6 +676,11 @@ export function renderSkillCalculation(s) {
   const dpsLabel=assumed?'스킬 방어 전 DPS':'스킬 DPS';
   const total=amounts.length&&displayRow?.supported?calcGroup(dpsLabel,skillDps,calcRows(amounts),'selected-skill-dps'):
     `<p class="skill-calc-total" data-role="selected-skill-dps"><span>${dpsLabel}</span><b>${skillDps}</b></p>`;
+  const typedParts=seasonDamageTypeParts(displayRow);
+  const skillTypes=typedParts?.filter(([,dps])=>dps>0);
+  const typedDamage=!displayRow?.minionDamageByType&&skillTypes?.length>1
+    ? calcGroup(assumed?'속성별 방어 전 DPS':'속성별 DPS',skillDps,
+      calcRows(skillTypes.map(([type,dps])=>[damageTypes[type],number(dps)])),'selected-skill-damage-types') : '';
   const hitOnly=!displayRow?.supported && Number.isFinite(row?.permafrostHitDps)
     ? calcRows([['얼음 송곳 적중 DPS',number(row.permafrostHitDps)],['동토의 지속 대미지','계산 보류']]) : '';
   const elapsed=assumed?report.assumedDps.elixirUptime:report.elixirUptime;
@@ -670,11 +707,12 @@ export function renderSkillCalculation(s) {
   if (displayRow?.supported && (!averaged || measuredMinionDamage) && minionTypes.length) {
     const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
     const metric = assumed ? '방어 전 DPS' : 'DPS';
-    minionDamage = calcGroup(`소환체 스킬의 유형별 ${averagedElixir || measuredMinionDamage ? '평균 ' : ''}${metric}`, number(sum),
+    const coverage = typedParts ? '유형별' : '확인된 속성의';
+    minionDamage = calcGroup(`소환체 스킬의 ${coverage} ${averagedElixir || measuredMinionDamage ? '평균 ' : ''}${metric}`, number(sum),
       calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
   }
   if(averagedElixir)
-    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
+    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}</section>`;
   const useRate=assumed?displayRow?.useRate:direct?.offenseBasis?.rate;
   const criticalChance=critical?.effectiveCriticalChance;
   const summary=displayRow?.supported?[
@@ -696,7 +734,7 @@ export function renderSkillCalculation(s) {
     const types=Object.entries(stages.byType??{}).filter(([,v])=>v.base||v.added||v.taken);
     let prior=stages.baseHitAverage+stages.addedHitAverage;
     steps+=calcGroup('기본·추가 적중 대미지',number(prior),calcRows([['기본 평균',number(stages.baseHitAverage)],['추가 평균',number(stages.addedHitAverage)],
-      ...types.map(([type,v])=>[(damageTypes[type]??'기타')+' 기본 / 추가',number(v.base)+' / '+number(v.added)])]));
+      ...types.map(([type,v])=>[(damageTypes[type]??'기타')+' 기본 / 추가',number(v.base)+' / '+number(v.added)])])+renderAddedHitSources(addedDamageTrace,addedDamageSources));
     for(const [key,label,stage,previous] of [['hitAfterIncrease','비율 증가','increase','base'],['hitAfterAdditional','추가 증가','additional','increase']]){
       const next=stages[key];
       if(!Number.isFinite(next))continue;
@@ -758,7 +796,7 @@ export function renderSkillCalculation(s) {
   }
   if(steps)steps=calcGroup(averaged?'전투 시작 상태의 계산 단계':assumed?'방어 전 계산 단계':'대미지 계산 단계','',steps);
   const details = conversion + minionDamage + excluded + steps;
-  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
+  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
 }
 
 export function renderNumbedCalculation(s) {
@@ -851,14 +889,19 @@ function skillContributions(s) {
       ? `<tr class="contribution-skill-total" data-role="analysis-skill-total"><th scope="row">${label} 합계 <small>· ${group.count}칸</small></th><td>${number(group.dps)}</td>${shareCell(group.dps)}</tr>` : '';
     const actions=button(`${label} <small>· ${slotName}</small>`,row?'inspect-contribution-skill':'inspect-skill',`data-index="${index}" class="contribution-skill"`);
     const compare=hasSupport?button('보조 비교','compare-support-impact',`data-index="${index}" data-role="support-impact-${index}" aria-label="${label} ${slotName} 보조 비교" aria-expanded="${expanded}"`):'';
-    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,resources})=>{
+    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,resources,breakdown})=>{
       const {supported,value,delta,reasons}=comparison;
       const result=supported?`<strong>${number(value)}</strong><small>${delta>0?'+':''}${number(delta)} DPS</small>`
         :`<details><summary>비교 보류</summary>${renderReasons(s,reasons)}</details>`;
       const edit=button(`${supportIndex+1} · ${nameFor(seasonSupportKoreanCard(id))}`,'inspect-support-impact',
         `data-row="${index}" data-index="${supportIndex}" data-role="support-impact-edit-${index}-${supportIndex}" class="contribution-skill"`);
-      const cost=resources?renderResourceChanges(resources,esc):'';
-      return `<li>${edit}<div>${result}</div>${cost?`<section class="support-impact-cost">${cost}</section>`:''}</li>`;
+      const cost=resources?renderResourceChanges(resources,esc,{action:'해제'}):'';
+      const labels={before:'해제 전',after:'해제 후'};
+      const changes=breakdown?renderSkillLevelChanges(breakdown.skillLevels,esc,labels)
+        +renderDamageBreakdown(breakdown,esc,labels)
+        +renderDamageRouteChanges(breakdown.damageRoutes,{...labels,role:`support-impact-routes-${index}-${supportIndex}`}):'';
+      const details=changes?`<details class="support-impact-detail" data-role="support-impact-detail-${index}-${supportIndex}"><summary>해제 전후 상세</summary>${changes}</details>`:'';
+      return `<li>${edit}<div>${result}</div>${cost||details?`<section class="support-impact-cost">${cost}${details}</section>`:''}</li>`;
     }).join(''):'';
     return `${combined}<tr><th scope="row">${actions}${compare}</th><td>${row?.supported?number(row.values.dps):row?'보류':'—'}</td>${reconciled?(row?shareCell(row.values.dps):'<td>—</td>'):''}</tr>${linkRows?`<tr class="support-impact"><td colspan="${reconciled?3:2}"><strong>보조 해제 시 ${metricLabel}</strong><ul>${linkRows}</ul></td></tr>`:''}`;
   }).join('')}</tbody></table>${composition}</section>`;
@@ -884,9 +927,15 @@ export function renderResultAnalysis(s) {
       ${result.baselineReasons.length ? `<ul>${result.baselineReasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul>` : ''}
       ${rows.map(row => {
         const reasons = row.reasons.filter(reason => !baselineReasons.has(reason));
+        const labels={before:'기준',after:'비교 빌드'};
+        const change=row.changes;
+        const details=change?renderSkillLevelChanges(change.levels,esc,labels)
+          +renderDamageBreakdown(change,esc,labels)+renderDamageRouteChanges(change.damageRoutes,labels)
+          +renderResourceChanges(change,esc,{board:true}):'';
         return `<article class="native-comparison-row"><h3>${esc(row.name)}</h3>${row.reasons.length
         ? `<strong>비교 보류</strong>${reasons.length ? `<details><summary>이유 확인</summary><ul>${reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}`
         : `<strong>${number(row.value)}</strong><p class="native-comparison-delta">기준 대비 ${row.delta > 0 ? '+' : ''}${number(row.delta)}${result.baseValue ? ` (${row.delta > 0 ? '+' : ''}${number(row.delta / result.baseValue * 100)}%)` : ''}</p>`}
+        ${details?`<details data-role="saved-build-change-details"><summary>변경 수치</summary>${details}</details>`:''}
         ${button('이 빌드 열기', 'open', `data-id="${esc(row.id)}" aria-label="${esc(row.name)} 열기"`)}</article>`;
       }).join('') || '<p>다른 저장 빌드가 없습니다. 비교용 사본을 만들어 편집하세요.</p>'}
       ` : ''}</div>

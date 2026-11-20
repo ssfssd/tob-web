@@ -573,6 +573,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           totals.moduleIgniteDps += moduleIgnite;
           if (!row.moduleTimeline) totals.minionHitDps += row.values.minionHitDps * w;
           if (row.moduleTimeline) {
+            if (row.explosionDps > 0) accumulateMinionTypes(row.rowIndex, {true:row.explosionDps}, w);
             if (moduleIgnite > 0) accumulateMinionTypes(row.rowIndex, {fire:moduleIgnite}, 1);
             for (const action of row.minionSkills) {
               if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction, ailmentState.numbedEffect);

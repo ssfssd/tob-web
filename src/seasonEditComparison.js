@@ -93,18 +93,22 @@ export function createSeasonEditComparison(document, report) {
         const previousCompared=previous?compareSeasonDpsSnapshots(previous,current,metric):null;
         const resourceBaseline=compared.supported ? baseline : previousCompared?.supported ? previous
           : compared.encounterMatches===true ? baseline : previousCompared?.encounterMatches===true ? previous : null;
-        const resources=changed && resourceBaseline && compareSeasonResourceCosts(resourceBaseline.report,current.report,metric,{allActive:true});
-        const breakdown=changed && (compared.supported || previousCompared?.supported)
-          && compareSeasonDamageBreakdown(resourceBaseline.report,current.report,metric);
-        const fromPrevious=resourceBaseline!==baseline && resourceBaseline===previous;
+        const details=(origin,comparable)=>{
+          const fromPrevious=origin!==baseline && origin===previous;
+          const levelChanges=compareSeasonSkillLevels((origin??baseline).report,current.report);
+          const resources=origin&&compareSeasonResourceCosts(origin.report,current.report,metric,{allActive:true});
+          const breakdown=comparable&&compareSeasonDamageBreakdown(origin.report,current.report,metric);
+          return {levelChanges,levelsFromPrevious:fromPrevious,
+            ...(breakdown && {breakdown:{...breakdown,dpsBasis:metric,previous:fromPrevious}}),
+            ...(resources && {resources:{...resources,dpsBasis:metric,previous:fromPrevious,
+              manaObservationStale:resources.manaObservationStale&&!origin.report.character.survival?.manaObservationStale}})};
+        };
+        const showPrevious=compared.supported&&previousCompared?.supported&&content(previous.document)!==content(baseline.document);
         return {baseline:compared,previous:previousCompared,
-          ...(changed && {levelChanges:compareSeasonSkillLevels((resourceBaseline??baseline).report,current.report),levelsFromPrevious:fromPrevious}),
-          ...(breakdown && {breakdown:{...breakdown,dpsBasis:metric,previous:fromPrevious}}),
+          ...(changed && details(resourceBaseline,compared.supported||previousCompared?.supported)),
+          ...(showPrevious && {previousDetails:details(previous,true)}),
           ...(compared.encounterMatches===false && {encounterChanges:encounterInputChanges(baseline,current,metric)}),
-          ...(previousCompared?.encounterMatches===false && {previousEncounterChanges:encounterInputChanges(previous,current,metric)}),
-          ...(resources && {resources:{...resources,dpsBasis:metric,
-            previous:fromPrevious,
-            manaObservationStale:resources.manaObservationStale&&!resourceBaseline.report.character.survival?.manaObservationStale}})};
+          ...(previousCompared?.encounterMatches===false && {previousEncounterChanges:encounterInputChanges(previous,current,metric)})};
       };
       const assumed=preferredSeasonDpsMetric(current.report)==='assumedDps'?compare('assumedDps'):null;
       return {changed,...compare('fullDps'),assumed};

@@ -29,8 +29,17 @@ export function excludedSeasonHitRoutes(skill) {
 // owner path AND source line. Equal-name rings and repeated supports stay apart.
 export function seasonEffectSources(report) {
   const rows = [];
-  const trace = (report.coupledSkills?.rows ?? []).flatMap(skill => (skill.trace ?? []).map(t => ({ ...t, rowIndex: skill.rowIndex })));
-  const absent = (report.coupledSkills?.rows ?? []).flatMap(skill=>[
+  const skills=report.coupledSkills?.rows??[];
+  const trace = skills.flatMap(skill => {
+    const applied=(skill.trace??[]).map(t=>({...t,rowIndex:skill.rowIndex}));
+    const accepted=applied.some(t=>t.stage==='added-damage'&&t.stat==='added-damage-effectiveness'&&t.contribution?.max>0);
+    if (accepted) for (const {source,effects,min,max} of skill.addedDamageSources??[]) {
+      if (!source.path||!Number.isFinite(min)||!Number.isFinite(max)||min>max||max<=0) continue;
+      for (const effect of effects??[]) applied.push({rowIndex:skill.rowIndex,effectSource:{...source,...effect}});
+    }
+    return applied;
+  });
+  const absent = skills.flatMap(skill=>[
     ...excludedSeasonHitRoutes(skill),
     ...(skill.offenseBasis?.excluded??[]).filter(effect=>effect.reason==='no-hit-damage-not-applied'&&!effect.affectsCompletion),
   ]);

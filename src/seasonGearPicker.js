@@ -228,6 +228,8 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
   const bySlot=dps=>new Map(dps.rows.filter(row=>row.rowIndex<5).map(row=>[row.rowIndex,row]));
   const beforeRows=bySlot(beforeDps), afterRows=bySlot(afterDps);
   const slots=[...new Set([...beforeRows.keys(),...afterRows.keys()])].sort((a,b)=>a-b);
+  const equippedId=(snapshot, row, index)=>row?.id??snapshot.components?.find(component=>
+    component.category==='skills'&&component.paths?.includes(`skills.rows.${index}`))?.id;
   const changed=({a,b})=>Number.isFinite(a)&&Number.isFinite(b)
     ? Math.abs(a-b)>=0.005 : Number.isFinite(a)||Number.isFinite(b);
   const beforeMana = beforeDps.manaReservation ?? report.character.values;
@@ -262,23 +264,27 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
     {label:'수동 시전 HP/초',a:beforeResources?.lifePerSecond,b:afterResources?.lifePerSecond},
   ];
   if (allActive || Number.isInteger(rowIndex)) {
-    const indices=allActive?[...afterRows.keys()]:[rowIndex];
+    const indices=allActive?slots:[rowIndex];
     const perUse=indices.flatMap(index=>{
       const beforeRow=beforeRows.get(index), afterRow=afterRows.get(index);
+      const aEmpty=Boolean(report.components&&!equippedId(report,beforeRow,index));
+      const bEmpty=Boolean(after.components&&!equippedId(after,afterRow,index));
       const label=allActive?(index===0?'주력':'액티브 '+(index+1))+' · ':'';
-      return [
-        {label:label+'시전당 MP',a:beforeRow?.manaPerUse,b:afterRow?.manaPerUse},
-        {label:label+'시전당 HP',a:beforeRow?.lifePerUse,b:afterRow?.lifePerUse},
-      ];
+      return [['MP','manaPerUse'],['HP','lifePerUse']].flatMap(([resource,key])=>{
+        const a=beforeRow?.[key], b=afterRow?.[key];
+        if ((aEmpty||bEmpty)&&(a??b)===0) return [];
+        return [{label:label+'시전당 '+resource,a,b,...(aEmpty&&{aEmpty}),...(bEmpty&&{bEmpty})}];
+      });
     });
     resourceCosts.unshift(...perUse);
   }
   const skillResourceChanges=slots.flatMap(index=>{
     const beforeRow=beforeRows.get(index), afterRow=afterRows.get(index);
+    const beforeId=equippedId(report,beforeRow,index), afterId=equippedId(after,afterRow,index);
     return [['MP','manualManaPerSecond'],['HP','manualLifePerSecond']].flatMap(([resource,key])=>{
       const a=beforeRow?.[key], b=afterRow?.[key];
-      if (!changed({a,b}) || (!beforeRow||!afterRow)&&(a??b)===0) return [];
-      return [{index,beforeId:beforeRow?.id,afterId:afterRow?.id,resource,a,b}];
+      if (!changed({a,b}) || (!beforeId||!afterId)&&(a??b)===0) return [];
+      return [{index,beforeId,afterId,resource,a,b}];
     });
   });
   return {resourceChanges:resourceChanges.filter(changed),resourceCosts:resourceCosts.filter(changed),

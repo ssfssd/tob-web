@@ -698,6 +698,7 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .support-impact details[open] {text-align:left;max-width:13em}
 .support-impact .support-impact-cost {grid-column:1/-1;min-width:0;color:#d0c8b9}
 .support-impact .support-impact-cost details[open] {max-width:none}
+.support-impact-detail {overflow-x:auto}
 .ss14-support-matrix {min-width:0}
 .support-matrix-controls {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
 .support-matrix-controls :is(nav,div) {display:flex;flex-wrap:wrap;gap:5px}

@@ -201,6 +201,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
       reasons.push("수확 회복 속도에 적용할 부식 광선 수를 확인할 수 없습니다.");
     let evaluation = null;
     let weaponHands = null;
+    const addedDamageSources=[];
     let moonStrike = null;
     let evaluatedEffects = [];
     if (!reasons.length && record?.season === "SS14" && record.sourceRecordKey === item?.tlidbText?.en?.sourceRecordKey) {
@@ -272,6 +273,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         path: `skills.rows.${entry.rowIndex}`, itemId: row.id, sourceText: effect.sourceText, stat: effect.stat,
       } })), ...applicable, ...supportEffects.map(e=>e.perWiltingBeam ? {...e,value:e.value*beamCount} : e)];
       const context = seasonDamageContext(build, entry.rowIndex, row.id);
+      if (context.addedDamage?.lightning) addedDamageSources.push({type:'lightning',...context.addedDamage.lightning,source:{name:'직접 입력'}});
       context.actionRateCap = seasonActionRateCap('SS14');
       context.damageConversion = 'ss14';
       context.verifiedDotOnly = entry.damageCapabilities?.dot===true && entry.damageCapabilities.hit===false;
@@ -281,11 +283,26 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
       if (observedReaping) context.reapingEventsPerSecond = 0;
       if (row.id === "skills-tlidb-com-cn-ice-lances") context.projectiles = { base: 1, hitCount: 1 };
       if (tags.has("spell") || tags.has('attack')) {
-        const added = [...gear.flatMap(e => e.rawEffects ?? []),...componentProjection.effects];
+        const added = [...gear.flatMap(g=>(g.rawEffects??[]).map(effect=>({effect,source:{path:`gear.slots.${g.slotIndex}`,itemId:g.itemId}}))),
+          ...componentProjection.effects.map(effect=>{
+            const origin=componentSources.get(effect.path);
+            return {effect,source:{path:effect.path,itemId:origin?.itemId,name:origin?.name}};
+          })];
         for (const type of ["physical", "fire", "cold", "lightning", "erosion"]) {
-          const sum = side => added.filter(e => e.stat === `${tags.has('spell')?'spell':'attack'}_${type}_damage_${side}` && e.operation === "add").reduce((n, e) => n + e.value, 0);
-          if (sum("min") || sum("max")) context.addedDamage = { ...(typeof context.addedDamage === "object" ? context.addedDamage : {}),
-            [type]: { min: (context.addedDamage?.[type]?.min ?? 0) + sum("min"), max: (context.addedDamage?.[type]?.max ?? 0) + sum("max") } };
+          const prefix=`${tags.has('spell')?'spell':'attack'}_${type}_damage_`;
+          const totals={min:0,max:0}, sources=new Map();
+          for (const {effect,source} of added) {
+            const side=effect.stat===`${prefix}min`?'min':effect.stat===`${prefix}max`?'max':null;
+            if (!side||effect.operation!=='add') continue;
+            totals[side]+=effect.value;
+            const range=sources.get(source.path)??{type,min:0,max:0,source,effects:[]};
+            range[side]+=effect.value;
+            range.effects.push({stat:effect.stat,sourceText:effect.sourceText});
+            sources.set(source.path,range);
+          }
+          addedDamageSources.push(...sources.values());
+          if (totals.min || totals.max) context.addedDamage = { ...context.addedDamage,
+            [type]: { min: (context.addedDamage?.[type]?.min ?? 0) + totals.min, max: (context.addedDamage?.[type]?.max ?? 0) + totals.max } };
         }
       }
       const {weaponHands: candidateHands,...combatContext} = context;
@@ -354,6 +371,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
         'supported-skill-elemental-damage', 'supported-skill-ailment-damage', 'supported-skill-damage-over-time'].includes(e.stat))
         .map(e => e.operation === 'add' && e.unit === 'percent' ? { ...e, operation: 'add_percent' } : e),
       damageStages: supported && !weaponHands ? evaluation.damageStages : null,
+      addedDamageSources: supported && !weaponHands ? addedDamageSources : [],
       offenseBasis: supported ? { hitDps: alternatingHitDps??evaluation.hit.dps, dotDps: evaluation.dot.dps, weaponHands, moonStrike,
         cadence:evaluation.cadence,
         cadenceTrace:evaluation.applied.filter(effect=>effect.stage==='cadence'||effect.stage==='cooldown')
