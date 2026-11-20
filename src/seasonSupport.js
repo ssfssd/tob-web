@@ -17,6 +17,7 @@ export const MANIACAL_ARMY_ID = "supports-tlidb-com-cn-maniacal-army";
 export const VOLTAGE_TURMOIL_ID = 'supports-ss14-current-voltaic-ripple-turmoil-noble';
 export const VOLTAGE_AFTERWAVE_ID = 'supports-ss14-current-voltaic-ripple-afterwave-noble';
 export const LUNAR_ECLIPSE_ID = 'supports-ss14-current-moon-strike-lunar-eclipse-noble';
+export const SEAL_CONVERSION_UNRESOLVED = '봉인 전환의 HP 봉인량과 추가 MP 봉인 보상의 적용 공식은 미확인입니다.';
 const MOON_RAINBOW_ID = 'supports-ss14-current-moon-strike-rainbow-magnificent';
 export const MOON_WAX_AND_WANE_ID = 'supports-ss14-current-moon-strike-wax-and-wane-noble';
 const moonStrikeId = 'skills-tlidb-com-cn-moon-strike';
@@ -210,6 +211,14 @@ export function inspectSeasonSupport(support, { rowIndex, supportIndex, binding,
     if(noMana&&lines.includes(lunarSeal))base.sealedManaPercent=10;
   }
   if (rolled.blockers.length) return { ...base, blockers: rolled.blockers };
+  if (verified && ['Seal_Conversion','Precise_Seal_Conversion'].includes(record.sourceRecordKey)) {
+    const lines=rolled.item.tlidbText.en.detail.split('\n').map(line=>line.trim());
+    if (lines.includes('Replaces Sealed Mana of the supported skill with Sealed Life')
+      && lines.some(line=>/^-[\d.]+\s*% additional Sealed Mana Compensation for the supported skill$/u.test(line))) {
+      return {...base, sealConversionUnresolved:true,
+        blockers:[SEAL_CONVERSION_UNRESOLVED]};
+    }
+  }
   const parsed = parseTlidbSkillTooltipCalculation(rolled.item, { season: "SS14", level: resolved.parserLevel });
   const unresolvedEffects=new Set(parsed.effects.filter(e=>e.condition||e.conditionText||e.conditionRequirements||e.per));
   for(const e of unresolvedEffects)if(!parsed.blockers.some(b=>b.sourceText===e.sourceText))

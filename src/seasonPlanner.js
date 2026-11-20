@@ -16,9 +16,9 @@ import { createSlateEditorState, handleSlateEditorAction, slateEditorBoard, show
 import { recommendSeasonWorkspaces, SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
 import { RESULT_TABS } from './seasonResultPanels.js';
 import { inputDestinations } from './seasonInputRequirements.js';
-import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowTrim, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
+import { SEASON_DPS_SKILL_FIELDS, seasonDotWindowTrim, seasonDotWindowRepairs, seasonDotWindowRole, seasonDotWindowMerge } from './seasonDps.js';
 import {rankSeasonUpgrades,copySeasonUpgrade,copySeasonSkillTrial,copySeasonGearTrial,GEAR_UPGRADE_SOURCES} from './seasonUpgradeRanking.js';
-import { createSeasonEditComparison } from './seasonEditComparison.js';
+import { createSeasonEditComparison, encounterInputChanges } from './seasonEditComparison.js';
 import { captureShelf, readShelf, SHELF_KEY } from './seasonShelf.js';
 import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem, openGearWorkshop } from './seasonItemWorkshop.js';
 import { itemGearKind } from './seasonItemCraft.js';
@@ -491,6 +491,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.documents = loaded.documents;
       state.analysis = recommendSeasonWorkspaces(state.document, loaded.documents, state.analysisMetric ?? preferredSeasonDpsMetric(state.report), {
         baselineReport:state.report,
+        describeEncounterChanges:encounterInputChanges,
         describeDpsChange:(before,after,dpsBasis)=>({
           dpsBasis,
           levels:compareSeasonSkillLevels(before,after),
@@ -512,15 +513,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           }, {metric,includeSnapshot:true});
           const resources=preview.dpsBasis===metric?preview:
             compareSeasonResourceCosts(state.report,preview.candidate.report,metric,{rowIndex});
-          const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaObservationStale}=resources;
+          const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}=resources;
           const {dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
-            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
+            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
           const breakdown=preview.comparison.supported&&dpsBasis===metric ? {
             dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
-            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,numbedStateChanges,uptimeChanges,
+            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges,
           } : null;
           rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,
-            breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaObservationStale}});
+            breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}});
         } catch (error) {
           rows.push({supportIndex, id:support.supportId, comparison:{supported:false,reasons:[error.message]}});
         }
@@ -530,7 +531,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     async rank(){
       if(state.pending.size||state.upgrades?.busy)return;
       const group=state.upgradeGroup??'all';
-      const replacement=group==='replacement';
+      const replacement=group==='replacement'||group==='manaReplacement';
       const source=state.upgradeSource??'all';
       const usesShelf=(replacement||group==='legendary')&&source!=='catalog';
       const job={busy:true,checked:0,total:0,usesShelf};
@@ -1585,6 +1586,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const bound=bounds.find(row=>row.rowIndex===Number(d.index) && row.end===Number(d.end));
           const edit=seasonDotWindowTrim(state.document.targetBuild,bound);
           if (!edit) throw new Error('측정 구간이 바뀌었습니다. 적용 구간을 다시 확인하세요.');
+          api.edit(edit);
+          state.focusField={edit:edit.kind,key:edit.key,inResults:true};
+          return;
+        }
+        if (action === 'merge-dot-windows') {
+          api.flush();
+          const index=Number(d.index);
+          const edit=seasonDotWindowRepairs(state.report).sameSlot.includes(index)&&seasonDotWindowMerge(state.document.targetBuild,index);
+          if (!edit) throw new Error('겹친 구간이 바뀌었습니다. 적용 구간을 다시 확인하세요.');
           api.edit(edit);
           state.focusField={edit:edit.kind,key:edit.key,inResults:true};
           return;

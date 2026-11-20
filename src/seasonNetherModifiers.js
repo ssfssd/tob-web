@@ -101,9 +101,9 @@ export function applyNetherModifiers(rows,build,parseLines,gearSealCompensation,
     for(const [supportIndex,support] of (slot.supports??[]).entries()) {
       if(!support?.supportId)continue;
       const linked=inspectSeasonSupport({...support,level:support.level+levelBonus(null,index,true)},{rowIndex:index,supportIndex,isTarget:true,binding:build.ss14Inputs?.supports?.[`${index}:${supportIndex}`],build});
-      const deferredLevel=row.inactiveAura&&linked.levelUnavailable&&supportIndex<slot.unlockedSupportCount
+      const deferredEffect=row.inactiveAura&&(linked.levelUnavailable||linked.sealConversionUnresolved)&&supportIndex<slot.unlockedSupportCount
         &&supportFitsSocket(support.supportId,card,index,supportIndex);
-      if(!deferredLevel)for(const reason of linked.blockers)fail(row,reason);
+      if(!deferredEffect)for(const reason of linked.blockers)fail(row,reason);
       if(checkSeasonSupportHost(support.supportId,card,{values:{}},index)!==true)fail(row,'버프와 보조 스킬의 호환 조건을 확인하세요.');
       for(const effect of linked.effects) {
         if(!['mana-cost-multiplier','supported-skill-area','supported-skill-aura-effect','supported-skill-sealed-mana-compensation'].includes(effect.stat)

@@ -78,7 +78,8 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     Object.entries(build.ss14Inputs.character??{}).filter(([key])=>key!=='observedManaRecovery')), enemy:target(build),
     blessings:build.ss14Inputs.blessings, heroCombat:build.ss14Inputs.heroCombat,
     theaCycle:build.ss14Inputs.theaCycle, theaEvents:Object.fromEntries(
-      Object.entries(build.ss14Inputs.theaEvents??{}).filter(([key])=>!independentElixirTiming.includes(key))),
+      Object.entries(build.ss14Inputs.theaEvents??{}).filter(([key])=>!independentElixirTiming.includes(key)
+        && !(metric==='assumedDps'&&key==='scorchResistance'))),
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
   const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
@@ -104,6 +105,9 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     if (sameSkill&&seasonUptimeInputChanges(left,right,leftReport,rightReport,Number(index),metric).length) return false;
     for (const key of Object.keys(a)) {
       if (key==='observedSkillCostBasis' || (!compareObservedCosts && observedSkillCostFields.includes(key))) continue;
+      if (key==='moonBaseManaCostBasis'||key==='moonBaseManaCost'&&(!sameSkill||!Number.isFinite(a.moonBaseManaCostBasis)
+        || a.moonBaseManaCostBasis!==b.moonBaseManaCostBasis||a.moonBaseManaCostBasis!==leftReport?.character?.values?.mana
+        || b.moonBaseManaCostBasis!==rightReport?.character?.values?.mana)) continue;
       if (sameSkill&&SEASON_UPTIME_INPUTS.includes(key)) continue;
       if (['itemId','sourcePageSha256','dotWindows','fissureTimes','channelCostTimes','periodicBurstUptime',...Object.keys(WEAPON_FIELDS)].includes(key)) continue;
       if (timed && key==='fissureHits' || sameSkill && leftSchedule.channelCostTimes && rightSchedule.channelCostTimes && key==='channelCostRate') continue;
@@ -217,7 +221,7 @@ export function compareSeasonDpsSnapshots(before, after, metric = 'fullDps') {
 
 // An explicitly bounded comparison of saved inputs, never a full-build or cost
 // optimizer. Unknown changes and different combat scenarios cannot be ranked.
-export function recommendSeasonWorkspaces(document, candidates, metric = "life", { baselineReport, describeDpsChange } = {}) {
+export function recommendSeasonWorkspaces(document, candidates, metric = "life", { baselineReport, describeDpsChange, describeEncounterChanges } = {}) {
   if (!Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
   exportSeasonWorkspace(document);
   const dpsMetric = metric === 'fullDps' || metric === 'assumedDps';
@@ -239,7 +243,11 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life",
       reasons.push(...validationReasons(candidate, report));
       if (stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
       if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,metric)
-        : scenario(document.targetBuild) !== scenario(candidate.targetBuild)) reasons.push("기본 속성·전투 조건이 서로 다릅니다.");
+        : scenario(document.targetBuild) !== scenario(candidate.targetBuild)) {
+        reasons.push("기본 속성·전투 조건이 서로 다릅니다.");
+        if (dpsMetric && describeEncounterChanges) row.encounterChanges=describeEncounterChanges(
+          {document,report:baseline},{document:candidate,report},metric);
+      }
       if (!dpsMetric && unresolved(baseline) !== unresolved(report)) reasons.push("미해석 효과 또는 근거가 달라 우열을 확정할 수 없습니다.");
       if (["directDps", "expectedHitDps", "elixirAverageDps"].includes(metric) && baseline.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id
         !== report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id) reasons.push("서로 다른 스킬의 직접 DPS는 비교하지 않습니다.");

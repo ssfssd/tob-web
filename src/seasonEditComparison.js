@@ -4,13 +4,15 @@ import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
 import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldDefinition, observedSkillCostFields } from './seasonDps.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { ADDED_FIELDS } from './seasonWeaponInputs.js';
-import { theaCombatEnabled } from './seasonTheaCombatInputs.js';
+import { theaCombatEnabled, theaCombatInputValues, theaCombatKeys } from './seasonTheaCombatInputs.js';
+import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
+import { isThea } from './seasonTheaRevelation.js';
 import { SEASON_CHARACTER_INPUTS } from './seasonCharacter.js';
 import { SEASON_BLESSINGS, blessingConditionValue, blessingLabel } from './seasonBlessings.js';
 import { boundSeasonConditions, matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyCountLabel, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
 
-function encounterInputChanges(before, after, metric) {
+export function encounterInputChanges(before, after, metric) {
   const old=before.document.targetBuild, current=after.document.targetBuild;
   const changes=[];
   const add=(label,a,b,edit,key,tab,unit='')=>{
@@ -64,6 +66,27 @@ function encounterInputChanges(before, after, metric) {
   if(oldInputs.theaCycle?.mode==='automatic'&&inputs.theaCycle?.mode==='automatic'){
     for(const [key,label] of [['seconds','측정 시간'],['warmup','측정 전 준비 시간']])
       add(label,oldInputs.theaCycle[key],inputs.theaCycle[key],'thea-cycle-input',key,null,'초');
+  }
+  if (isThea(old)&&isThea(current)) {
+    const previousMode=theaCombatEnabled(old), mode=theaCombatEnabled(current);
+    const enabled=value=>value?'예':'아니요';
+    const modeLabel=THEA_EVENT_FIELDS.combatMode.label;
+    add(modeLabel,enabled(previousMode),enabled(mode),'thea-event','combatMode');
+    const keys=(build,report)=>{
+      const mechanics=report.componentProjection.rows.flatMap(row=>row.mechanics??[]);
+      return new Set([...theaCombatKeys(build,mechanics,report),...mechanics.filter(m=>m.kind==='thea-event-input').map(m=>m.key)]);
+    };
+    const oldKeys=keys(old,before.report), currentKeys=keys(current,after.report);
+    const oldValues=theaCombatInputValues(old,before.report), values=theaCombatInputValues(current,after.report);
+    for (const key of currentKeys) {
+      if (!oldKeys.has(key)||(metric==='assumedDps'&&key==='scorchResistance')) continue;
+      const elixir=/^elixir([01])/u.exec(key);
+      if (elixir&&old.skills.elixirs?.[elixir[1]]?.skillId!==current.skills.elixirs?.[elixir[1]]?.skillId) continue;
+      const {label,boolean}=THEA_EVENT_FIELDS[key];
+      const format=value=>boolean&&Number.isInteger(value)?enabled(value):value;
+      add(label.replace(/ \(초\)$/u,''),format(oldValues[key]),format(values[key]),'thea-event',key,undefined,
+        label.endsWith(' (%)')?'%':label.endsWith(' (초)')?'초':'');
+    }
   }
   const single=before.report.coupledSkills.rows.length===1&&after.report.coupledSkills.rows.length===1;
   const timed=theaCombatEnabled(old)&&oldInputs.theaCycle?.mode==='automatic';

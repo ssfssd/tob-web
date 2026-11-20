@@ -177,7 +177,7 @@ const validObservedSkillCostBasis=value=>typeof value==='string'&&value.length>0
 
 const buildSkillInputKeys = new Set([
   'itemId', 'sourcePageSha256', ...Object.keys(WEAPON_FIELDS), ...Object.keys(ADDED_FIELDS),
-  'moonBaseManaCost', 'multistrikeChance', 'multistrikeIncrement', 'additionalChannelStacks',
+  'moonBaseManaCost', 'moonBaseManaCostBasis', 'multistrikeChance', 'multistrikeIncrement', 'additionalChannelStacks',
   'minionBaseMin', 'minionBaseMax', 'minionCriticalRating', 'moduleIgniteBaseMin', 'moduleIgniteBaseMax',
   'moduleSkillAreaBonus', 'moduleProjectileSpeedBonus', 'moduleSteepStrike', 'moduleFrostbiteBonus',
 ]);
@@ -219,14 +219,14 @@ function dotWindowRanges(value) {
   }
   return ranges.sort((a,b)=>a[0]-b[0]);
 }
-function continuousDotWindows(value) {
+function continuousDotWindows(value, mergeOverlaps=false) {
   const ranges = dotWindowRanges(value);
   if (!ranges) return null;
   const merged = [];
   for (const [start, stop] of ranges) {
     const previous = merged.at(-1);
     // Touching ranges in one slot have no intervening inactive time.
-    if (previous?.[1] === start) previous[1] = stop;
+    if (previous && (previous[1]===start||mergeOverlaps&&previous[1]>start)) previous[1]=Math.max(previous[1],stop);
     else merged.push([start, stop]);
   }
   return merged;
@@ -234,15 +234,24 @@ function continuousDotWindows(value) {
 export const seasonDotWindowRole = ({id,start,stop}) => `dot-window-overlap-${id}-${start}-${stop}`;
 
 export function seasonDotWindowRepairs(report) {
-  const overlaps=new Map(), bounds=new Map();
+  const overlaps=new Map(), bounds=new Map(), sameSlot=new Set();
   for(const dps of [report?.assumedDps,report?.fullDps]){
     for(const conflict of dps?.dotWindowConflicts??[]){
       const key=seasonDotWindowRole(conflict), other=overlaps.get(key);
       overlaps.set(key,other?{...conflict,slots:[...new Set([...other.slots,...conflict.slots])].sort((a,b)=>a-b)}:conflict);
     }
     for(const bound of dps?.dotWindowBounds??[])bounds.set(`${bound.rowIndex}:${bound.start}:${bound.stop}:${bound.end}`,bound);
+    for(const index of dps?.dotWindowSelfOverlap??[])sameSlot.add(index);
   }
-  return {overlaps:[...overlaps.values()],bounds:[...bounds.values()]};
+  return {overlaps:[...overlaps.values()],bounds:[...bounds.values()],sameSlot:[...sameSlot].sort((a,b)=>a-b)};
+}
+
+export function seasonDotWindowMerge(build,rowIndex) {
+  const key=`${rowIndex}:dotWindows`;
+  const value=build.ss14Inputs?.dps?.skills?.[rowIndex]?.dotWindows;
+  const continuous=continuousDotWindows(value), merged=continuousDotWindows(value,true);
+  return continuous&&merged.length<continuous.length
+    ? {kind:'dps-input',key,value:merged.map(range=>range.join('-')).join(', ')} : null;
 }
 
 export function seasonDotWindowAssignment(build, conflict, winner) {
@@ -396,7 +405,9 @@ export function validSeasonDpsInputs(inputs) {
     for (const [key, b] of Object.entries(d.skills)) {
       if (!/^[0-8]$/u.test(key) || !object(b) || typeof b.itemId !== "string" || !hash(b.sourcePageSha256)
         || !Object.entries(b).every(([k, v]) => ["itemId", "sourcePageSha256"].includes(k)
-          || (k==='observedSkillCostBasis' ? validObservedSkillCostBasis(v) : validValue(SEASON_DPS_SKILL_FIELDS[k], v)))
+          || (k==='observedSkillCostBasis' ? validObservedSkillCostBasis(v)
+            : k==='moonBaseManaCostBasis' ? b.itemId===MOON_STRIKE_ID&&Object.hasOwn(b,'moonBaseManaCost')&&finite(v)&&v>=0
+              : validValue(SEASON_DPS_SKILL_FIELDS[k], v)))
         || observedSkillCostFields.some(field=>Object.hasOwn(b,field))!==Object.hasOwn(b,'observedSkillCostBasis')) return false;
     }
   }
@@ -420,6 +431,7 @@ export function editSeasonDpsInput(target, key, value) {
     const index = Number(slot); const skill = index < 5 ? target.skills.active[index] : target.skills.passive[index - 5];
     const record = SS14_CARDS_EN.records[skill?.skillId];
     if (record?.season !== "SS14" || record.status !== "collected-preview") throw new Error("SS14 원문이 연결된 스킬을 먼저 선택하세요.");
+    if (field==='moonBaseManaCost'&&value!==''&&skill.skillId!==MOON_STRIKE_ID) throw new Error('문 스트라이크를 먼저 선택하세요.');
     const old = inputs.dps.skills[slot];
     binding = old?.itemId === skill.skillId && old.sourcePageSha256 === record.sourcePageSha256 ? old
       : { itemId: skill.skillId, sourcePageSha256: record.sourcePageSha256 };
@@ -560,7 +572,11 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
   const binding = build.ss14Inputs?.dps?.skills?.[rowIndex];
   if (entry?.itemId===MOON_STRIKE_ID && binding?.itemId===entry.itemId
     && binding.sourcePageSha256===entry.receipt?.sourcePageSha256
-    && validValue(SEASON_DPS_SKILL_FIELDS.moonBaseManaCost,binding.moonBaseManaCost)) base=binding.moonBaseManaCost;
+    && validValue(SEASON_DPS_SKILL_FIELDS.moonBaseManaCost,binding.moonBaseManaCost)) {
+    const mana=report.character?.values.mana;
+    if (!finite(mana)||binding.moonBaseManaCostBasis!==mana) return {moonCostStale:true};
+    base=binding.moonBaseManaCost;
+  }
   if (!finite(base) || base < 0) return null;
   // The installed Cost Conversion and Ice Pulse effects write the same
   // skill-cost field (2010060). Skill_cost permits life cost above 100%.
@@ -639,8 +655,8 @@ function coverage(build, report, effects, gearEffects) {
     if (["skills", "gear", "supports"].includes(row.category)) {
       if (row.status !== "mapped" && !(row.category === "skills" && (seasonMinionProfile(row.id) || seasonModuleProfile(row.id)))) {
         let reasons=row.reasons;
-        if(row.category==='supports'&&inactiveAuras.size&&row.calculations?.some(entry=>entry.levelUnavailable)){
-          reasons=[...new Set(row.calculations.filter(entry=>!(entry.levelUnavailable&&inactiveAuras.has(entry.rowIndex))).flatMap(entry=>entry.blockers))];
+        if(row.category==='supports'&&inactiveAuras.size&&row.calculations?.some(entry=>entry.levelUnavailable||entry.sealConversionUnresolved)){
+          reasons=[...new Set(row.calculations.filter(entry=>!((entry.levelUnavailable||entry.sealConversionUnresolved)&&inactiveAuras.has(entry.rowIndex))).flatMap(entry=>entry.blockers))];
           if(!reasons.length)continue;
         }
         blockers.push(`${row.label} · ${row.name}: ${reasons.join(" · ")}`);
@@ -1340,6 +1356,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       ...(!reasons.length&&{damageByType}),
       ...(averageHitByType&&{averageHitByType}),
       ...(cost?.observation&&{castCostObservation:cost.observation}),
+      ...(cost?.moonCostStale&&{moonCostStale:true}),
       fixedNumbedPerCast:reasons.length ? null : round(lightningShare>0 ? hit*lightningShare*fixedNumbedShare : 0),
       ...(finite(permafrostHitDps) && {permafrostHitDps}),
       ...(!reasons.length && frostActive && {permafrostBreakdown:{active:round(frostActiveDps),uptime:frostUptime,charge:frost.charge}}),
@@ -1400,6 +1417,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   const dotWindowIssues = new Map();
   const dotWindowConflicts = [];
   const dotWindowBounds = [];
+  const dotWindowSelfOverlap = new Set();
   const dotWindowGroups = [];
   const addWindowIssue = (reason, indices) => {
     blockers.push(reason);
@@ -1440,6 +1458,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       for (const {start,stop,windows:overlap} of overlappingDotSegments(windows)) {
         const slots=[...new Set(overlap.map(window=>window.index))].sort((a,b)=>a-b);
         for (const index of slots) invalid.add(index);
+        for (const index of slots) if (overlap.filter(window=>window.index===index).length>1) dotWindowSelfOverlap.add(index);
         if (slots.length===overlap.length&&overlap.every(window=>window.stop<=end+1e-8))
           dotWindowConflicts.push({id,start,stop,slots});
       }
@@ -1491,6 +1510,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     ...(dotWindowIssues.size && { dotWindowIssues:Object.fromEntries(dotWindowIssues) }),
     ...(dotWindowConflicts.length && { dotWindowConflicts }),
     ...(dotWindowBounds.length && { dotWindowBounds }),
+    ...(dotWindowSelfOverlap.size && { dotWindowSelfOverlap:[...dotWindowSelfOverlap] }),
     ...(dotWindowGroups.length && { dotWindowGroups }),
     manualResources,
     receipts: [...Object.values(rules.pages).filter(p => p.locale === "en"), ...rows.flatMap(r => r.receipts ?? []),

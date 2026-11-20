@@ -5,7 +5,7 @@ import { SEASON_HERO_COMBAT_FIELDS } from './seasonMechanicInputs.js';
 import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { THEA_EVENT_FIELDS } from './seasonTheaEvents.js';
 import { THEA_SS14_ID } from './seasonHeroSelection.js';
-import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing } from './seasonSupport.js';
+import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing, SEAL_CONVERSION_UNRESOLVED } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
 const customOptions={ id:'custom', label:'사용자 옵션', section:'combat', role:'custom-options', pattern:/사용자 옵션 \d+/u };
@@ -126,6 +126,14 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       ? field.label.replace(/ \(초\)$/u,'')+' 입력' : '발동 조건 입력';
     return [{section:'combat',label,edit:'thea-event',key}];
   }
+  if(reason.endsWith(SEAL_CONVERSION_UNRESOLVED)) {
+    for(const row of report?.componentProjection?.rows??[]) {
+      if(!row.isAura||!row.blockers.some(blocker=>blocker.reason===SEAL_CONVERSION_UNRESOLVED))continue;
+      const control=row.conditionControls.find(c=>c.conditionGroup===`nether-buff-${row.buffSkill}`);
+      if(control) add('skills',row.name+' 오라 설정','component-condition',control.key,{index:row.buffSkill});
+    }
+    return links;
+  }
   if(/시전 MP 부족|MP 봉인 합이 100%를 초과/u.test(reason)) {
     for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'&&e.value>0))
       for(const control of row.conditionControls.filter(c=>c.key.endsWith(`:nether-buff-${row.buffSkill}`)&&c.value===1))
@@ -166,13 +174,17 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       const affected=dps?.dotWindowIssues?.[reason]??[];
       const routed=new Set();
       if(reason.includes('측정 종료 시각')){
-        const {overlaps,bounds}=seasonDotWindowRepairs(report);
+        const {overlaps,bounds,sameSlot}=seasonDotWindowRepairs(report);
         for(const conflict of overlaps.filter(conflict=>conflict.slots.every(index=>affected.includes(index)))){
           links.push({tab:'conditions',role:seasonDotWindowRole(conflict),label:`${conflict.start}–${conflict.stop}초 · ${conflict.slots.map(index=>index+1).join('·')}번 칸 겹침 배정`});
           for(const index of conflict.slots)routed.add(index);
         }
         for(const index of new Set(bounds.map(bound=>bound.rowIndex)))if(affected.includes(index)){
           links.push({tab:'conditions',role:`dot-window-bound-${index}`,label:`${index+1}번 칸 측정 범위 수정`});
+          routed.add(index);
+        }
+        for(const index of sameSlot)if(affected.includes(index)){
+          links.push({tab:'conditions',role:`dot-window-merge-${index}`,label:`${index+1}번 칸 겹친 구간 합치기`});
           routed.add(index);
         }
       }

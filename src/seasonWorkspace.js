@@ -600,6 +600,15 @@ export function editSeasonWorkspace(document, edit) {
       const next=target.ss14Inputs.dps?.skills?.[slot];
       if (next&&observedSkillCostFields.some(key=>Object.hasOwn(next,key))) next.observedSkillCostBasis=basis;
       else if(next) delete next.observedSkillCostBasis;
+    } else if (field==='moonBaseManaCost') {
+      const mana=edit.value===''?null:calculateSeasonBuild(target,{includeTheaAverage:false,includeAverage:false,includeElixirUptime:false}).character.values.mana;
+      if (edit.value!==''&&!Number.isFinite(mana)) throw new Error('현재 최대 MP를 확인한 뒤 문 스트라이크 소모량을 입력하세요.');
+      editSeasonDpsInput(target,edit.key,edit.value);
+      const binding=target.ss14Inputs.dps?.skills?.[slot];
+      if (binding) {
+        if (edit.value==='') delete binding.moonBaseManaCostBasis;
+        else binding.moonBaseManaCostBasis=mana;
+      }
     } else {
       editSeasonDpsInput(target, edit.key, edit.value);
     }

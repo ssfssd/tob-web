@@ -35,8 +35,9 @@ export function compareSeasonUptimeChanges(before, after, metric) {
     const old=previous.get(id), row=current.get(id);
     if (!old||!row) {
       const present=old??row;
-      const hasKnownSkillUptime=id.startsWith('skill:')&&unit(present)==='percent'&&before[metric]?.supported&&after[metric]?.supported;
-      if (!present.buffState&&!hasKnownSkillUptime) return [];
+      const timedNumbed=id==='numbed'&&before[metric]?.scope==='ss14-thea-joint-combat'&&after[metric]?.scope==='ss14-thea-joint-combat';
+      const hasKnownUptime=(id.startsWith('skill:')||timedNumbed)&&unit(present)==='percent'&&before[metric]?.supported&&after[metric]?.supported;
+      if (!present.buffState&&!hasKnownUptime) return [];
       const absent=present.buffState?'미장착':'미적용';
       const missingDps=Number.isFinite(present[damage])?0:undefined;
       return [{name:present.name,from:old?.[key]??absent,to:row?.[key]??absent,
@@ -51,11 +52,12 @@ export function compareSeasonUptimeChanges(before, after, metric) {
 }
 
 export function describeUptime(build, report, estimate, skills, scenarioHeroCombat) {
-  const windowUptime = (row, fallback) => {
-    if (!row?.dotWindows) return fallback;
+  const windowUptime = (dps, row, fallback) => {
+    if (!row?.dotWindows) return percent(fallback);
+    if (Object.values(dps.dotWindowIssues??{}).some(indices=>indices.includes(row.rowIndex))) return '확인 필요';
     const {warmup,seconds}=build.ss14Inputs.theaCycle;
     const active=row.dotWindows.reduce((total,[start,stop])=>total+Math.max(0,Math.min(stop,warmup+seconds)-Math.max(start,warmup)),0);
-    return 100*active/seconds;
+    return percent(100*active/seconds);
   };
   const lines = skills.map(({name, rowIndex, actionIndex, field, saved, assumed, exclusive, duplicate}) => {
     const row = estimate.fullDps.rows.find(r=>r.rowIndex===rowIndex);
@@ -80,8 +82,8 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
     return {
       key:`skill:${rowIndex}:${row?.id}:${field}:${actionIndex??''}`,
       name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
-      setting:percent(windowed?windowUptime(original?.dotWindows?original:row,saved):saved),
-      assumed:percent(windowed?windowUptime(row,assumed):assumed),
+      setting:windowed?windowUptime(report.fullDps,original,saved):percent(saved),
+      assumed:windowed?windowUptime(estimate.fullDps,row,assumed):percent(assumed),
       input:{edit:'dps-input',key:`${rowIndex}:${input}`},
       method:windowed?'측정 시간과 겹치는 적용 구간만 계산합니다.':duplicate&&assumed===undefined?'이 칸이 대미지를 준 시간의 비율을 입력하세요. 적용되지 않는 칸은 0%입니다.':exclusive?'겹친 시간을 실제 대미지가 적용된 한 칸에만 배정한 슬롯별 유지율을 사용합니다.':duplicate&&assumed===0?'중복 슬롯에 지정한 0%를 유지합니다.':details[1],
       contribution:contribution(estimate,row),

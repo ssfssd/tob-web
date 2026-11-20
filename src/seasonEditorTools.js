@@ -31,12 +31,18 @@ const slotName=index=>index===0?'주력':index<5?`액티브 ${index+1}`:`패시�
 export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장착 후',role='skill-level-changes'}={}) {
   if(!rows?.length)return '';
   const single=rows.length===1?rows[0]:null;
-  const summary=single?` · ${single.from} → ${single.to}${single.toConfirmed?'':' (확인 필요)'}`:'';
-  const value=(base,level,verified,growth)=>`Lv.${level}${verified?'':' (수치 미확인)'}${base!==level?`<small> · 기본 ${base}</small>`:''}${verified&&Number.isFinite(growth)?`<small> · 대미지 ×${fmt(growth)}</small>`:''}`;
+  const summary=single&&Number.isInteger(single.from)&&Number.isInteger(single.to)&&single.from!==single.to
+    ?` · ${single.from} → ${single.to}${single.toConfirmed?'':' (확인 필요)'}`:'';
+  const value=(id,base,level,verified,growth)=>{
+    if(!id)return '빈 칸';
+    if(!Number.isInteger(level))return '레벨 미확인';
+    return `Lv.${level}${verified?'':' (수치 미확인)'}${Number.isInteger(base)&&base!==level?`<small> · 기본 ${base}</small>`:''}${verified&&Number.isFinite(growth)?`<small> · 대미지 ×${fmt(growth)}</small>`:''}`;
+  };
   const content=rows.map(({id,beforeId,rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth})=>{
     const socket=Number.isInteger(supportIndex)?` · 보조 ${supportIndex+1}`:'';
-    const name=beforeId?`${skillName(beforeId)} → ${skillName(id)}`:skillName(id);
-    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${value(fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(toBase,to,toConfirmed,toGrowth)}</td></tr>`;
+    const oldId=beforeId===undefined?id:beforeId;
+    const name=oldId&&id&&oldId!==id?`${skillName(oldId)} → ${skillName(id)}`:skillName(id??oldId);
+    return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${value(oldId,fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(id,toBase,to,toConfirmed,toGrowth)}</td></tr>`;
   }).join('');
   return `<details data-role="${esc(role)}"><summary>스킬 레벨${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
 }

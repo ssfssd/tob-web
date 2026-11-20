@@ -173,6 +173,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
     Object.fromEntries(SEASON_UPTIME_INPUTS.filter(key=>Number.isFinite(binding[key])).map(key=>[key,binding[key]]))]));
   report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,uptimeInputs,
     dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotWindowBounds:estimate.dotWindowBounds,
+    dotWindowSelfOverlap:estimate.dotWindowSelfOverlap,
     dotWindowGroups:estimate.dotWindowGroups,
     dotUptimeOverflow:estimate.dotUptimeOverflow, dotUptimeFields:estimate.dotUptimeFields,
     dotExclusiveUnconfirmed:estimate.dotExclusiveUnconfirmed, reapingOverlapOverflow:estimate.reapingOverlapOverflow,

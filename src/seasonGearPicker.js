@@ -107,22 +107,32 @@ function damageRouteChanges(before,after,beforeDps,afterDps) {
 }
 
 export function compareSeasonSkillLevels(before,after) {
-  const slots=report=>report.components.filter(({category})=>category==='skills'||category==='supports')
-    .flatMap(({id,calculations})=>(calculations??[]).map(entry=>({id,entry})));
   const key=({entry})=>`${entry.rowIndex}:${entry.supportIndex??''}`;
-  const previousSlots=new Map(slots(before).map(slot=>[key(slot),slot]));
+  const slots=report=>{
+    const entries=report.components.filter(({category})=>category==='skills'||category==='supports');
+    const index=new Map(entries.flatMap(({id,calculations})=>(calculations??[]).map(entry=>[key({entry}),{id,entry}])));
+    for (const {id,paths} of entries) for (const path of paths??[]) {
+      const match=/^skills\.rows\.(\d+)(?:\.supports\.(\d+))?$/u.exec(path);
+      if(!match)continue;
+      const entry={rowIndex:Number(match[1]),supportIndex:match[2]===undefined?undefined:Number(match[2])};
+      const slotKey=key({entry});
+      if(!index.has(slotKey))index.set(slotKey,{id,entry});
+    }
+    return index;
+  };
+  const previousSlots=slots(before), currentSlots=slots(after);
   const changes=[];
-  for (const slot of slots(after)) {
-    const previous=previousSlots.get(key(slot));
-    if (!previous) continue;
-    const {id,entry}=slot, {rowIndex,supportIndex}=entry;
-    const fromState=Number.isInteger(supportIndex)?seasonSkillLevelState(previous.entry):seasonSkillCalculationLevel(before,rowIndex);
-    const toState=Number.isInteger(supportIndex)?seasonSkillLevelState(entry):seasonSkillCalculationLevel(after,rowIndex);
+  for (const slotKey of new Set([...previousSlots.keys(),...currentSlots.keys()])) {
+    const previous=previousSlots.get(slotKey), current=currentSlots.get(slotKey);
+    const {rowIndex,supportIndex}=(current??previous).entry;
+    const id=current?.id??null, beforeId=previous?.id??null;
+    const state=(report,slot)=>!slot?{level:null,confirmed:false}
+      : Number.isInteger(supportIndex)?seasonSkillLevelState(slot.entry):seasonSkillCalculationLevel(report,rowIndex);
+    const fromState=state(before,previous), toState=state(after,current);
     const {base:fromBase,level:from,confirmed:fromConfirmed,growthMultiplier:fromGrowth}=fromState;
     const {base:toBase,level:to,confirmed:toConfirmed,growthMultiplier:toGrowth}=toState;
-    if (!Number.isInteger(from)||!Number.isInteger(to)
-      || (from===to&&fromBase===toBase&&fromConfirmed===toConfirmed&&fromGrowth===toGrowth)) continue;
-    changes.push({id,...(previous.id!==id&&{beforeId:previous.id}),rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth});
+    if (beforeId===id && from===to && fromBase===toBase && fromConfirmed===toConfirmed && fromGrowth===toGrowth) continue;
+    changes.push({id,...(beforeId!==id&&{beforeId}),rowIndex,supportIndex,from,to,fromBase,toBase,fromConfirmed,toConfirmed,fromGrowth,toGrowth});
   }
   return changes.sort((a,b)=>a.rowIndex-b.rowIndex||(a.supportIndex??-1)-(b.supportIndex??-1));
 }

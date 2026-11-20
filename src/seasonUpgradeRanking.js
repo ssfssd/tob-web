@@ -19,7 +19,7 @@ import {compareSeasonDamageBreakdown,compareSeasonResourceCosts,compareSeasonSki
 import {describeSeasonOptionChange} from './seasonNumericStatsView.js';
 import {FIXED_NUMBED_FIELD} from './seasonNetherModifiers.js';
 
-export const UPGRADE_GROUPS = {all:'한계효용',unit:'가상 옵션 1단위',replacement:'장비 교체 추천',gearImpact:'장착 장비 기여',gear:'장비 옵션',craft:'제작 옵션 추천',talents:'재능',pact:'정령',memory:'추억',legendary:'레전드 장비',skills:'액티브 스킬 레벨·보조',skillReplacement:'액티브 스킬 교체 추천'};
+export const UPGRADE_GROUPS = {all:'한계효용',unit:'가상 옵션 1단위',replacement:'장비 교체 추천',manaReplacement:'MP 소모 절감 장비',gearImpact:'장착 장비 기여',gear:'장비 옵션',craft:'제작 옵션 추천',talents:'재능',pact:'정령',memory:'추억',legendary:'레전드 장비',skills:'액티브 스킬 레벨·보조',skillReplacement:'액티브 스킬 교체 추천'};
 export const GEAR_UPGRADE_SOURCES = {all:'도감·보관함',shelf:'보관함',catalog:'도감'};
 function skillReplacementCandidates(document,report,rowIndex) {
   const {skillId,level}=normalizeBuild(document.targetBuild).skills.active[rowIndex];
@@ -269,7 +269,8 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
   const base={document,report},baseline=compareSeasonDpsSnapshots(base,base,metric);
   const result={metric,rows:[],resources:[],checked:0,blocked:0,total:0,reasons:baseline.reasons,base:baseline.baseValue};
   const skillReplacement=group==='skillReplacement';
-  const equipment=mode==='gear'||group==='replacement'||group==='legendary';
+  const manaReplacement=group==='manaReplacement';
+  const equipment=mode==='gear'||group==='replacement'||group==='legendary'||manaReplacement;
   if(skillReplacement)result.blockedSkills=[];
   if(equipment)result.blockedGear=[];
   const reasonCounts=new Map();
@@ -300,11 +301,16 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     }
   }
   if(!baseline.supported)return result;
+  const baseMana=report[metric].manualResources?.manaPerSecond;
+  if(manaReplacement&&!Number.isFinite(baseMana)){
+    result.reasons=['현재 수동 시전의 초당 MP 소모를 먼저 확인하세요.'];
+    return result;
+  }
   const impact = group==='gearImpact';
   const unit = group==='unit';
   if(impact)result.impacts=[];
   if(equipment&&!Object.hasOwn(GEAR_UPGRADE_SOURCES,source))throw Error('장비 추천의 후보 출처를 선택하세요.');
-  const assembleShelf=equipment&&assemble&&source==='shelf'&&slot==='all';
+  const assembleShelf=equipment&&!manaReplacement&&assemble&&source==='shelf'&&slot==='all';
   const locked=new Set(assembleShelf?lockedSlots:[]);
   const previousOffhand=equipment && normalizeBuild(document.targetBuild).gear.slots[1]?.itemId;
   const canReplace=({edits:[edit]})=>!locked.has(edit.slotIndex)
@@ -377,8 +383,8 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     const comparison=compareSeasonDpsSnapshots(base,{document:next,report:after},metric);
     if(impact){
       const {supported,reasons,value}=comparison;
-      const resources=supported?compareSeasonResourceCosts(report,after,metric,{allActive:true}):null;
-      result.impacts.push({...candidate,reasons,value,delta:supported ? baseline.value-value : null,resources});
+      result.impacts.push({...candidate,reasons,value,delta:supported ? baseline.value-value : null,
+        ...(supported&&upgradeDetails(report,after,metric))});
       if(!supported)block(reasons);
       continue;
     }
@@ -397,14 +403,18 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       skillImpact={id:row.id,index:row.rowIndex,base:selectedRow.values.dps,value:row.values.dps,
         delta:row.values.dps-selectedRow.values.dps};
     }
-    const rankDelta=row=>row.skillImpact?.delta??row.delta;
-    if((skillImpact?.delta??comparison.delta)>0){
+    const candidateMana=after[metric].manualResources?.manaPerSecond;
+    const manaImpact=manaReplacement&&Number.isFinite(candidateMana)&&comparison.delta>=0&&candidateMana<baseMana
+      ? {base:baseMana,value:candidateMana,saved:baseMana-candidateMana} : null;
+    const rankDelta=row=>row.manaImpact?.saved??row.skillImpact?.delta??row.delta;
+    if(manaReplacement ? manaImpact : (skillImpact?.delta??comparison.delta)>0){
       if(previousOffhand && candidate.edits[0].slotIndex===0 && !next.targetBuild.gear?.slots?.[1]?.itemId)candidate.detail+=' · 서브 무기 해제';
       const option = unit ? {label:candidate.label,hypothetical:true} : candidate;
       const optionChanges = equipment?sameGearOptionChanges(candidate.edits[0],document,report,after):[];
       result.rows.push({...option,metric,value:comparison.value,delta:comparison.delta,percent:comparison.percent,
         ...(!unit&&upgradeDetails(report,after,metric)),
         ...(optionChanges.length&&{optionChanges}),
+        ...(manaImpact&&{manaImpact}),
         ...(skillImpact&&{skillImpact})});
       result.rows.sort((a,b)=>rankDelta(b)-rankDelta(a)||a.label.localeCompare(b.label,'ko'));
       if(result.rows.length>20)result.rows.pop();
@@ -559,6 +569,9 @@ export function copySeasonUpgrade(document,report,row){
   const copyReport=calculate(copy,row.metric);
   const check=compareSeasonDpsSnapshots({document,report},{document:copy,report:copyReport},row.metric);
   if(!check.supported||check.value!==row.value||check.delta!==row.delta)throw Error('빌드가 바뀌었습니다. 추천을 다시 계산하세요.');
+  if(row.manaImpact&&(report[row.metric].manualResources?.manaPerSecond!==row.manaImpact.base
+    ||copyReport[row.metric].manualResources?.manaPerSecond!==row.manaImpact.value))
+    throw Error('MP 소모 기준이 바뀌었습니다. 추천을 다시 계산하세요.');
   if(row.skillImpact){
     const {index,id,base,value,delta}=row.skillImpact;
     const before=skillDpsRow(report,row.metric,index), after=skillDpsRow(copyReport,row.metric,index);
