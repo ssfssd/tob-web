@@ -364,7 +364,7 @@ function projectSeasonBuild(build, { skills = SS14_CARDS_EN, gear = SS14_GEAR_EN
     const support = row.category === "supports", record = skills.records[row.id];
     const revelationBonus = support ? 0 : seasonRevelationLevelBonus(build,componentProjection.rows,record);
     row.calculations = row.calculations.map(entry => {
-      if(entry.mechanics?.some(m=>m.kind==='utility-skill'))return entry;
+      if(entry.mechanics?.some(m=>m.kind==='utility-skill'&&m.utility!=='restoration'))return entry;
       const bonus = seasonEffectLevelBonus(componentProjection.effects, record, support, entry.rowIndex)
         + seasonGearLevelBonus(components, record, support, entry.rowIndex) + revelationBonus;
       if (!bonus) return entry;

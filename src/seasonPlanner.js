@@ -349,9 +349,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         const detail = globalThis.document.querySelector?.(`[data-role="${state.focusRole}"]`);
         if (detail) {
           for(let p=detail;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
-          const focusTarget=detail.matches?.('button,input,select,textarea,summary,[tabindex]') ? detail : detail.querySelector?.('input,select,textarea');
+          const focusTarget=detail.matches?.('button,input,select,textarea,summary,[tabindex]') ? detail
+            : detail.querySelector?.(detail.tagName==='DETAILS'?'summary':'input,select,textarea');
           focusTarget?.focus({preventScroll:true});
-          detail.scrollIntoView?.({ block: "nearest" });
+          (focusTarget??detail).scrollIntoView?.({ block: "nearest" });
         }
         state.focusRole = null;
       }

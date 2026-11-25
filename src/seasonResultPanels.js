@@ -53,13 +53,13 @@ export function renderReasons(s,reasons,dps=s.report.fullDps) {
     }
     const text=side+message;
     if (!links.length) {rest.push(`<li>${esc(text)}</li>`);continue;}
-    const key=JSON.stringify(links.map(l=>JSON.stringify([l.section,l.index,l.supportIndex,l.type,l.role,l.edit,l.key])).sort());
+    const key=JSON.stringify(links.map(l=>JSON.stringify([l.section,l.tab,l.index,l.supportIndex,l.type,l.role,l.edit,l.key])).sort());
     if(!inputs.has(key))inputs.set(key,{links,messages:new Set()});
     inputs.get(key).messages.add(text);
   }
   const items=[...inputs.values()].map(({links,messages})=>{
     const [first,...other]=messages;
-    const actions=links.map(l=>l.tab ? button(esc(l.label),'result-tab',`data-tab="${esc(l.tab)}" data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)
+    const actions=links.map(l=>l.tab ? button(esc(l.label),'result-tab',`data-tab="${esc(l.tab)}"${Number.isInteger(l.index)?` data-index="${l.index}"`:''} data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)
       : button(esc(l.label),'requirement',`data-section="${esc(l.section??'hero')}" data-index="${l.index??''}" data-support="${l.supportIndex??''}" data-type="${esc(l.type)}" data-focus-role="${esc(l.role)}" data-field="${esc(l.edit)}" data-field-key="${esc(l.key)}"`)).join('');
     const details=other.length?`<details><summary>같은 입력과 관련된 사유</summary><ul>${other.map(text=>`<li>${esc(text)}</li>`).join('')}</ul></details>`:'';
     return `<li>${esc(first)} ${actions}${details}</li>`;
@@ -535,22 +535,32 @@ export function renderWeaponDamageRoutes(hands,index) {
     `weapon-damage-routes-${index}`);
 }
 function damageRouteAmountChanges(before,after) {
-  if(!before||!after||before.length!==after.length)return null;
-  const identity=({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource})=>
-    JSON.stringify([stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource]);
-  if(before.some((edge,i)=>identity(edge)!==identity(after[i])))return null;
-  return after.flatMap((edge,i)=>{
+  if (!before?.length || !after?.length) return null;
+  const identity=({stage,sourceType,targetType,actionName,effectSource})=>
+    JSON.stringify([stage,sourceType,targetType,actionName,effectSource]);
+  const older=new Map(before.map(edge=>[identity(edge),edge]));
+  const newer=new Map(after.map(edge=>[identity(edge),edge]));
+  if (older.size!==before.length || newer.size!==after.length) return null;
+  const rows=[...new Set([...newer.keys(),...older.keys()])].map(key=>{
+    const previous=older.get(key), current=newer.get(key), edge=current??previous;
     const converted=edge.stage==='conversion';
-    const value=row=>damageRouteAmount(converted?row.movedBaseDamage:row.gainedBaseDamage);
-    const a=value(before[i]), b=value(edge);
-    if(!a||!b||a===b)return [];
+    const amount=row=>damageRouteAmount(converted?row.movedBaseDamage:row.gainedBaseDamage);
+    const percent=row=>(converted?'':'+')+number(converted?row.effectivePercent:row.resolvedValue)+'%'
+      +(converted&&Math.abs(row.effectivePercent-row.resolvedValue)>1e-8?` (원래 ${number(row.resolvedValue)}%)`:'');
+    const amountA=previous?amount(previous):'', amountB=current?amount(current):'';
+    const percentA=previous?percent(previous):'', percentB=current?percent(current):'';
+    const stable=percentA===percentB;
     const from=damageTypes[edge.sourceType]??(edge.sourceType==='non-erosion'?'부식 이외':'');
     const to=damageTypes[edge.targetType];
-    if(!from||!to)return [];
-    const percent=(converted?'':'+')+number(converted?edge.effectivePercent:edge.resolvedValue)+'%';
-    const label=[edge.actionName,`${from} → ${to} ${percent}`,converted?'전환':'추가 획득'].filter(Boolean).join(' · ');
-    return [{label,source:conversionSource(edge.effectSource??undefined),a,b}];
+    if (!from || !to || previous&&!amountA || current&&!amountB) return null;
+    const label=[edge.actionName,`${from} → ${to}${stable?' '+percentB:''}`,converted?'전환':'추가 획득'].filter(Boolean).join(' · ');
+    const cell=(row,rate,value)=>!row?'미적용':stable?value:`${rate} · ${value}`;
+    return {label,source:conversionSource(edge.effectSource??undefined),a:cell(previous,percentA,amountA),b:cell(current,percentB,amountB),
+      matched:Boolean(previous&&current)};
   });
+  if (rows.some(row=>!row)) return null;
+  const changes=rows.filter(row=>row.a!==row.b);
+  return changes.some(row=>row.matched)?changes:null;
 }
 export function renderDamageRouteChanges(rows,{before='장착 전',after='장착 후',role='damage-route-changes'}={}) {
   if(!rows?.length)return '';
@@ -567,7 +577,7 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
     if(amounts?.length)return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <table class="slot-dps-table" data-role="damage-route-amount-changes"><caption>보정 전 대미지</caption>
         <thead><tr><th scope="col">전환·획득</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead>
-        <tbody>${amounts.map(({label,source,a,b})=>`<tr><th scope="row">${esc(label)}${source?`<small>${esc(source)}</small>`:''}</th><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table></section>`;
+        <tbody>${amounts.map(({label,source,a,b})=>`<tr><th scope="row">${esc(label)}${source?`<small>${esc(source)}</small>`:''}</th><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')}</tbody></table></section>`;
     const empty=' · 적용 없음';
     return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <div><b>${esc(before)}</b>${route(previous,previousStates,previousHands,`${role}-before-${index}`)||empty}</div>
@@ -655,8 +665,10 @@ function renderSkillResourceCosts(row, averaged, timedCombat) {
   if (row.channelCost?.valid)
     costs.push([row.channelCost.times?'측정 구간 차감 빈도':'관측 차감 횟수',number(row.channelCost.rate)+'회/초']);
   if (row.measuredManualUses) {
-    const {count,seconds,rate}=row.measuredManualUses;
+    const {count,seconds,rate,multistrikes}=row.measuredManualUses;
     costs.push(['측정 구간 수동 사용',`${number(count)}회 / ${number(seconds)}초 · ${number(rate)}회/초`]);
+    if (multistrikes>0) costs.push(['측정 구간 연속 공격',`${number(multistrikes)}회 / ${number(seconds)}초`
+      +(Number.isFinite(row.manualManaPerSecond)&&Number.isFinite(row.manualLifePerSecond)?' · 소모에 포함':'')]);
   }
   const channel=row.channelCost;
   const needsRate=channel&&!channel.valid;

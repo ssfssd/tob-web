@@ -36,7 +36,9 @@ export function compareSeasonUptimeChanges(before, after, metric) {
     if (!old||!row) {
       const present=old??row;
       const timedNumbed=id==='numbed'&&before[metric]?.scope==='ss14-thea-joint-combat'&&after[metric]?.scope==='ss14-thea-joint-combat';
-      const hasKnownUptime=(id.startsWith('skill:')||timedNumbed)&&unit(present)==='percent'&&before[metric]?.supported&&after[metric]?.supported;
+      const reaping=id.startsWith('reaping:');
+      const knownUptime=(id.startsWith('skill:')||timedNumbed)&&unit(present)==='percent';
+      const hasKnownUptime=(knownUptime||reaping&&Number.isFinite(present[damage]))&&before[metric]?.supported&&after[metric]?.supported;
       if (!present.buffState&&!hasKnownUptime) return [];
       const absent=present.buffState?'미장착':'미적용';
       const missingDps=Number.isFinite(present[damage])?0:undefined;

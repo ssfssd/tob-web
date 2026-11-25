@@ -71,13 +71,16 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
     <tbody>${p.skillSpeedChanges.map(({index,id,kind,from,to})=>
       `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))} <small>${kind==='attack'?'공격':'시전'}</small></th><td>${speed(from)}</td><td>${speed(to)}</td></tr>`).join('')}</tbody></table>`:'';
-  const usageValue=({count,seconds},mana,life,showLife)=>`${fmt(count)}회 / ${speed(seconds)}초${Number.isFinite(mana)?`<small> · ${fmt(mana)} MP/초</small>`:''}${showLife&&Number.isFinite(life)?`<small> · ${fmt(life)} HP/초</small>`:''}`;
+  const usageValue=({count,seconds,multistrikes=0},mana,life,showLife,showMultistrikes)=>`${fmt(count)}회 / ${speed(seconds)}초`
+    +(showMultistrikes?`<small> · 연속 공격 ${fmt(multistrikes)}회</small>`:'')
+    +(Number.isFinite(mana)?`<small> · ${fmt(mana)} MP/초</small>`:'')+(showLife&&Number.isFinite(life)?`<small> · ${fmt(life)} HP/초</small>`:'');
   const usage=p.manualUsageChanges?.length?`<table class="slot-dps-table" data-role="manual-usage-preview"><caption>측정 구간 수동 사용</caption>
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
     <tbody>${p.manualUsageChanges.map(({index,id,beforeId,from,to,fromMana,toMana,fromLife,toLife})=>{
       const showLife=fromLife>0||toLife>0;
+      const showMultistrikes=from.multistrikes>0||to.multistrikes>0;
       const name=beforeId?`${skillName(beforeId)} → ${skillName(id)}`:skillName(id);
-      return `<tr><th scope="row">${esc(slotName(index)+' · '+name)}</th><td>${usageValue(from,fromMana,fromLife,showLife)}</td><td>${usageValue(to,toMana,toLife,showLife)}</td></tr>`;
+      return `<tr><th scope="row">${esc(slotName(index)+' · '+name)}</th><td>${usageValue(from,fromMana,fromLife,showLife,showMultistrikes)}</td><td>${usageValue(to,toMana,toLife,showLife,showMultistrikes)}</td></tr>`;
     }).join('')}</tbody></table>`:'';
   const numbed=p.numbedDamageChanges?.length?`<table class="slot-dps-table" data-role="numbed-damage-preview"><caption>${p.dpsBasis==='assumedDps'?'마취 기여 · 방어 전 DPS':'마취 기여 DPS'}</caption>
     <thead><tr><th scope="col">대미지</th>${headers}<th scope="col">변화</th></tr></thead>
@@ -193,5 +196,9 @@ export function mobileDpsBar(s,blockedStatus='확인 필요'){
   const showAssumed=!d.supported&&assumed?.supported;
   const value=showAssumed?assumed.dps:d.dps;
   const change=compactSeasonEditDelta(showAssumed?s.editComparison?.assumed:s.editComparison);
-  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기"><span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):blockedStatus}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small></a>`;
+  const body=`<span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):blockedStatus}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small>`;
+  const hasBlockers=d.blockers?.length||assumed?.blockers?.length;
+  if (!s.pending.size&&!d.supported&&!showAssumed&&hasBlockers)
+    return `<button type="button" class="mobile-dps-bar" aria-label="전체 DPS 보류 이유 보기" data-ss14-action="result-tab" data-tab="calculation" data-show-dps="true" data-focus-role="calculation-requirements">${body}</button>`;
+  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기">${body}</a>`;
 }

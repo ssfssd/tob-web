@@ -8,7 +8,7 @@ import { THEA_SS14_ID } from './seasonHeroSelection.js';
 import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing, SEAL_CONVERSION_UNRESOLVED } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
-import { NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED } from './seasonTheaCombatInputs.js';
+import { NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED, REVELATION_NUMBED_REQUIRED } from './seasonTheaCombatInputs.js';
 const customOptions={ id:'custom', label:'사용자 옵션', section:'combat', role:'custom-options', pattern:/사용자 옵션 \d+/u };
 const routes = [
   customOptions,
@@ -49,6 +49,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     .map(row => ({section:'combat',label:`스킬 ${row.rowIndex+1} 추가 번개 범위 입력`,edit:'dps-input',key:`${row.rowIndex}:addedLightningMin`}));
   if(reason.includes('자동 은총과 균열 후속 적중을 함께 계산하려면'))
     return [{section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
+  if(reason === REVELATION_NUMBED_REQUIRED)
+    return [{section:'combat',label:'마취 계산 켜기',edit:'thea-event',key:'numbedEnabled'}];
   if (reason.startsWith('고압전기의 마취는') && report?.components?.some(row => row.category === 'hero' && row.id === THEA_SS14_ID))
     return [{section:'combat', role:'season-thea-controls', label:'복합 발동 설정'}];
   if(/스킬의 무기 제한/u.test(reason)&&/메인 무기|서브 무기/u.test(reason)){
@@ -139,6 +141,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     }
     return links;
   }
+  if(reason.startsWith('스킬 에너지 한도 초과'))
+    return [{section:'skills',role:'skill-catalog-toggle',label:'스킬 연결판에서 보조 칸 조정'}];
   if(/시전 MP 부족|MP 봉인 합이 100%를 초과/u.test(reason)) {
     for(const row of report?.componentProjection?.rows??[])if(row.isAura&&row.effects.some(e=>e.stat==='sealed_mana_percent'&&e.value>0))
       for(const control of row.conditionControls.filter(c=>c.key.endsWith(`:nether-buff-${row.buffSkill}`)&&c.value===1))
@@ -147,7 +151,12 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       if(Number.isInteger(row.supportIndex)&&!row.blocked&&row.applied>0)
         add('skills',row.name+' 보조 편집',undefined,undefined,{index:row.rowIndex,supportIndex:row.supportIndex});
     }
-    return links;
+    if (links.length) return links;
+  }
+  if (/시전 (?:MP|HP) 부족/u.test(reason)) {
+    return (dps?.rows??[]).filter(row=>row.blockers?.includes(reason)).map(row=>({
+      tab:'calculation',index:row.rowIndex,role:'selected-skill-resource-cost',label:'스킬 '+(row.rowIndex+1)+' 시전 비용 보기',
+    }));
   }
   if (reason.startsWith('채널링의 MP 차감 시각') || reason.startsWith('채널링 MP 차감과 다른 행동')) {
     const times = (dps?.rows ?? []).filter(row=>row.channelCost && row.manaPerUse>0

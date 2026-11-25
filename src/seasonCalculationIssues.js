@@ -17,7 +17,7 @@ export function seasonIssueCause(value) {
   if (/^spell-base-damage-unavailable$|^level-formula-pattern-unsupported$/u.test(reason)) return 'source';
   if (/^(?:trigger|stacking|skill-support)-runtime-required$|^legendary-runtime-mechanic$/u.test(reason)) return 'model';
   if (/출처 충돌|원문.*충돌|source.*conflict|ss14-level-row-unavailable|레벨.*수치.*(?:없|미확보)|수치.*근거.*미확보|동일.*카드 미확보|원문 미확보/u.test(reason)) return 'source';
-  if (/호환|장착할 수|중복|상한.*초과|초과.*상한|배치.*(?:범위|충돌)|봉인 합.*초과|메인 스킬을.*교체|선택 ID를 찾지/u.test(reason)) return 'compatibility';
+  if (/호환|장착할 수|중복|상한.*초과|초과.*상한|한도 초과|배치.*(?:범위|충돌)|봉인 합.*초과|시전 (?:MP|HP) 부족|메인 스킬을.*교체|선택 ID를 찾지/u.test(reason)) return 'compatibility';
   if (/입력|선택하세요|확인하세요|값을 선택|범위에서 직접 확인|원문 근거가 바뀌|원문 연결을 다시/u.test(reason)
     && !/미지원|해석.*미완료|계산.*미완료|범위를 벗어났습니다/u.test(reason)) return 'input';
   if (/unsupported|unmapped|unresolved|미지원|미완료|미연결|연결되지 않은 효과|연산 미확인|분리.*필요|별도 계산.*필요/u.test(reason)) return 'model';

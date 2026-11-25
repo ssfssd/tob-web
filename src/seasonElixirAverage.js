@@ -193,6 +193,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
         : manaPerSecond;
       return {active:observed.map(row=>active[varying.indexOf(row)]??Number(row.elixirState.uptime===100)),
         uptime:100*weight,dps:value.dps,weightedDps:supported?value.dps*weight:null,
+        manaRecovery:(value.manualResources?.recovery??[]).filter(row=>row.id!=='observed').map(({id,label,value})=>({id,label,value})),
         manaPerSecond,weightedManaPerSecond:Number.isFinite(manaPerSecond)?manaPerSecond*weight:null,channelCostTotalOnly,
         ...(channelCostTotalOnly&&{manaExcludingCombinedChannels:stateMana,
           weightedManaExcludingCombinedChannels:Number.isFinite(stateMana)?stateMana*weight:null})};

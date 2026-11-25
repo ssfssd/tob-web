@@ -3,6 +3,7 @@ import { SS14_THEA_COMBAT } from "./data/ss14TheaCombat.generated.js";
 export const theaCombatPin = () => SS14_THEA_COMBAT.receiptSha256;
 export const theaCombatEnabled = build => build?.ss14Inputs?.theaEvents?.combatMode === 1;
 export const NUMBED_DOT_WINDOW_REQUIRED = '마취가 변하는 전투에서는 번개 지속 대미지의 적용 구간을 입력하세요.';
+export const REVELATION_NUMBED_REQUIRED = '선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.';
 export const VARIABLE_DOT_WINDOW_REQUIRED = '전투 효과로 지속 대미지가 변합니다. 해당 스킬의 적용 구간을 입력하세요.';
 export const BLESSING_DOT_WINDOW_REQUIRED = '지속 대미지로 축복이 발동할 수 있습니다. 해당 스킬의 적용 구간을 입력하세요.';
 export function fixedNumbedStacks(build) {

@@ -3,7 +3,7 @@ import { bindTheaState } from "./seasonTheaState.js";
 import { SS14_EXTENSION_NATIVE } from "./data/ss14ExtensionNative.generated.js";
 import { createOmenAccumulator } from "./seasonOmen.js";
 import { combatNumbedEnabled, hasTheaNativeDot, theaCombatInputBlockers, theaCombatInputValues, usesTheaDotTrigger,
-  NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED } from "./seasonTheaCombatInputs.js";
+  NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED, REVELATION_NUMBED_REQUIRED } from "./seasonTheaCombatInputs.js";
 import { netherSum, netherMore, SEASON_SKILL_AILMENT_TAGS } from './seasonNetherRemaining.js';
 import { netherDeterioration } from './seasonNetherDps.js';
 import { manualResourceBalance } from './seasonDps.js';
@@ -14,6 +14,8 @@ import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
 const eps = 1e-8;
 const missingChannelManaTimes = row => row.channelCost && !row.channelCost.times && row.channelCost.rate !== 0 && row.manaPerUse > 0;
 const CHANNEL_MANA_TIMES_REQUIRED = '채널링의 MP 차감 시각을 확인할 수 없습니다. 초당 MP 소모율을 입력하세요.';
+const missingRevelationNumbedMode = (build, mechanics) => build.ss14Inputs.theaEvents.numbedEnabled !== 1
+  && mechanics.some(m => m.kind === 'thea-numbed-on-hit' || m.kind === 'thea-numbed-consume');
 const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "netherDps", "specialDps", "omenDps", "playerDeteriorationDps", "dotDps", "permafrostDps", "reapingDps", "igniteReapingDps", "minionDps", "minionDeteriorationDps", "igniteDps", "scorchDps", "dps"];
 // These are portions of existing damage totals and are never added to DPS.
 const contributionKeys = ["numbedHitDps", "numbedDotDps", "numbedReapingDps", "numbedMinionDps", "minionHitDps", "moduleIgniteDps"];
@@ -73,9 +75,16 @@ function summarizeTimedElixirs(build,report,options,results,dps,resources) {
     const seconds=average(mask,'seconds');
     if (!(seconds>0)) return [];
     const damage=average(mask,'damage'), mana=average(mask,'mana');
+    const manaRecovery=(resources?.recovery??[]).filter(row=>row.id!=='observed').map(({id,label})=>{
+      const amounts=results.flatMap(run=>{
+        const phase=run.elixirPhases.get(mask);
+        return phase?.seconds>0?[phase.manaRecovery.get(id)]:[];
+      });
+      return {id,label,value:amounts.every(Number.isFinite)?sum(amounts)/results.length/seconds:null};
+    });
     return [{active:elixirs.map(({i})=>Number(Boolean(mask&(1<<i)))),uptime:100*seconds/options.seconds,
       dps:damage/seconds,weightedDps:damage/options.seconds,manaPerSecond:showMana?mana/seconds:null,
-      weightedManaPerSecond:showMana?mana/options.seconds:null}];
+      weightedManaPerSecond:showMana?mana/options.seconds:null,manaRecovery}];
   });
   if (Math.abs(sum(states.map(state=>state.uptime))-100)>1e-6
     || Math.abs(sum(states.map(state=>state.weightedDps))-dps)>Math.max(1e-6,Math.abs(dps)*1e-8)) return null;
@@ -176,7 +185,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const phaseAt=time=>{
     if (!elixirs.length) return null;
     const mask=elixirs.reduce((state,e)=>state|(elixirActive(e,time)?1<<e.i:0),0);
-    if (!elixirPhases.has(mask)) elixirPhases.set(mask,{mask,seconds:0,damage:0,mana:0,skills:new Map()});
+    if (!elixirPhases.has(mask)) elixirPhases.set(mask,{mask,seconds:0,damage:0,mana:0,manaRecovery:new Map(),skills:new Map()});
     return elixirPhases.get(mask);
   };
   const nextElixir = time => Math.min(Infinity, ...elixirs.map(e => time + eps < e.start ? e.start : e.duration >= e.interval ? Infinity
@@ -188,6 +197,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   let numbedEnabled = combatNumbedEnabled(build, report);
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const has = kind => mechanics.some(m => m.kind === kind);
+  const needsRevelationNumbed = missingRevelationNumbedMode(build, mechanics);
   const linked = mechanics.filter(m => m.kind === "thea-combat-event").map(e => ({ ...e }));
   const manaRule = mechanics.find(m => m.kind === 'thea-mana-spend');
   const manaTrigger = manaRule && { ...manaRule };
@@ -253,6 +263,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const counts = { casts: 0, hits: 0, followupHits: 0, multistrikes: 0, spellBurst: 0, ignites: 0, scorches: 0, numbedInflicted: 0, reaps: 0 };
   const measuredCounts = { ...counts };
   const manualUses = new Map();
+  const multistrikeUses = new Map();
   const inMeasurement = time => time >= warmup && time < end;
   const count = (time, key, amount = 1) => {
     counts[key] += amount;
@@ -474,6 +485,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     }
     const lightning = row.pools.filter(p => p.type === "lightning");
     if (hitMultiplier>0 && lightning.some(pool=>pool.max>0)) {
+      if (needsRevelationNumbed) {
+        blockers.add(REVELATION_NUMBED_REQUIRED);
+        return;
+      }
       // A timed effect can create the first eligible lightning hit after combat starts.
       if (!numbedEnabled && row.numbedOnHit) {
         observeNumbedSupport?.(event.row);
@@ -590,7 +605,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     const burstMultiplier = (event.kind === "burst" ? row.combat.burstHitMore : 1)*(event.triggerMultiplier??1);
     const landed = row.pools.length > 0 && (event.kind === "repeat" || random() < b.hitChance / 100);
     count(time, 'casts');
-    if (event.index > 0) count(time, 'multistrikes');
+    if (event.kind === 'multi') {
+      count(time, 'multistrikes');
+      if (inMeasurement(time)) multistrikeUses.set(event.row,(multistrikeUses.get(event.row)??0)+1);
+    }
     if (event.kind === "burst") count(time, 'spellBurst');
     if (landed) {
       const castMultiplier = sequenceMultiplier * burstMultiplier;
@@ -624,7 +642,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     if (event.kind === "multi" && event.index === event.max) runTriggers("multistrikeRate", time, ctx);
   }
   return {
-    blockers, counts, measuredCounts, manualUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows, elixirPhases,
+    blockers, counts, measuredCounts, manualUses, multistrikeUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows, elixirPhases,
     get missingDotWindows() {
       const numbed = variableNumbed ? partialLightningDotRows.filter(index => !blessingDotRows.has(index)) : [];
       const variable = [...variableDotRows].filter(index => !blessingDotRows.has(index) && !numbed.includes(index));
@@ -706,6 +724,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         for (const [id, amount] of manaRecovery) {
           const rate = recovery.find(row => row.id === id)?.value;
           manaRecovery.set(id, Number.isFinite(amount) && Number.isFinite(rate) ? amount + rate * w : null);
+          if (phase && id!=='observed') {
+            const prior=phase.manaRecovery.has(id)?phase.manaRecovery.get(id):0;
+            phase.manaRecovery.set(id,Number.isFinite(prior)&&Number.isFinite(rate)?prior+rate*w:null);
+          }
         }
         if (active.length) igniteTime += w;
         if (ailments.numbed() > 0) {
@@ -917,8 +939,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics, report), ...report.fullDps.blockers];
   if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(missingChannelManaTimes))
     blockers.push(CHANNEL_MANA_TIMES_REQUIRED);
-  if (build.ss14Inputs.theaEvents.numbedEnabled !== 1 && mechanics.some(m => ["thea-numbed-on-hit", "thea-numbed-consume"].includes(m.kind))
-    && report.fullDps.rows.some(r => r.pools?.some(p => p.type === "lightning" && p.max > 0))) blockers.push("선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.");
+  if (missingRevelationNumbedMode(build, mechanics)
+    && report.fullDps.rows.some(r => r.pools?.some(p => p.type === 'lightning' && p.max > 0))) blockers.push(REVELATION_NUMBED_REQUIRED);
   if (report.componentProjection.rows.some(r => r.elixirState && r.elixirState.scale === "")) blockers.push("영약의 최종 효과 배율을 선택하세요.");
   if (build.ss14Inputs.theaEvents.igniteEnabled === 1 && !Number.isFinite(build.ss14Inputs.dps?.enemy?.fire)) blockers.push("점화·스코치가 적용될 적 화염 저항을 선택하세요.");
   if (report.fullDps.rows.some(r => r.values.heroDps > 0)) blockers.push("히어로 발동의 개별 시점 입력을 확인하세요.");
@@ -984,6 +1006,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const rows = report.fullDps.rows.map(r => {
     const manualUses=supported&&(r.combat||Number.isFinite(r.manualSummonRate))
       ? sum(results.map(run=>run.manualUses.get(r.rowIndex)??0))/results.length : null;
+    const multistrikes=manualUses===null ? 0 : sum(results.map(run=>run.multistrikeUses.get(r.rowIndex)??0))/results.length;
     const usages = results.map(v => v.costs.get(r.rowIndex));
     const canMeasure = supported && usages.every(Boolean);
     const perSecond = type => canMeasure ? sum(usages.map(usage => usage[type])) / results.length / options.seconds : null;
@@ -1031,7 +1054,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     const minionDamageByType=Object.keys(minionTypes).length?minionTypes:undefined;
     return { ...r, damageByType, minionDamageByType, moduleDotDpsByAction, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
       ...(timedNumbedSlots.has(r.rowIndex)&&{numbedOnHit:true}),
-      ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds}}),
+      ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds,
+        ...(multistrikes>0&&{multistrikes})}}),
       ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });
   const dps = supported ? sum(rows.map(r => r.values.dps)) : null;

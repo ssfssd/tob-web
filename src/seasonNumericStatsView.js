@@ -81,6 +81,20 @@ function manaReservationRows(rows) {
         <td>${row.active===false?'—':percent(row.base)}</td><td>${row.blocked?'확인 필요':row.active===false?'꺼짐':percent(row.applied)}</td></tr>`;
     }).join('')}</tbody></table>`;
 }
+function manaByElixirState(phases) {
+  if (!phases?.supported || phases.states.length<2) return '';
+  const formulas=phases.states[0].manaRecovery??[];
+  if (!formulas.length) return '';
+  const rows=phases.states.map(({active,uptime,manaPerSecond,manaRecovery})=>{
+    const names=active.flatMap((on,index)=>on?[safeName(phases.rows[index].name)]:[]);
+    const recovery=new Map(manaRecovery?.map(({id,value})=>[id,value]));
+    return `<tr><th scope="row">${esc(names.join(' · ')||'없음')}</th><td>${number(uptime)}%</td><td>${number(manaPerSecond)}</td>
+      ${formulas.map(({id})=>`<td>${number(recovery.get(id))}</td>`).join('')}</tr>`;
+  }).join('');
+  return `<details data-role="elixir-mana-balance"><summary>영약 상태별 MP 수급</summary><table aria-label="영약 상태별 초당 MP 수급">
+    <thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비중</th><th scope="col">수동 소모</th>
+    ${formulas.map(({label})=>`<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></details>`;
+}
 const signed = v => `${v > 0 ? "+" : ""}${number(v)}`;
 function sourceValue(source, stat) {
   if (stat === "mana-cost-multiplier") return `×${number(source.value / 100)}`;
@@ -118,6 +132,7 @@ export function renderSeasonNumericStats(report) {
   const summaryCritical = assumed ? summaryCalculation?.detail?.critical?.effectiveCriticalChance : summarySkill?.values.criticalChance;
   const averaged = assumed ? assumed.measuredResources : report.theaAverage?.supported;
   const elixirUptime=assumed?assumed.elixirUptime:report.elixirUptime;
+  const elixirPhases=assumed?(assumed.timedElixirPhases??elixirUptime):(report.theaAverage?.elixirPhases??elixirUptime);
   const averagedElixir=elixirUptime?.supported&&elixirUptime.rows.some(r=>r.uptime>0&&r.uptime<100);
   const budget = displayedDps.manualResources;
   const costs=activeRows.flatMap(row=>{
@@ -157,7 +172,7 @@ export function renderSeasonNumericStats(report) {
       ${manaReservationRows(manaReservations)}
       ${mana.reservedManaPercent===null?`<button type="button" data-ss14-action="result-tab" data-tab="conditions">${manaReservations?.some(row=>Number.isInteger(row.supportIndex))?'봉인 조건 확인':'오라 조건 확인'}</button>`:''}
       ${manaBalance(budget, averaged, assumed, otherBudget, c.survival, costs, [...new Set(excluded)],
-        displayedDps.scope==='ss14-thea-joint-combat')}</details>`:''}
+        displayedDps.scope==='ss14-thea-joint-combat')}${manaByElixirState(elixirPhases)}</details>`:''}
     ${renderElixirRestoration(stats.elixirRestoration)}
     <details data-role="numeric-character"><summary>속성·에너지</summary>
     <dl class="native-stat-list">${Object.entries({ strength: "힘", dexterity: "민첩", intelligence: "지혜" }).map(([key, label]) => cell(label,c.values[key],key)).join("")}

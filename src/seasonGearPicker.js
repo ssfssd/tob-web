@@ -248,7 +248,8 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
     const fromMana=old.manualManaPerSecond, toMana=row.manualManaPerSecond;
     const fromLife=old.manualLifePerSecond, toLife=row.manualLifePerSecond;
     const display=value=>Number.isFinite(value)?value.toFixed(2):null;
-    return display(from.count)!==display(to.count)||display(fromMana)!==display(toMana)||display(fromLife)!==display(toLife)
+    return display(from.count)!==display(to.count)||display(from.multistrikes??0)!==display(to.multistrikes??0)
+      ||display(fromMana)!==display(toMana)||display(fromLife)!==display(toLife)
       ? [{index:row.rowIndex,id:row.id,...(old.id!==row.id&&{beforeId:old.id}),from,to,fromMana,toMana,fromLife,toLife}] : [];
   });
   const elixirPhaseChanges=after[metric].rows.flatMap(row=>{

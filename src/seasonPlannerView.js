@@ -403,11 +403,16 @@ function renderSkillLevelStats(entry, growthMultiplier) {
   if (!confirmed)
     return `<section data-role="skill-level-stats" aria-label="레벨별 스킬 수치">${appliedSkillLevel(entry) || `<strong>Lv.${level} 수치 확인 필요</strong>`}</section>`;
   const values = entry?.values ?? {};
+  const restoration=entry?.mechanics?.find(effect=>effect.utility==='restoration');
   const showHit = Number.isFinite(values.averageHit) && (values.averageHit>0 || !entry.damageCapabilities?.dot);
   const stats = [
     ['20레벨 이후 대미지 배율',growthMultiplier,'', '×'],
     ['스킬 자체 평균 적중',showHit?values.averageHit:null],
     Number.isFinite(values.dotDps)?['스킬 자체 지속 DPS',values.dotDps]:['스킬 자체 DPS',showHit?null:values.baseDps],
+    ...(restoration?[
+      ['기본 HP 회복',restoration.lifePercent,`% (최대 HP 기준, ${restoration.lifeDuration}초)`],
+      ['기본 MP 회복',restoration.mana,` (${restoration.manaDuration}초)`],
+    ]:[]),
     ['기본 MP 소모',values.manaCost], ['기본 시전 시간',values.castTime,'초'], ['기본 쿨타임',values.cooldown,'초'],
   ].filter(([, value])=>Number.isFinite(value));
   const number = value => value.toLocaleString('ko-KR',{maximumFractionDigits:3});
