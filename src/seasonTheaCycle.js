@@ -38,6 +38,7 @@ export function simulateTheaCycle({ seconds, warmup = 0, caps = { Focus: 4, Agil
   const snapshot = () => ({ stacks: { ...stacks }, caps: { ...caps }, boons: boons.map(b => ({ consumed: b.consumed, atMax: 1 })),
     events: { ...runtime.state(time), ...(combat?.state(time, stacks, runtime.state(time)) ?? {}) } });
   let activeTime = 0; let doubleTime = 0;
+  if (combat?.next(0) === 0) combat.apply(0, { stacks, caps, expires, runtime, snapshot, stateBoundary: false });
   while (time < end) {
     const stateTimes = [nextGrant, runtime.next(time), ...Object.values(expires), ...boons.map(b => b.expires),
       stacks.Focus === caps.Focus && ready > time ? ready : Infinity];

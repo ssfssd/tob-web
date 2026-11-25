@@ -57,7 +57,7 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
     ${skillCosts}${excluded.length?`<p class="native-stat-note">시전 소모 미집계 · ${excluded.map(name=>esc(name)).join(' · ')}</p>`:''}
     ${budget.shareOverflow?`<p>시전 배분 ${number(budget.shareOverflow)}% / 최대 100%</p><button type="button" data-ss14-action="result-tab" data-tab="conditions" data-focus-role="cast-share-allocation">시전 배분 확인</button>`:''}
     ${unknown.length?`<p class="native-stat-note">스킬 ${unknown.map(row=>row+1).join('·')}의 비용 또는 시전 횟수를 확인하세요.</p>`:''}
-    ${channels.map(({rowIndex,rate,max,valid,variable})=>valid?'':Number.isFinite(rate)&&Number.isFinite(max)&&rate<=max&&variable
+    ${channels.map(({rowIndex,rate,max,valid,variable})=>valid?'':variable
       ? `<p class="native-stat-note">스킬 ${rowIndex+1}의 비용이 전투 중 바뀌어 평균 차감 횟수로는 소모량을 확정할 수 없습니다.${timedCombat?' '+editChannel(rowIndex,true):''}</p>`
       : `<p class="native-stat-note">${rate===null?'채널링 비용 차감 횟수가 비어 있습니다.':Number.isFinite(max)?`채널링 비용 차감은 최대 ${number(max)}회/초입니다.`:'채널링 비용 차감의 상한을 확인할 수 없습니다.'} ${editChannel(rowIndex,false)}${timedCombat?' '+editChannel(rowIndex,true):''}</p>`).join('')}
     ${inputObserved?table([{...inputObserved,label:'입력 조건 · 관측 자연 회복'}],true):''}

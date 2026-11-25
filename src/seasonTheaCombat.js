@@ -2,7 +2,8 @@ import { SS14_THEA_COMBAT as rules } from "./data/ss14TheaCombat.generated.js";
 import { bindTheaState } from "./seasonTheaState.js";
 import { SS14_EXTENSION_NATIVE } from "./data/ss14ExtensionNative.generated.js";
 import { createOmenAccumulator } from "./seasonOmen.js";
-import { combatNumbedEnabled, hasTheaNativeDot, theaCombatInputBlockers, theaCombatInputValues, usesTheaDotTrigger } from "./seasonTheaCombatInputs.js";
+import { combatNumbedEnabled, hasTheaNativeDot, theaCombatInputBlockers, theaCombatInputValues, usesTheaDotTrigger,
+  NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED } from "./seasonTheaCombatInputs.js";
 import { netherSum, netherMore, SEASON_SKILL_AILMENT_TAGS } from './seasonNetherRemaining.js';
 import { netherDeterioration } from './seasonNetherDps.js';
 import { manualResourceBalance } from './seasonDps.js';
@@ -10,6 +11,8 @@ import { isSeasonTargetDamageTaken, validSeasonGearEffects } from './seasonGearE
 import { isNumbedBaseOverride } from './seasonNetherModifiers.js';
 
 const eps = 1e-8;
+const missingChannelManaTimes = row => row.channelCost && !row.channelCost.times && row.channelCost.rate !== 0 && row.manaPerUse > 0;
+const CHANNEL_MANA_TIMES_REQUIRED = '채널링의 MP 차감 시각을 확인할 수 없습니다. 초당 MP 소모율을 입력하세요.';
 const damageKeys = ["manualDps", "spellBurstDps", "repeatDps", "heroDps", "netherDps", "specialDps", "omenDps", "playerDeteriorationDps", "dotDps", "permafrostDps", "reapingDps", "igniteReapingDps", "minionDps", "minionDeteriorationDps", "igniteDps", "scorchDps", "dps"];
 // These are portions of existing damage totals and are never added to DPS.
 const contributionKeys = ["numbedHitDps", "numbedDotDps", "numbedReapingDps", "numbedMinionDps", "minionHitDps", "moduleIgniteDps"];
@@ -195,6 +198,18 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const dotBoundaries = [...new Set([...dotWindows.values()].flat(2))].sort((a,b)=>a-b);
   const dotWindowAt = (row,time) => dotWindows.get(row.rowIndex)?.find(([start,stop])=>time>=start && time<stop);
   const dotInEffect = (row,time) => !dotWindows.has(row.rowIndex) || Boolean(dotWindowAt(row,time));
+  const partialDotRows = new Set(report.fullDps.rows.filter(row => {
+    const uptime = config[row.rowIndex]?.dotUptime;
+    return row.combat?.hasDot && !dotWindows.has(row.rowIndex) && uptime > 0 && uptime < 100;
+  }).map(row => row.rowIndex));
+  const partialLightningDotRows = report.fullDps.rows.filter(row => {
+    return partialDotRows.has(row.rowIndex) && row.combat?.persistentByType?.lightning > 0;
+  }).map(row => row.rowIndex);
+  const startingDotDps = new Map();
+  const variableDotRows = new Set();
+  const blessingDotRows = new Set();
+  let firstMeasuredNumbedEffect;
+  let variableNumbed = false;
   const frostRows = new Set(report.fullDps.rows.filter(row=>row.combat?.frostSource && row.dotWindows?.length).map(row=>row.rowIndex));
   const frostSources = new Map();
   const reapingReadyAt = new Map();
@@ -318,7 +333,9 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     const separatelyObserved = !channelCharge && row?.channelCost?.times;
     if (manaTrigger) {
       const manaSpent = !channelCharge && (separatelyObserved || row?.channelCost?.rate === 0) ? 0 : row?.manaPerUse;
-      if (!Number.isFinite(manaSpent) || !channelCharge && manaSpent > 0 && row.combat?.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
+      if (!channelCharge && row && missingChannelManaTimes(row))
+        blockers.add(CHANNEL_MANA_TIMES_REQUIRED);
+      else if (!Number.isFinite(manaSpent) || !channelCharge && manaSpent > 0 && row.combat?.tags.some(tag => ['Channeled', 'Channel'].includes(tag)))
         blockers.add('스킬 시전 비용을 확인하거나 초당 MP 소모율을 입력하세요.');
       else {
         eventCasts++;
@@ -588,6 +605,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   }
   return {
     blockers, counts, measuredCounts, manualUses, rows, costs, channelCosts, manaRecovery, playerNumbedDuration, reapedNativeRows, elixirPhases,
+    get missingDotWindows() {
+      const numbed = variableNumbed ? partialLightningDotRows.filter(index => !blessingDotRows.has(index)) : [];
+      const variable = [...variableDotRows].filter(index => !blessingDotRows.has(index) && !numbed.includes(index));
+      return {
+        ...(blessingDotRows.size && { [BLESSING_DOT_WINDOW_REQUIRED]: [...blessingDotRows].sort((a,b)=>a-b) }),
+        ...(numbed.length && { [NUMBED_DOT_WINDOW_REQUIRED]: numbed }),
+        ...(variable.length && { [VARIABLE_DOT_WINDOW_REQUIRED]: variable }),
+      };
+    },
     get hasProjectileTie() { return hasProjectileTie; },
     get hasFissureTie() { return hasFissureTie; },
     result() { return { numbedAverage: numbedArea / seconds, numbedEffectAverage: numbedEffectArea / seconds, scorchUptime: 100 * scorchArea / seconds,
@@ -608,6 +634,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const ailmentState=values();
       const r = getReport({ ...state, events: { ...state.events, ...ailmentState } });
       if (!r.fullDps.supported) r.fullDps.blockers.forEach(s => blockers.add(s));
+      if (manaTrigger && r.fullDps.rows.some(missingChannelManaTimes)) blockers.add(CHANNEL_MANA_TIMES_REQUIRED);
       const delta = to - from, active = activeIgnites();
       for (const row of r.fullDps.rows) {
         if (!frostRows.has(row.rowIndex)) continue;
@@ -637,6 +664,11 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const ignite = active.length ? igniteTarget(r,active) : null;
       const lo = Math.max(0, warmup - from), hi = Math.min(delta, warmup + seconds - from), w = Math.max(0, hi - lo);
       if (w) {
+        if (partialLightningDotRows.length) {
+          // Uptime alone cannot place lightning damage relative to changing Numbed stacks.
+          firstMeasuredNumbedEffect ??= ailmentState.numbedEffect;
+          variableNumbed ||= Math.abs(ailmentState.numbedEffect - firstMeasuredNumbedEffect) > eps;
+        }
         const phase=phaseAt(from);
         if (phase) {
           phase.seconds+=w;
@@ -667,6 +699,13 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           recordTypes(effect.row,{fire:amount},1);
         }
         for (const row of native) {
+          if (partialDotRows.has(row.rowIndex)) {
+            const baseDotDps = row.combat.dotWithoutAffliction - (row.combat.numbedDotWithoutAffliction ?? 0);
+            const initial = startingDotDps.get(row.rowIndex);
+            if (initial === undefined) startingDotDps.set(row.rowIndex, baseDotDps);
+            else if (Math.abs(baseDotDps - initial) > eps * Math.max(1, Math.abs(initial), Math.abs(baseDotDps)))
+              variableDotRows.add(row.rowIndex);
+          }
           const weight = w + integral(lo, hi) / 100 * row.combat.afflictionEffect;
           accumulateDamage(row.rowIndex,'dotDps',row.combat.dotWithoutAffliction*weight,phase);
           rows.get(row.rowIndex).numbedDotDps += (row.combat.numbedDotWithoutAffliction ?? 0) * weight;
@@ -817,11 +856,13 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       if (nextDotTrigger <= time + eps) {
         const burning = activeIgnites().some(effect => effect.damage > 0);
         const numbed = ailments.numbed() > 0;
-        const activeDot = !burning && nativeDot && (!dotWindows.size || getReport(ctx.snapshot()).fullDps.rows
-          .some(row=>(row.combat?.dotWithoutAffliction>0 || row.combat?.frostWithoutAffliction>0) && dotInEffect(row,time)));
-        if (nextDotTrigger < end - eps && (burning || activeDot)) {
-          runTriggers("hitRate", time, ctx, e => (e.requiresIgnite || e.requiresNumbed)
-            && (!e.requiresIgnite || burning) && (!e.requiresNumbed || numbed));
+        const eligible = e => (e.requiresIgnite || e.requiresNumbed)
+          && (!e.requiresIgnite || burning) && (!e.requiresNumbed || numbed);
+        if (nextDotTrigger < end - eps && linked.some(e=>e.inputKey==='hitRate'&&eligible(e))) {
+          const native = !burning && nativeDot ? getReport(ctx.snapshot()).fullDps.rows
+            .filter(row=>(row.combat?.dotWithoutAffliction>0 || row.combat?.frostWithoutAffliction>0) && dotInEffect(row,time)) : [];
+          if (burning || native.some(row=>!partialDotRows.has(row.rowIndex))) runTriggers("hitRate", time, ctx, eligible);
+          else for (const row of native) blessingDotRows.add(row.rowIndex);
         }
         nextDotTrigger = nativeDot || burning ? dotTriggerStart + ++dotTriggerOccurrence / dotRate : Infinity;
       }
@@ -851,8 +892,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
 export function calculateTheaCombatAverage(build, report, calculateState, simulate, options, priorBlockers) {
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const blockers = [...priorBlockers, ...theaCombatInputBlockers(build, mechanics, report), ...report.fullDps.blockers];
-  if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(row => row.channelCost && !row.channelCost.times && row.channelCost.rate !== 0 && row.manaPerUse > 0))
-    blockers.push('채널링의 MP 차감 시각을 확인할 수 없습니다. 초당 MP 소모율을 입력하세요.');
+  if (mechanics.some(m => m.kind === 'thea-mana-spend') && report.fullDps.rows.some(missingChannelManaTimes))
+    blockers.push(CHANNEL_MANA_TIMES_REQUIRED);
   if (build.ss14Inputs.theaEvents.numbedEnabled !== 1 && mechanics.some(m => ["thea-numbed-on-hit", "thea-numbed-consume"].includes(m.kind))
     && report.fullDps.rows.some(r => r.pools?.some(p => p.type === "lightning" && p.max > 0))) blockers.push("선택한 계시가 번개 대미지로 마취를 부여합니다. 마취 계산을 켜고 대상 조건을 입력하세요.");
   if (report.componentProjection.rows.some(r => r.elixirState && r.elixirState.scale === "")) blockers.push("영약의 최종 효과 배율을 선택하세요.");
@@ -889,17 +930,25 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   let anyProjectileTie = false;
   let anyFissureTie = false;
   let alternateAvailable = true;
+  let missingDotWindows;
   if (!blockers.length) for (let i = 0; i < 128; i++) {
     const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, observeElixirPhase });
     const simulation = simulate({ ...options, seed: 127 + i * 104729, combat });
     if (combat.blockers.size) { blockers.push(...combat.blockers); break; }
+    const missingWindows = combat.missingDotWindows;
+    const windowReasons = Object.keys(missingWindows);
+    if (windowReasons.length) {
+      missingDotWindows = missingWindows;
+      blockers.push(...windowReasons);
+      break;
+    }
     const baselineTotal = finishCombatRows(combat, options.seconds);
     if (combat.hasProjectileTie || combat.hasFissureTie) {
       anyProjectileTie ||= combat.hasProjectileTie;
       anyFissureTie ||= combat.hasFissureTie;
       const alternate = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, newCastFirst: true });
       simulate({ ...options, seed: 127 + i * 104729, combat: alternate });
-      if (alternate.blockers.size) alternateAvailable = false;
+      if (alternate.blockers.size || Object.keys(alternate.missingDotWindows).length) alternateAvailable = false;
       alternateTotals.push(finishCombatRows(alternate, options.seconds));
     } else alternateTotals.push(baselineTotal);
     results.push(combat); simulations.push(simulation);
@@ -921,9 +970,12 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       const max = sum(samples.map(s => s.possibleCharges)) / results.length / options.seconds;
       const variable = samples.some(s => s.variable || s.mana !== first.mana || s.life !== first.life);
       const valid = rate !== null && rate <= max + eps && (rate === 0 || first.mana !== null && !variable);
-      channelUsage = {channelCost: {rate,max,valid,variable,observed: true},
-        manualManaPerSecond: valid ? first.mana * rate : null,
-        manualLifePerSecond: valid ? first.life * rate : null};
+      // No charge count is needed when every measured state has zero cost.
+      channelUsage = !variable && first.mana === 0 && first.life === 0
+        ? {channelCost:undefined,manualManaPerSecond:0,manualLifePerSecond:0}
+        : {channelCost: {rate,max,valid,variable,observed: true},
+          manualManaPerSecond: valid ? first.mana * rate : null,
+          manualLifePerSecond: valid ? first.life * rate : null};
     }
     const values = { ...r.values, ...Object.fromEntries(recordedKeys.map(key => [key, supported ? sum(results.map(v => v.rows.get(r.rowIndex)[key])) / 128 : null])) };
     const activeWindowSeconds = r.dotWindows?.reduce((n,[start,stop])=>
@@ -998,6 +1050,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     extraBlessings: averageBlessings('eventTotals'), measuredBlessings: averageBlessings('measuredEventTotals'),
     blockers: [...new Set(blockers)], receipt: rules.receiptSha256 };
   report.fullDps = { ...report.fullDps, supported, rows, dps, scope: "ss14-thea-joint-combat", blockers: [...new Set(blockers)],
+    ...(missingDotWindows && { dotWindowIssues: { ...report.fullDps.dotWindowIssues, ...missingDotWindows } }),
     manualResources,
     receipts: [...report.fullDps.receipts, ...Object.values(rules.pages)],
     limitation: "입력한 시전 간격으로 축복 소모·매직 버스트·연속 공격·점화·스코치·마취를 같은 시간표에서 128회 계산합니다. 점화는 높은 대미지 중첩부터 적용하며, 마취는 각 중첩의 만료와 번개 명중 임계값을 계산합니다. 표준오차는 모의 계산 평균의 안정성 지표이며 실전 오차 범위가 아닙니다. 아래 속성·크리티컬 상세는 전투 시작 상태입니다." };

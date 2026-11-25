@@ -4,6 +4,7 @@ import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
 import { seasonSupportKoreanCard } from './seasonSupport.js';
 import { SEASON_DAMAGE_TYPE_LABELS } from './seasonDps.js';
+import { WEAPON_PHYSICAL_BASE_UNVERIFIED } from './seasonWeaponProfile.js';
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
@@ -160,7 +161,12 @@ export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,
   const line=(label,a,b)=>`<li>${label} · ${fmt(a)} → ${fmt(b)} (${signed(b-a)})</li>`;
   const contributions=p.options.map(describeSeasonOptionChange).filter(Boolean).map(change=>`<li>${esc(change)}</li>`).join('');
   const {supported,baseValue,value,reasons,encounterMatches}=p.comparison;
-  const blocked=!supported&&reasons.length?`<details><summary>${encounterMatches===false?'전투 조건 변경':'전체 DPS 비교 보류'}</summary><ul>${comparisonReasons(reasons,esc)}</ul></details>`:'';
+  const missingWeaponBase=!supported&&!p.assumedComparison?.supported&&p.weaponComparisons?.length
+    && reasons.includes('현재: '+WEAPON_PHYSICAL_BASE_UNVERIFIED);
+  const isWeaponBaseReason=reason=>reason.replace(/^(?:기준|현재): /u,'')===WEAPON_PHYSICAL_BASE_UNVERIFIED;
+  const otherReasons=missingWeaponBase?reasons.filter(reason=>!isWeaponBaseReason(reason)):reasons;
+  const weaponBlocker=missingWeaponBase?`<p data-role="weapon-dps-blocker">${esc(WEAPON_PHYSICAL_BASE_UNVERIFIED)}</p>`:'';
+  const blocked=!supported&&otherReasons.length?`<details><summary>${encounterMatches===false?'전투 조건 변경':'전체 DPS 비교 보류'}</summary><ul>${comparisonReasons(otherReasons,esc)}</ul></details>`:'';
   const {baseValue:assumedBefore,value:assumedAfter,supported:assumedSupported}=p.assumedComparison??{};
   const repeated=supported && Number.isFinite(assumedBefore) && Number.isFinite(assumedAfter)
     && fmt(baseValue)===fmt(assumedBefore) && fmt(value)===fmt(assumedAfter)
@@ -172,7 +178,7 @@ export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,
   const resources=renderResourceChanges(p,esc,{skill:showResourcesInline});
   const changes=`${showDps?'':table}${renderDamageBreakdown(p,esc)}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${contributions?'<h4>옵션</h4><ul>'+contributions+'</ul>':''}${showResourcesInline?'':resources}${extraDetails}`;
   const details=changes?`<details><summary>변경 수치</summary>${changes}${showDps?'':blocked}</details>`:blocked;
-  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${showDps?table:''}${renderWeaponComparisons(p.weaponComparisons)}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
+  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${weaponBlocker}${showDps?table:''}${renderWeaponComparisons(p.weaponComparisons)}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
   return body?`<section aria-label="장착 전 수치 비교">${body}</section>`:'';
 }
 export function shelfTools(kind,index,filled,button,candidate=false){

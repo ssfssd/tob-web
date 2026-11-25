@@ -74,7 +74,7 @@ for (const [type, label] of Object.entries(addedDamageLabels)) for (const side o
 SEASON_STAT_LABELS.minion_skill_levels='소환체 소환 스킬 레벨';
 Object.assign(SEASON_STAT_LABELS,{main_skill_levels:'메인 스킬 레벨',active_skill_levels:'액티브 스킬 레벨',passive_skill_levels:'패시브 스킬 레벨',
   spell_skill_levels:'주술 스킬 레벨',attack_skill_levels:'공격 스킬 레벨',beam_skill_levels:'빔 스킬 레벨',mobility_skill_levels:'이동 스킬 레벨',
-  defensive_skill_levels:'방어 스킬 레벨',attack_projectile_skill_levels:'공격 투사체 스킬 레벨'});
+  defensive_skill_levels:'방어 스킬 레벨',melee_skill_levels:'근접 스킬 레벨',attack_projectile_skill_levels:'공격 투사체 스킬 레벨'});
 SEASON_STAT_LABELS.spirit_magus_origin_effect='마령의 근원 효과';
 Object.assign(SEASON_STAT_LABELS,{curse_effect:'저주 효과',max_curses:'동시 저주 상한'});
 for(const [type,label] of Object.entries(addedDamageLabels))SEASON_STAT_LABELS[`enemy_${type}_damage_taken`]=`적이 받는 ${label} 대미지`;

@@ -659,7 +659,7 @@ function renderSkillResourceCosts(row, averaged, timedCombat) {
   const channelDetails=needsRate
     ? `<p>${channel.variable?'상태마다 차감 비용이 달라 평균 횟수만으로는 초당 소모를 확정할 수 없습니다.'
       : Number.isFinite(channel.max)?`관측한 초당 차감 횟수를 입력하세요. 현재 상한은 ${number(channel.max)}회/초입니다.`:'차감 횟수의 상한을 확인할 수 없습니다.'}</p>`
-      +button('차감 횟수 입력','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostRate"`):'';
+      +(channel.variable&&timedCombat?'':button('차감 횟수 입력','result-tab',`data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostRate"`)):'';
   const timesEdit = channel && timedCombat ? button('차감 시각 편집','result-tab',
     `data-tab="conditions" data-field="dps-input" data-field-key="${row.rowIndex}:channelCostTimes"`) : '';
   const total = [row.manualManaPerSecond,row.manualLifePerSecond]

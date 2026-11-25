@@ -11,7 +11,7 @@ export const SEASON_SPELL_FLAT_STATS = new Set(["physical", "fire", "cold", "lig
   ["min", "max"].map(side => `spell_${type}_damage_${side}`)));
 export const SEASON_GLOBAL_FLAT_STATS = new Set([...SEASON_SPELL_FLAT_STATS,...[...SEASON_SPELL_FLAT_STATS].map(s=>s.replace(/^spell_/u,'attack_'))]);
 export const SEASON_GEAR_LEVEL_STATS = new Set(['all_skill_levels', 'support_skill_levels', 'main_skill_levels', 'active_skill_levels', 'passive_skill_levels',
-  'spell_projectile_skill_levels', 'attack_projectile_skill_levels', 'horizontal_projectile_skill_levels', ...['physical','cold','fire','lightning','erosion','minion','spell','attack','beam','mobility','defensive','projectile','aura','curse','restoration','empower','focus'].map(t=>`${t}_skill_levels`)]);
+  'spell_projectile_skill_levels', 'attack_projectile_skill_levels', 'horizontal_projectile_skill_levels', ...['physical','cold','fire','lightning','erosion','minion','spell','attack','melee','beam','mobility','defensive','projectile','aura','curse','restoration','empower','focus'].map(t=>`${t}_skill_levels`)]);
 const conversionTypes = ['physical', 'lightning', 'cold', 'fire', 'erosion'];
 const outgoingConversions = new Map(conversionTypes.flatMap((source, index) =>
   conversionTypes.slice(index + 1).map(target => [`${source}_damage_to_${target}_damage`, {

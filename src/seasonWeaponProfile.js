@@ -10,6 +10,7 @@ import { parseSeasonComponentLines } from './seasonComponents.js';
 
 const finite = Number.isFinite;
 const intrinsic = e => e.operation === 'set' && /^(?:[\d.]+ - [\d.]+ Physical Damage|[\d.]+ Critical Strike Rating|[\d.]+ Attack Speed)$/u.test(e.sourceText);
+export const WEAPON_PHYSICAL_BASE_UNVERIFIED = '선택 무기의 SS14 기본 물리 대미지가 확인되지 않아 공격 DPS를 계산할 수 없습니다.';
 
 // Derived on every calculation, never persisted over the original or over the
 // user's encounter inputs. Old manual-only documents keep their existing path.
@@ -78,9 +79,12 @@ export function seasonWeaponProfile(build, slotIndex = 0, { individual = false }
   const damage = (type, side) => {
     const stat = `gear_${type}_damage_${side}`;
     const bases = local.filter(e => e.stat === stat && e.operation === 'set');
+    if (type === 'physical' && !bases.length) {
+      result.blockers.push(WEAPON_PHYSICAL_BASE_UNVERIFIED); return null;
+    }
     const flat = local.filter(e => e.stat === stat && e.operation === 'add');
     const modifiers = local.filter(e => e.stat === `gear_${type}_damage` || ['fire', 'cold', 'lightning'].includes(type) && e.stat === 'gear_elemental_damage');
-    if ((type === 'physical' ? bases.length !== 1 : bases.length > 1) || local.some(e => e.stat === stat && !['set', 'add'].includes(e.operation))
+    if (bases.length > 1 || local.some(e => e.stat === stat && !['set', 'add'].includes(e.operation))
       || modifiers.some(e => !['add_percent', 'more', 'more_percent'].includes(e.operation))) {
       result.blockers.push('무기 기본 대미지 또는 자체 보정 연산을 확인할 수 없습니다.'); return null;
     }
@@ -93,9 +97,11 @@ export function seasonWeaponProfile(build, slotIndex = 0, { individual = false }
   result.values = { weaponSpeed: speed?.value ?? null,
     baseCriticalRating: scalar('weapon_critical_strike_rating', 'gear_attack_critical_strike_rating', '크리티컬 수치', 100000)?.value ?? null };
   for (const type of ['physical', 'fire', 'cold', 'lightning', 'erosion']) for (const side of ['Min', 'Max']) result.values[`weapon${type}${side}`] = damage(type, side.toLowerCase());
-  if (result.values.weaponSpeed === 0 || ['physical', 'fire', 'cold', 'lightning', 'erosion'].some(type =>
-    result.values[`weapon${type}Min`] > result.values[`weapon${type}Max`]
-    || ['Min', 'Max'].some(side => { const value = result.values[`weapon${type}${side}`]; return !finite(value) || value < 0 || value > 1e9; })))
+  if (result.values.weaponSpeed === 0 || ['physical', 'fire', 'cold', 'lightning', 'erosion'].some(type => {
+    const min = result.values[`weapon${type}Min`], max = result.values[`weapon${type}Max`];
+    return min > max && min !== null && max !== null
+      || [min, max].some(value => value !== null && (!finite(value) || value < 0 || value > 1e9));
+  }))
     result.blockers.push('무기 대미지·공격 속도의 유효 범위를 확인하세요.');
   if (slotIndex === 0 && slots[1]?.itemId) {
     const offhand = findItemById(slots[1].itemId);

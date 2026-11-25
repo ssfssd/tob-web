@@ -149,8 +149,8 @@ export const SEASON_DPS_SKILL_FIELDS = {
   reapingTimes: { label: "대상 수확 성공 시각 (초)", times: true,
     hint: "준비 시간부터 센 시각을 입력하세요. 수확에 성공한 적이 없으면 ‘없음’을 입력하세요." },
   channelCostRate: { label: "채널링 비용 차감 횟수 (초당)", min: 0, max: 30 },
-  channelCostTimes: { label: "채널링 비용 차감 시각 (초)", times: true,
-    hint: "준비 시작을 0초로 두고 실제 차감 시각을 쉼표로 입력하세요. 입력하면 초당 횟수 대신 사용합니다. 차감이 없으면 ‘없음’을 입력하세요." },
+  channelCostTimes: { label: "채널링 비용 차감 시각 (초)", times: true, allowZero: true,
+    hint: "준비 시작 순간의 차감은 0으로 입력하세요. 시각을 쉼표로 구분하면 초당 횟수 대신 사용합니다. 차감이 없으면 ‘없음’을 입력하세요." },
   reapingOverlap: { label: "수확 시 이 지속 대미지 적용 비율 (%)", min: 0, max: 100 },
   dotWindows: { label: "지속 대미지 적용 구간 (초)", windows: true,
     hint: "준비 시간부터 센 구간을 0-2, 4-6처럼 입력하세요. 적용 구간이 없으면 ‘없음’을 입력하세요." },
@@ -305,17 +305,17 @@ export function seasonDotWindowTrim(build, bound) {
   const value=remaining.join(', ')||'없음';
   return dotWindowRanges(value) ? {kind:'dps-input',key,value} : null;
 }
-function observedTimeList(value) {
+function observedTimeList(value, allowZero = false) {
   if (typeof value !== 'string' || value.length > 4096) return null;
   if (value.trim() === '없음') return [];
   const entries = value.split(',');
   if (entries.length > 100 || entries.some(entry => !/^\s*\d+(?:\.\d{1,3})?\s*$/u.test(entry))) return null;
   const times = entries.map(Number);
-  if (times.some(time => time <= 0 || time >= 3600) || new Set(times).size !== times.length) return null;
+  if (times.some(time => time < 0 || (!allowZero && time === 0) || time >= 3600) || new Set(times).size !== times.length) return null;
   return times.sort((a,b)=>a-b);
 }
 const timedFissure = build => theaCombatEnabled(build) && build?.ss14Inputs?.theaCycle?.mode === 'automatic';
-const validValue = (field, value) => field && (field.windows ? !!dotWindowRanges(value) : field.times ? !!observedTimeList(value)
+const validValue = (field, value) => field && (field.windows ? !!dotWindowRanges(value) : field.times ? !!observedTimeList(value, field.allowZero)
   : typeof value === "number" && finite(value) && value >= field.min && value <= field.max && (!field.integer || Number.isInteger(value)) && (!field.choices || field.choices.some(([v]) => v === value)));
 export function seasonDpsSkillFieldKeys(entry, id, build) {
   const slots = build?.skills?.active;
@@ -452,7 +452,7 @@ export function editSeasonDpsInput(target, key, value) {
   if (!periodicBurst) {
     if (value === "") delete binding[field];
     else if (definition.windows) binding[field] = dotWindowRanges(value).map(range=>range.join('-')).join(', ') || '없음';
-    else if (definition.times) binding[field] = observedTimeList(value).join(', ') || '없음';
+    else if (definition.times) binding[field] = observedTimeList(value, definition.allowZero).join(', ') || '없음';
     else binding[field] = value;
   }
   inputs.dpsRuleReceipts = seasonDpsRulePins();
@@ -1283,7 +1283,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     reasons.push(...nether.blockers);
     const cost=core||!castCostVerified ? null : manualSkillCost(build,report,entry,direct.rowIndex,tags,effects);
     const channeled=tags.includes("Channeled")||tags.includes("Channel");
-    const chargeTimes = channeled && timed ? observedTimeList(b?.channelCostTimes) : null;
+    const chargeTimes = channeled && timed ? observedTimeList(b?.channelCostTimes, SEASON_DPS_SKILL_FIELDS.channelCostTimes.allowZero) : null;
     const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0 || chargeTimes?.length>0;
     if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
     else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
@@ -1293,7 +1293,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     if (chargeTimes?.some(time=>time>=cycle.warmup+cycle.seconds-1e-8))
       reasons.push(`${SEASON_DPS_SKILL_FIELDS.channelCostTimes.label}은 측정 종료 전이어야 합니다.`);
     const channelCost=channeled && (combat || build.ss14Inputs?.theaCycle?.mode !== "automatic")
-      && cost && !cost.reason && (chargeTimes || (cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0)
+      && cost && !cost.reason && (chargeTimes || (timed || cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0)
       ? {rate:measuredChargeRate??b?.channelCostRate??null,max:possibleManualRate,
         ...(chargeTimes && {times:chargeTimes}),
         valid:!!chargeTimes || validValue(SEASON_DPS_SKILL_FIELDS.channelCostRate,b?.channelCostRate) && b.channelCostRate<=possibleManualRate+1e-8}

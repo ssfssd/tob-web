@@ -299,7 +299,7 @@ const STAT_ENTRIES = Object.freeze([
   statEntry("max summonable synthetic troops", "max_summonable_synthetic_troops", "count"),
   statEntry("ignite limit", "ignite_limit", "count"),
   statEntry("fire skill level", "fire_skill_level", "level"),
-  ...['attack','physical','cold','erosion','aura','curse','restoration','spell projectile'].map(type=>
+  ...['attack','physical','cold','erosion','aura','curse','restoration','melee','spell projectile'].map(type=>
     statEntry(`${type} skill level`,`${type.replaceAll(' ','_')}_skill_level`,'level')),
   statEntry("lightning skill level", "lightning_skill_level", "level"),
   statEntry("active skill level", "active_skill_level", "level"),

@@ -8,6 +8,7 @@ import { THEA_SS14_ID } from './seasonHeroSelection.js';
 import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing, SEAL_CONVERSION_UNRESOLVED } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
+import { NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED } from './seasonTheaCombatInputs.js';
 const customOptions={ id:'custom', label:'사용자 옵션', section:'combat', role:'custom-options', pattern:/사용자 옵션 \d+/u };
 const routes = [
   customOptions,
@@ -169,7 +170,8 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     return (dps?.reapingOverlapOverflow??[]).map(i=>({
       section:'combat',label:`스킬 ${i+1} 수확 겹침 입력`,edit:'dps-input',key:`${i}:reapingOverlap`,
     }));
-  if(/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은|^심화가 변하는 전투에서는 지속 대미지 적용 구간/u.test(reason)) {
+  if([NUMBED_DOT_WINDOW_REQUIRED,VARIABLE_DOT_WINDOW_REQUIRED,BLESSING_DOT_WINDOW_REQUIRED].includes(reason)
+    ||/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은|^심화가 변하는 전투에서는 지속 대미지 적용 구간/u.test(reason)) {
     if(reason.includes('적용 구간')) {
       const affected=dps?.dotWindowIssues?.[reason]??[];
       const routed=new Set();
