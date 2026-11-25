@@ -1306,7 +1306,10 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const cost=core||!castCostVerified ? null : manualSkillCost(build,report,entry,direct.rowIndex,tags,effects);
     const channeled=tags.includes("Channeled")||tags.includes("Channel");
     const chargeTimes = channeled && timed ? observedTimeList(b?.channelCostTimes, SEASON_DPS_SKILL_FIELDS.channelCostTimes.allowZero) : null;
-    const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0 || chargeTimes?.length>0;
+    // A measured DoT window can outlast the cast that started it. With an
+    // explicit payment schedule, only casts and charges in the timeline cost resources.
+    const observedDotWithoutCast=timed&&manualRate===0&&dotWindows&&(!channeled||chargeTimes);
+    const requiresManualUse=manualRate>0 || hasDot&&dotUptime>0&&b?.useShare>0&&!observedDotWithoutCast || chargeTimes?.length>0;
     if (requiresManualUse) reasons.push(...manualCastCostIssues(report,cost,skillName));
     else if (b?.useShare>0&&cost?.reason) reasons.push(cost.reason);
     if (chargeTimes?.length && !cost) reasons.push(`${skillName} 채널링 차감에 적용할 시전 비용을 확인하세요.`);

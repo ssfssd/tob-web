@@ -534,8 +534,8 @@ export function renderWeaponDamageRoutes(hands,index) {
     `<h4>${slotIndex===0?'메인 무기':'서브 무기'}</h4>${body||'<p>적용된 전환·추가 획득 없음</p>'}`).join(''),
     `weapon-damage-routes-${index}`);
 }
-function damageRouteAmountChanges(before,after) {
-  if (!before?.length || !after?.length) return null;
+function damageRouteAmountChanges(before,after,perWeapon=false) {
+  if (!before || !after || !perWeapon && (!before.length || !after.length)) return null;
   const identity=({stage,sourceType,targetType,actionName,effectSource})=>
     JSON.stringify([stage,sourceType,targetType,actionName,effectSource]);
   const older=new Map(before.map(edge=>[identity(edge),edge]));
@@ -560,7 +560,7 @@ function damageRouteAmountChanges(before,after) {
   });
   if (rows.some(row=>!row)) return null;
   const changes=rows.filter(row=>row.a!==row.b);
-  return changes.some(row=>row.matched)?changes:null;
+  return perWeapon||changes.some(row=>row.matched)?changes:null;
 }
 export function renderDamageRouteChanges(rows,{before='장착 전',after='장착 후',role='damage-route-changes'}={}) {
   if(!rows?.length)return '';
@@ -571,13 +571,21 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
     const card=SS14_CARDS.records[id];
     return card?.season==='SS14'&&card.koreanTextVerified?card.name:'한국어 이름 미제공';
   };
+  const table=(amounts, caption)=>`<table class="slot-dps-table" data-role="damage-route-amount-changes"><caption>${caption}</caption>
+    <thead><tr><th scope="col">전환·획득</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead>
+    <tbody>${amounts.map(({label,source,a,b})=>`<tr><th scope="row">${esc(label)}${source?`<small>${esc(source)}</small>`:''}</th><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')}</tbody></table>`;
   return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,beforeId,previous,current,previousStates,currentStates,previousHands,currentHands})=>{
     const skill=beforeId!==undefined?`${name(beforeId)} → ${name(id)}`:name(id);
+    if(beforeId===undefined&&previousHands?.length&&previousHands.length===currentHands?.length){
+      const changes=currentHands.map(({slotIndex,trace})=>({slotIndex,
+        amounts:damageRouteAmountChanges(previousHands.find(hand=>hand.slotIndex===slotIndex)?.trace,trace,true)}));
+      if(changes.every(hand=>hand.amounts)&&changes.some(hand=>hand.amounts.length)){
+        return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>${changes.filter(hand=>hand.amounts.length)
+          .map(({slotIndex,amounts})=>table(amounts,`${slotIndex===0?'메인 무기':'서브 무기'} · 보정 전 대미지`)).join('')}</section>`;
+      }
+    }
     const amounts=beforeId===undefined&&damageRouteAmountChanges(previous,current);
-    if(amounts?.length)return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
-      <table class="slot-dps-table" data-role="damage-route-amount-changes"><caption>보정 전 대미지</caption>
-        <thead><tr><th scope="col">전환·획득</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead>
-        <tbody>${amounts.map(({label,source,a,b})=>`<tr><th scope="row">${esc(label)}${source?`<small>${esc(source)}</small>`:''}</th><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')}</tbody></table></section>`;
+    if(amounts?.length)return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>${table(amounts,'보정 전 대미지')}</section>`;
     const empty=' · 적용 없음';
     return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <div><b>${esc(before)}</b>${route(previous,previousStates,previousHands,`${role}-before-${index}`)||empty}</div>
@@ -689,7 +697,10 @@ function renderSkillNumbedContribution(dps,row) {
   const entries=seasonNumbedDamageRows(dps.scope,row.values);
   if(!entries.length)return '';
   const total=entries.reduce((sum,[,value])=>sum+value,0);
-  return calcGroup('이 스킬의 마취 기여','+'+number(total)+' DPS',calcRows(entries.map(([label,value])=>[label,'+'+number(value)+' DPS']))
+  const details=entries.map(([label,value])=>[label,'+'+number(value)+' DPS']);
+  const coverage=row.numbedDotCoverage;
+  if(coverage)details.push(['마취가 적용된 지속 시간',`${number(coverage.seconds)}초 / ${number(coverage.activeSeconds)}초`]);
+  return calcGroup('이 스킬의 마취 기여','+'+number(total)+' DPS',calcRows(details)
     +'<p>스킬 DPS에 이미 반영된 수치입니다.</p>','selected-skill-numbed');
 }
 
@@ -784,6 +795,24 @@ export function renderSkillCalculation(s) {
     ? calcRows([['얼음 송곳 적중 DPS',number(row.permafrostHitDps)],['동토의 지속 대미지','계산 보류']]) : '';
   const elapsed=assumed?report.assumedDps.elixirUptime:report.elixirUptime;
   const averagedElixir=elapsed?.supported&&elapsed.rows.some(r=>r.uptime>0&&r.uptime<100);
+  const perSecond = value => value.toLocaleString('ko-KR',{maximumFractionDigits:4})+'회';
+  const burst=displayRow?.measuredBurst, manualUses=displayRow?.measuredManualUses;
+  const burstCadence=burst&&manualUses ? calcGroup('측정 구간 매직 버스트',number(manualUses.seconds)+'초',calcRows([
+    ['일반 시전',number(manualUses.count)+'회'],
+    ...(burst.manualActivations>0?[
+      ['그중 버스트가 발동한 시전',number(burst.manualActivations)+'회'],
+      ['수동 시전으로 인한 추가 발동',number(burst.extraCasts)+'회'],
+    ]:[]),
+    ...(burst.automaticActivations>0?[
+      ['추방 자동 버스트 발동',number(burst.automaticActivations)+'회'],
+      ['추방으로 발생한 시전',number(burst.automaticCasts)+'회'],
+    ]:[]),
+  ]),'selected-skill-burst-cadence') : displayRow?.supported&&!averaged&&!averagedElixir&&v.manualRate>0&&v.burstActivationRate>0
+    ? calcGroup('매직 버스트 발동',number(100*v.burstActivationRate/v.manualRate)+'%',calcRows([
+      ['초당 일반 시전',perSecond(v.manualRate)],
+      ['그중 버스트가 발동한 시전',perSecond(v.burstActivationRate)],
+      ['초당 버스트 추가 발동',perSecond(v.burstExtraRate)],
+    ]),'selected-skill-burst-cadence') : '';
   const elixirRoutes=renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index);
   const scope=(assumed?report.assumedDps:report.fullDps).scope;
   const cycleAverage=scope==='ss14-thea-cycle-full-dps';
@@ -873,10 +902,12 @@ export function renderSkillCalculation(s) {
         if(!d)return '';
         const percent=value=>number(value)+'%';
         const points=value=>number(value)+'%p';
+        const effective=Number(((1-pools[0].armorMultiplier)*100).toFixed(8))||0;
         return calcGroup(damageTypes[type]??'기타','',calcRows([
           ['대상 아머',number(d.armor)],['관통 전 아머 감면',percent(d.armorReduction*100)],
           ...(d.armorPenetration?[['아머 감면 관통',points(d.armorPenetration)]]:[]),
           ...(d.projectilePen?[['투사체 아머 관통',points(d.projectilePen)]]:[]),
+          ...((d.armorPenetration||d.projectilePen)?[['유효 아머 감면',percent(effective)]]:[]),
           ...resistanceRows(d.resistance),
         ]));
       }).join(''),'target-mitigation-breakdown'):''));
@@ -902,7 +933,7 @@ export function renderSkillCalculation(s) {
   }
   if(steps)steps=calcGroup(averaged?'전투 시작 상태의 계산 단계':assumed?'방어 전 계산 단계':'대미지 계산 단계','',steps);
   const details = conversion + minionDamage + (averaged?dotDetails:'') + excluded + steps;
-  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
+  return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${burstCadence}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
 }
 
 export function renderNumbedCalculation(s) {

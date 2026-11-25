@@ -58,9 +58,10 @@ function extensionEncounterValues(build, report) {
   return entries;
 }
 
-export function seasonExtensionEncounterChanges(left, right, leftReport, rightReport) {
+export function seasonExtensionEncounterChanges(left, right, leftReport, rightReport, metric='fullDps') {
   const current=extensionEncounterValues(right,rightReport);
   return [...extensionEncounterValues(left,leftReport)].flatMap(([identity,old])=>{
+    if(metric==='assumedDps'&&/^elixir:(?:[01]:(?:active|uptime)|overlap)$/u.test(old.key))return [];
     const control=current.get(identity);
     return control && old.value!==control.value ? [{control,a:old.value,b:control.value}] : [];
   });
@@ -87,9 +88,10 @@ export function seasonTheaEncounterChanges(left, right, leftReport, rightReport,
   const a = { ...theaCombatInputValues(left, leftReport), combatMode: Number(theaCombatEnabled(left)) };
   const b = { ...theaCombatInputValues(right, rightReport), combatMode: Number(theaCombatEnabled(right)) };
   const independentElixirTiming = independentTheaElixirTiming(left, right);
+  const forcedElixirTiming = metric==='assumedDps' ? [0,1].flatMap(theaElixirTimingKeys) : [];
   // Retained inputs matter only while both builds actually use the effect.
   const shared = [...newKeys].filter(key => key !== 'combatMode' && oldKeys.has(key) && !independentElixirTiming.includes(key)
-    && !(metric === 'assumedDps' && key === 'scorchResistance'));
+    && !forcedElixirTiming.includes(key) && !(metric === 'assumedDps' && key === 'scorchResistance'));
   return ['combatMode', ...shared].flatMap(key => a[key] === b[key] ? [] : [{ key, a: a[key], b: b[key] }]);
 }
 
@@ -182,7 +184,7 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
     || (rightConditions.get(low)?.has(1) && leftConditions.get(full)?.has(1)))) return false;
   if (incompatibleNearbyEnemyStates(leftConditions,rightConditions)) return false;
   return !seasonSupportEncounterChanges(left,right,leftReport,rightReport).length
-    && !seasonExtensionEncounterChanges(left,right,leftReport,rightReport).length;
+    && !seasonExtensionEncounterChanges(left,right,leftReport,rightReport,metric).length;
 }
 
 export function seasonHeroEncounterChanges(left,right,leftReport,rightReport,metric) {

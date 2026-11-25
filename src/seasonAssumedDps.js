@@ -190,7 +190,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,elixirDamageRoutes,elixirDpsStates,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,damageByType,executeDps,measuredManualUses,castCostObservation})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,elixirDamageRoutes,elixirDpsStates,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,damageByType,executeDps,measuredManualUses,castCostObservation,numbedDotCoverage,measuredBurst})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
       return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
@@ -204,7 +204,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
           addedDamageSources:direct?.addedDamageSources,
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
         manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(castCostObservation&&{castCostObservation}),...(reaping&&{reaping}),...(fissure&&{fissure}),
-        ...(dotBreakdown&&{dotBreakdown})};
+        ...(dotBreakdown&&{dotBreakdown}),...(numbedDotCoverage&&{numbedDotCoverage}),...(measuredBurst&&{measuredBurst})};
     }),
     uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};
   return report;

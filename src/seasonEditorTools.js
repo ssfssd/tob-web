@@ -1,4 +1,4 @@
-import { describeSeasonOptionChange } from './seasonNumericStatsView.js';
+import { describeSeasonOptionChange, formatSeasonManaBalance } from './seasonNumericStatsView.js';
 import { SEASON_ADVISOR_METRICS } from './seasonAdvisor.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { SS14_CARDS } from './data/ss14Cards.generated.js';
@@ -133,12 +133,15 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
       const name=a&&b&&a.name!==b.name?`${sealName(a)} → ${sealName(b)}`:sealName(b??a);
       return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${esc(sealValue(a))}</td><td>${esc(sealValue(b))}</td></tr>`;
     }).join('')}</tbody></table></details>`:'';
-  if(!first&&!castCosts.length)return manaNote+perSkill+reservations;
+  const elixirMana=p.elixirManaBalanceChanges?.length?`<details data-role="slot-elixir-mana-changes"><summary>영약 상태별 MP 수지 변화</summary>
+    <table class="slot-dps-table"><thead><tr><th scope="col">영약 · 자연 회복 기준</th><th scope="col">${p.previous?'직전':'변경 전'} MP/초</th><th scope="col">변경 후 MP/초</th></tr></thead>
+    <tbody>${p.elixirManaBalanceChanges.map(({name,uptime,label,from,to})=>`<tr><th scope="row">${esc(name)} · ${fmt(uptime)}%<small>${esc(label)}</small></th><td>${formatSeasonManaBalance(from)}</td><td>${formatSeasonManaBalance(to)}</td></tr>`).join('')}</tbody></table></details>`:'';
+  if(!first&&!castCosts.length)return manaNote+perSkill+reservations+elixirMana;
   const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 회복·수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
   const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
   const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
-  return detailRows.length||manaNote||basisNote||perSkill||reservations
-    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}${perSkill}${reservations}</details>`
+  return detailRows.length||manaNote||basisNote||perSkill||reservations||elixirMana
+    ? `<details data-role="slot-resource-preview"><summary>${esc(summary)}</summary>${detailRows.length?`<ul>${detailRows.map(row=>`<li>${esc(resourceText(row))}</li>`).join('')}</ul>`:''}${basisNote}${manaNote}${elixirMana}${perSkill}${reservations}</details>`
     : `<p data-role="slot-resource-preview">${esc(summary)}</p>`;
 }
 

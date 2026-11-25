@@ -121,7 +121,7 @@ function skillCardText(card) {
 function skillLevelEffects(id, entry, support, fallbackLevel = 20) {
   const card = support ? seasonSupportKoreanCard(id) : SS14_CARDS.records[id];
   const source = SS14_KOREAN_SKILL_LEVELS[id];
-  const level = entry?.level ?? fallbackLevel;
+  const level = seasonSkillLevelState(entry).level ?? fallbackLevel;
   const baseLevel = support ? seasonSupportItem(id)?.tlidbText.en.cardLevel ?? 20 : 20;
   const exact = source && card?.season === 'SS14' && card.koreanTextVerified && card.sourceUrl === source.url
     && !(entry?.tier != null && card.supportTiers?.length)
@@ -130,11 +130,11 @@ function skillLevelEffects(id, entry, support, fallbackLevel = 20) {
     const detail = exact[0].split(',').map(index => source.lines[Number(index)]).join('\n');
     return `<small>Lv.${level} 원문</small><p>${esc(presentGameText(detail))}</p>`;
   }
-  if (entry?.tier != null && card?.supportTiers?.length) {
-    const detail = seasonKoreanCardDetail(card,entry.tier);
-    if (detail) return `<small>Lv.${baseLevel} 원문</small><p>${esc(detail)}</p>`;
-  }
-  return `${card?.koreanTextVerified ? `<small>Lv.${baseLevel} 원문</small>` : ''}${skillCardText(card)}`;
+  if (!card?.koreanTextVerified) return skillCardText(card);
+  const tierDetail = entry?.tier != null && card.supportTiers?.length ? seasonKoreanCardDetail(card,entry.tier) : '';
+  const reference = tierDetail ? `<p>${esc(tierDetail)}</p>` : skillCardText(card);
+  if (level === baseLevel) return `<small>Lv.${baseLevel} 원문</small>${reference}`;
+  return `<small>Lv.${level} 한국어 원문 미제공</small><details data-role="skill-level-reference"><summary>Lv.${baseLevel} 참고 원문</summary>${reference}</details>`;
 }
 function itemSource(id, binding, tier) {
   const r = corrosionCard(SS14_CARDS.records[id] ?? seasonSupportKoreanCard(id),binding,'ko');
@@ -469,8 +469,9 @@ function equipmentPanel(s, category) {
     ${button(`${r.skillId?icon(r.skillId):'<span class="empty-slot-mark" aria-hidden="true">＋</span>'}<span><small>${label(i)}</small>${r.skillId?`<strong>${esc(title(r.skillId))}</strong>`:''}</span>`,'inspect-skill',`data-index="${i}" data-role="skill-slot-${i}" aria-label="${esc(label(i)+' · '+(r.skillId?title(r.skillId):'미장착'))}" aria-haspopup="dialog"`)}
     ${r.skillId?`<div class="chain-supports">${Array.from({length:5},(_,n)=>{
       if(n>=r.unlockedSupportCount)return '<span class="chain-locked" aria-hidden="true">–</span>';
-      const linked=r.supports[n]?.supportId, name='보조 '+(n+1)+' '+(linked?title(linked):'미장착');
-      return button(linked?icon(linked)+'<small>'+esc(title(linked))+'</small>':'＋','inspect-socket',`data-row="${i}" data-index="${n}" aria-label="${esc(name)}" title="${esc(name)}" aria-haspopup="dialog"`);
+      const linked=r.supports[n]?.supportId;
+      const name=`${label(i)} ${title(r.skillId)} · 보조 ${n+1} · ${linked?title(linked):'미장착'}`;
+      return button(linked?icon(linked)+'<small>'+esc(title(linked))+'</small>':'＋','inspect-socket',`data-row="${i}" data-index="${n}" data-role="skill-socket-${i}-${n}" aria-label="${esc(name)}" title="${esc(name)}" aria-haspopup="dialog"`);
     }).join('')}</div>`:''}</section>`).join('')}</nav>${button("영약·모듈화", "edit-slot", 'data-type="extensions"')}</div>`;
   const shelf=button('보관함','shelf-open',`data-kind="gear" data-scope="all" data-index="${selected}" data-role="home-shelf"`);
   const slots = `<nav class="equipped-list" aria-label="장비 슬롯"><header class="equipment-heading"><h2>장비</h2>${shelf}</header><div class="gear-slots">${positions.map(i => {

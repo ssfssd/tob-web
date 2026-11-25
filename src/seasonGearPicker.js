@@ -285,6 +285,28 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
   };
 }
 
+function compareElixirManaBalances(before, after, basis) {
+  const phases=report=>basis==='assumedDps' ? (report.assumedDps?.timedElixirPhases??report.assumedDps?.elixirUptime)
+    : (report.theaAverage?.elixirPhases??report.elixirUptime);
+  const a=phases(before), b=phases(after);
+  if(!a?.supported||!b?.supported||a.timed!==b.timed||a.states.length<2||a.states.length!==b.states.length||a.rows.length!==b.rows.length)return [];
+  const item=(report,path)=>report.componentProjection?.rows.find(row=>row.path===path)?.itemId;
+  if(a.rows.some(({path},index)=>!path||path!==b.rows[index].path||!item(before,path)||item(before,path)!==item(after,path)))return [];
+  const matched=b.states.map(state=>a.states.find(old=>old.active.join()===state.active.join()&&Math.abs(old.uptime-state.uptime)<1e-6));
+  if(matched.some(state=>!state))return [];
+  return b.states.flatMap((state,index)=>{
+    const old=matched[index];
+    if(!Number.isFinite(old.manaPerSecond)||!Number.isFinite(state.manaPerSecond))return [];
+    const name=state.active.flatMap((active,i)=>active?[b.rows[i].name]:[]).join(' · ')||'활성 영약 없음';
+    return (state.manaRecovery??[]).flatMap(({id,label,value})=>{
+      const earlier=old.manaRecovery?.find(row=>row.id===id)?.value;
+      if(!Number.isFinite(earlier)||!Number.isFinite(value))return [];
+      const from=earlier-old.manaPerSecond, to=value-state.manaPerSecond;
+      return Math.abs(from-to)>=.005 ? [{name,uptime:state.uptime,label,from,to}] : [];
+    });
+  });
+}
+
 export function compareSeasonResourceCosts(report,after,basis,{allActive=false,rowIndex}={}) {
   const beforeDps=report[basis],afterDps=after[basis];
   const bySlot=dps=>new Map(dps.rows.filter(row=>row.rowIndex<5).map(row=>[row.rowIndex,row]));
@@ -368,7 +390,8 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
     });
   });
   return {resourceChanges:resourceChanges.filter(changed),resourceCosts:resourceCosts.filter(changed),
-    resourceRecovery:resourceRecovery.filter(changed),skillResourceChanges,manaReservationChanges,manaObservationStale};
+    resourceRecovery:resourceRecovery.filter(changed),skillResourceChanges,manaReservationChanges,manaObservationStale,
+    elixirManaBalanceChanges:compareElixirManaBalances(report,after,basis)};
 }
 
 export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metric='fullDps'}={}) {

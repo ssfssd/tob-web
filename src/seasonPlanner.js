@@ -380,17 +380,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if(browse&&worn&&state.document.targetBuild.ss14Inputs.gear[index]?.itemId===worn&&itemGearKind(worn))selectGearCandidate(index,worn);
       state.focusRole='gear-drawer-heading';
     },
-    openSkill(index,support=null) {
+    openSkill(index,support=null,fromSlot=false) {
       if(!Number.isInteger(index)||index<0||index>=9)return;
       api.flush();
-      const initial=state.overlay?.type==='skills'?state.overlay.initial:null;
+      const current=state.overlay?.type==='skills'?state.overlay:null;
       const rows = state.document.targetBuild.skills;
       const host = index<5 ? rows.active[index] : rows.passive[index-5];
       if (!host?.skillId) support=null;
       state.section='skills';state.skillIndex=index;state.supportIndex=support;
-      const returnSection=state.overlay?.type==='skills'?state.overlay.returnSection:null;
-      const returnRole=state.overlay?.type==='skills'?state.overlay.returnRole:null;
-      state.overlay={type:'skills',index,supportIndex:support,returnSection,returnRole,initial:initial??{document:state.document,report:state.report}};state.picker=null;
+      state.overlay={type:'skills',index,supportIndex:support,returnSection:current?.returnSection,returnRole:current?.returnRole,
+        originSlot:current?.originSlot??(fromSlot?{index,support}:null),initial:current?.initial??{document:state.document,report:state.report}};state.picker=null;
       state.focusRole='slot-detail-heading';
     },
     openMemory(index) {
@@ -423,6 +422,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         state.focusRole='gear-slot-'+state.gearIndex;
       } else if(state.overlay?.type==='skills') {
         state.picker=null;state.focusRole='skill-slot-'+state.skillIndex;
+        const origin=state.overlay.originSlot;
+        if(origin){
+          const {index,support}=origin, {active,passive}=state.document.targetBuild.skills;
+          const row=index<5?active[index]:passive[index-5];
+          state.focusRole=support!==null&&row?.skillId&&support<row.unlockedSupportCount
+            ? `skill-socket-${index}-${support}` : `skill-slot-${index}`;
+        }
         if(state.overlay.returnSection){
           state.section=state.overlay.returnSection;
           state.focusRole=state.overlay.returnRole
@@ -526,7 +532,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           }, {metric,includeSnapshot:true});
           const resources=preview.dpsBasis===metric?preview:
             compareSeasonResourceCosts(state.report,preview.candidate.report,metric,{rowIndex});
-          const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}=resources;
+          const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale,elixirManaBalanceChanges}=resources;
           const {dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
             skillSpeedChanges,manualUsageChanges,elixirPhaseChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
           const breakdown=preview.comparison.supported&&dpsBasis===metric ? {
@@ -534,7 +540,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             skillSpeedChanges,manualUsageChanges,elixirPhaseChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges,
           } : null;
           rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,
-            breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}});
+            breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale,elixirManaBalanceChanges}});
         } catch (error) {
           rows.push({supportIndex, id:support.supportId, comparison:{supported:false,reasons:[error.message]}});
         }
@@ -1746,9 +1752,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           api.openSkill(Number(d.index));
           state.overlay.returnSection=section;
         }
-        else if (action === "inspect-skill") api.openSkill(Number(d.index));
+        else if (action === "inspect-skill") api.openSkill(Number(d.index),null,d.role?.startsWith('skill-slot-'));
         else if (action === "inspect-gear") api.openGear(Number(d.index));
-        else if (action === "inspect-socket") { const i = Number(d.index); api.openSkill(Number(d.row??state.skillIndex),Number.isInteger(i) && i >= 0 && i < 5 ? i : null); }
+        else if (action === "inspect-socket") { const i = Number(d.index); api.openSkill(Number(d.row??state.skillIndex),Number.isInteger(i) && i >= 0 && i < 5 ? i : null,d.role?.startsWith('skill-socket-')); }
         else if (action === "edit-slot") {
           if (d.type === "gear") api.openGear(Number(d.index));
           else if (d.type === "skills") api.openSkill(Number(d.index));

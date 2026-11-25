@@ -98,7 +98,7 @@ export function encounterInputChanges(before, after, metric) {
     }
   }
   const extensions=new Set();
-  for(const {control,a,b} of seasonExtensionEncounterChanges(old,current,before.report,after.report)) {
+  for(const {control,a,b} of seasonExtensionEncounterChanges(old,current,before.report,after.report,metric)) {
     if(extensions.has(control.key))continue;
     extensions.add(control.key);
     const text=value=>control.kind==='boolean'?(value?'예':'아니요'):value;

@@ -64,7 +64,7 @@ function measureElixirUptime(elixir,{warmup,seconds}) {
 function summarizeTimedElixirs(build,report,options,results,dps,resources) {
   const elixirs=timedElixirs(build,theaCombatInputValues(build,report));
   if (!elixirs.length) return null;
-  const rows=elixirs.map(elixir=>({name:report.componentProjection.rows.find(row=>row.elixirState?.index===elixir.i)?.name??`영약 ${elixir.i+1}`,
+  const rows=elixirs.map(elixir=>({path:`skills.elixirs.${elixir.i}`,name:report.componentProjection.rows.find(row=>row.elixirState?.index===elixir.i)?.name??`영약 ${elixir.i+1}`,
     uptime:measureElixirUptime(elixir,options).uptime}));
   const masks=[...new Set(results.flatMap(run=>[...run.elixirPhases.keys()]))].sort((a,b)=>a-b);
   const average=(mask,key)=>sum(results.map(run=>run.elixirPhases.get(mask)?.[key]??0))/results.length;
@@ -236,6 +236,8 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const rows = new Map(report.fullDps.rows.map(r => [r.rowIndex, {
     ...Object.fromEntries(recordedKeys.map(k => [k, 0])),
     damageByType:{},
+    numbedDotSeconds:0,
+    burstUses:{manualActivations:0,extraCasts:0,automaticActivations:0,automaticCasts:0},
     ...((r.minionSkills||r.minionDamageByType) && {minionDamageByType:{}}),
     ...(r.moduleDotDpsByAction && {moduleDotDpsByAction:Object.fromEntries(Object.keys(r.moduleDotDpsByAction).map(action=>[action,0]))}),
   }]));
@@ -609,7 +611,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       count(time, 'multistrikes');
       if (inMeasurement(time)) multistrikeUses.set(event.row,(multistrikeUses.get(event.row)??0)+1);
     }
-    if (event.kind === "burst") count(time, 'spellBurst');
+    if (event.kind === "burst") {
+      count(time, 'spellBurst');
+      if(inMeasurement(time)) {
+        const uses=rows.get(event.row).burstUses;
+        if(event.trigger)uses.automaticCasts++;
+        else if(event.activationCost)uses.manualActivations++;
+        else uses.extraCasts++;
+      }
+    }
     if (landed) {
       const castMultiplier = sequenceMultiplier * burstMultiplier;
       resolveHit(event, time, ctx, state, row, castMultiplier, 1);
@@ -750,7 +760,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           }
           const weight = w + integral(lo, hi) / 100 * row.combat.afflictionEffect;
           accumulateDamage(row.rowIndex,'dotDps',row.combat.dotWithoutAffliction*weight,phase);
-          rows.get(row.rowIndex).numbedDotDps += (row.combat.numbedDotWithoutAffliction ?? 0) * weight;
+          const dotTotals=rows.get(row.rowIndex);
+          const numbedDot=row.combat.numbedDotWithoutAffliction ?? 0;
+          dotTotals.numbedDotDps += numbedDot * weight;
+          if(numbedDot>0&&dotWindows.has(row.rowIndex))dotTotals.numbedDotSeconds+=w;
           accumulateDamage(row.rowIndex,'permafrostDps',(row.combat.frostWithoutAffliction??0)*weight,phase);
           recordTypes(row.rowIndex,row.combat.persistentByType,weight);
         }
@@ -879,6 +892,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           if(e.trigger.trigger==='burst') {
             if(charge.get(e.row)<1-eps){blockers.add('추방 자동 버스트 발동 시점에 충전이 부족합니다.');continue;}
             charge.set(e.row,0);runTriggers('burstRate',time,ctx);
+            if(inMeasurement(time))rows.get(e.row).burstUses.automaticActivations++;
           }
           for(let n=0;n<e.trigger.count;n++)cast({...e,kind:e.trigger.trigger==='burst'?'burst':'nether-hit',triggerMultiplier:e.trigger.multiplier},time,ctx);
           schedule(e,e.trigger.rate);continue;
@@ -1007,6 +1021,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     const manualUses=supported&&(r.combat||Number.isFinite(r.manualSummonRate))
       ? sum(results.map(run=>run.manualUses.get(r.rowIndex)??0))/results.length : null;
     const multistrikes=manualUses===null ? 0 : sum(results.map(run=>run.multistrikeUses.get(r.rowIndex)??0))/results.length;
+    const burstUses=manualUses===null ? null : Object.fromEntries(['manualActivations','extraCasts','automaticActivations','automaticCasts']
+      .map(key=>[key,sum(results.map(run=>run.rows.get(r.rowIndex).burstUses[key]))/results.length]));
     const usages = results.map(v => v.costs.get(r.rowIndex));
     const canMeasure = supported && usages.every(Boolean);
     const perSecond = type => canMeasure ? sum(usages.map(usage => usage[type])) / results.length / options.seconds : null;
@@ -1029,6 +1045,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     const values = { ...r.values, ...Object.fromEntries(recordedKeys.map(key => [key, supported ? sum(results.map(v => v.rows.get(r.rowIndex)[key])) / 128 : null])) };
     const activeWindowSeconds = r.dotWindows?.reduce((n,[start,stop])=>
       n+Math.max(0,Math.min(stop,options.warmup+options.seconds)-Math.max(start,options.warmup)),0);
+    const numbedDotSeconds=supported&&activeWindowSeconds>0
+      ? sum(results.map(run=>run.rows.get(r.rowIndex).numbedDotSeconds))/results.length : 0;
     const permafrostBreakdown = supported && r.permafrostBreakdown && activeWindowSeconds > 0
       ? {...r.permafrostBreakdown, uptime:100*activeWindowSeconds/options.seconds, active:values.permafrostDps*options.seconds/activeWindowSeconds}
       : undefined;
@@ -1053,6 +1071,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     for(const [type,damage] of Object.entries(minionTypes))damageByType[type]=(damageByType[type]??0)+damage;
     const minionDamageByType=Object.keys(minionTypes).length?minionTypes:undefined;
     return { ...r, damageByType, minionDamageByType, moduleDotDpsByAction, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+      ...(burstUses&&(burstUses.manualActivations>0||burstUses.automaticActivations>0)&&{measuredBurst:burstUses}),
+      ...(numbedDotSeconds>0&&{numbedDotCoverage:{seconds:numbedDotSeconds,activeSeconds:activeWindowSeconds}}),
       ...(timedNumbedSlots.has(r.rowIndex)&&{numbedOnHit:true}),
       ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds,
         ...(multistrikes>0&&{multistrikes})}}),

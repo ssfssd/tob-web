@@ -5,6 +5,7 @@ const link = r => /^https:\/\/tlidb\.com\/(en|ko)\//u.test(r?.sourceUrl ?? "")
   ? `<a href="${esc(r.sourceUrl)}" target="_blank" rel="noreferrer">SS14 근거</a>` : "";
 const cell = (label, value, key, suffix = "") => `<div class="native-stat-cell"><dt>${label}</dt><dd data-stat="${key}">${number(value)}${Number.isFinite(value) ? suffix : ""}</dd></div>`;
 const activeSlotLabel = index => index === 0 ? '주력 스킬' : '액티브 '+(index+1);
+export const formatSeasonManaBalance = value => !Number.isFinite(value) ? '확인 필요' : `${value<0?'부족':value>0?'여유':'균형'} ${number(Math.abs(value))}`;
 function renderElixirRestoration(rows) {
   if (!rows?.length) return '';
   return `<details data-role="elixir-restoration"><summary>회복 영약</summary><table aria-label="영약 1회 회복량">
@@ -30,7 +31,6 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
   const pendingNote = survival?.manaObservationPending
     ? '<p data-role="pending-mana-observation">전투 조건을 채우면 저장한 MP 회복값의 적용 여부를 확인합니다.</p>' : '';
   if(!budget)return staleNote ? staleNote+observe : pendingNote;
-  const net=value=>!Number.isFinite(value)?'확인 필요':`${value<0?'부족':value>0?'여유':'균형'} ${number(Math.abs(value))}`;
   const channels=budget.channels??[];
   const hasChargeTimes=channels.some(row=>row.observed&&row.valid&&row.times);
   const hasAverageCharges=channels.some(row=>row.observed&&row.valid&&!row.times);
@@ -52,7 +52,7 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
     <table><thead><tr><th scope="col">스킬</th><th scope="col">MP/초</th>${hasLife?'<th scope="col">HP/초</th>':''}</tr></thead><tbody>
     ${costs.map(row=>`<tr><th scope="row">${esc(row.name)} · ${activeSlotLabel(row.rowIndex)}</th><td>${number(row.manaPerSecond)}</td>${hasLife?`<td>${number(row.lifePerSecond)}</td>`:''}</tr>`).join('')}</tbody></table></details>`:'';
   const table=(rows, inputOnly=false)=>`<table aria-label="${inputOnly?'입력 조건의 관측 MP 수지':'초당 MP 자연 회복과 차이'}"><thead><tr><th scope="col">${measured && !inputOnly ? '측정 구간 평균 자연 회복' : '자연 회복'}</th><th scope="col">MP/초</th><th scope="col">소모 대비</th></tr></thead><tbody>
-    ${rows.map(row=>`<tr><th scope="row">${esc(row.label)}</th><td>${number(row.value)}</td><td data-stat="mana-balance-${esc(row.id)}">${net(row.balance)}</td></tr>`).join('')}</tbody></table>`;
+    ${rows.map(row=>`<tr><th scope="row">${esc(row.label)}</th><td>${number(row.value)}</td><td data-stat="mana-balance-${esc(row.id)}">${formatSeasonManaBalance(row.balance)}</td></tr>`).join('')}</tbody></table>`;
   return `<section aria-label="수동 시전 자원 수급"><h3>수동 시전 자원 수급</h3><dl class="native-stat-list">
     ${cell('MP 소모',budget.manaPerSecond,'manual-mana-total','/초')}${compareMana?cell(otherLabel+' MP 소모',otherMana,'manual-mana-other','/초'):''}
     ${budget.lifePerSecond>0||compareLife?cell('HP 소모',budget.lifePerSecond,'manual-life-total','/초'):''}${compareLife?cell(otherLabel+' HP 소모',otherLife,'manual-life-other','/초'):''}</dl>
@@ -85,11 +85,15 @@ function manaByElixirState(phases) {
   if (!phases?.supported || phases.states.length<2) return '';
   const formulas=phases.states[0].manaRecovery??[];
   if (!formulas.length) return '';
-  const rows=phases.states.map(({active,uptime,manaPerSecond,manaRecovery})=>{
+  const rows=phases.states.map(({active,uptime,manaPerSecond,manaRecovery,channelCostTotalOnly})=>{
     const names=active.flatMap((on,index)=>on?[safeName(phases.rows[index].name)]:[]);
     const recovery=new Map(manaRecovery?.map(({id,value})=>[id,value]));
-    return `<tr><th scope="row">${esc(names.join(' · ')||'없음')}</th><td>${number(uptime)}%</td><td>${number(manaPerSecond)}</td>
-      ${formulas.map(({id})=>`<td>${number(recovery.get(id))}</td>`).join('')}</tr>`;
+    return `<tr><th scope="row">${esc(names.join(' · ')||'없음')}</th><td>${number(uptime)}%</td><td>${channelCostTotalOnly||phases.combinedChannelCost?'전체 평균에만 집계':number(manaPerSecond)}</td>
+      ${formulas.map(({id})=>{
+        const value=recovery.get(id);
+        const balance=Number.isFinite(value)&&Number.isFinite(manaPerSecond) ? formatSeasonManaBalance(value-manaPerSecond) : '';
+        return `<td>${number(value)}${balance?`<small class="elixir-mp-contribution">${balance}</small>`:''}</td>`;
+      }).join('')}</tr>`;
   }).join('');
   return `<details data-role="elixir-mana-balance"><summary>영약 상태별 MP 수급</summary><table aria-label="영약 상태별 초당 MP 수급">
     <thead><tr><th scope="col">활성 영약</th><th scope="col">시간 비중</th><th scope="col">수동 소모</th>
