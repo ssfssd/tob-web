@@ -38,3 +38,45 @@ export function seasonDpsStatusLabel(report) {
   if (groups.length === 1) return groups[0].label;
   return groups.some(group=>group.cause==='input') ? '입력·효과 확인 필요' : groups.length ? '계산 보류' : '계산 확인 필요';
 }
+
+export function seasonPartialDps(report) {
+  const dps=report?.fullDps;
+  if (!dps || dps.supported || dps.sharedBlockers?.length!==0 ||
+      !['ss14-fixed-scenario-full-dps','ss14-observed-elixir-uptime'].includes(dps.scope)) return null;
+  const excluded=dps.rows.filter(row=>!row.supported);
+  const included=dps.rows.filter(row=>row.supported);
+  if (!included.length || !excluded.length || !dps.blockers.length ||
+      !excluded.every(row=>row.blockers.length&&row.blockers.every(reason=>reason.includes('미지원')&&seasonIssueCause(reason)==='model')) ||
+      !dps.blockers.every(reason=>excluded.some(row=>row.blockers.includes(reason))) ||
+      !included.every(row=>Number.isFinite(row.values.dps)&&row.values.dps>=0)) return null;
+  return {dps:included.reduce((sum,row)=>sum+row.values.dps,0),excluded};
+}
+
+export function seasonPartialDpsReview(document, report) {
+  const partial=seasonPartialDps(report);
+  if(!partial||!document?.id)return null;
+  const build=document.targetBuild, inputs=build.ss14Inputs??{};
+  const excluded=partial.excluded.map(({id,rowIndex,blockers})=>{
+    const skills=rowIndex<5?build.skills?.active:build.skills?.passive;
+    const supports=Object.entries(inputs.supports??{}).filter(([key])=>key.startsWith(`${rowIndex}:`));
+    return [rowIndex,id,[...new Set(blockers)].sort(),skills?.[rowIndex%5],supports,
+      inputs.dps?.skills?.[rowIndex],inputs.offense?.[rowIndex]];
+  });
+  const confirmation=JSON.stringify([document.id,report.fullDps.scope,excluded]);
+  const exclusionScope=[report.fullDps.scope,excluded.map(([index,id,reasons,skill,supports,dps,offense])=>
+    [index,id,reasons,skill,Object.fromEntries(supports),dps,offense])];
+  return {...partial,confirmation,exclusionScope};
+}
+
+export function compareSeasonPartialDps(before, after, fullComparison) {
+  if (fullComparison.encounterMatches !== true) return null;
+  const baseline=seasonPartialDpsReview(before.document,before.report);
+  const candidate=seasonPartialDpsReview(after.document,after.report);
+  if (!baseline || baseline.confirmation !== candidate?.confirmation) return null;
+  const excludedReasons=new Set([
+    ...before.report.fullDps.blockers.map(reason=>`기준: ${reason}`),
+    ...after.report.fullDps.blockers.map(reason=>`현재: ${reason}`),
+  ]);
+  if (fullComparison.reasons.some(reason=>!excludedReasons.has(reason))) return null;
+  return {confirmation:baseline.confirmation,baseValue:baseline.dps,value:candidate.dps,delta:candidate.dps-baseline.dps};
+}

@@ -82,7 +82,8 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   if(reason){
     report.fullDps={...original,supported:false,dps:null,rows:original.rows.map(row=>({...row,supported:false,dotBreakdown:undefined,permafrostBreakdown:undefined,permafrostHitDps:undefined,minionDamageByType:undefined,
       values:{...row.values,...Object.fromEntries(damageFieldsFor(row).map(key=>[key,null]))}})),manualResources:null,
-      blockers:[...new Set([...original.blockers,reason])]};
+      blockers:[...new Set([...original.blockers,reason])],
+      sharedBlockers:[...new Set([...original.sharedBlockers,reason])]};
     return;
   }
   const states=times.map(({active,weight})=>{
@@ -116,17 +117,23 @@ export function applyObservedElixirUptime(build,report,calculateState) {
   const first=states[0].value;
   const sameRows=states.every(({value})=>value.rows.length===first.rows.length&&first.rows.every(row=>
     value.rows.some(r=>r.rowIndex===row.rowIndex&&r.id===row.id)));
+  const compositionBlockers=sameRows?[]:['영약 상태에 따라 공격 스킬 구성이 달라 전체 DPS를 평균낼 수 없습니다.'];
+  const sharedBlockers=[...new Set(states.flatMap(({value})=>value.sharedBlockers).concat(compositionBlockers))];
   const supported=sameRows&&states.every(({value})=>value.supported);
+  // A blocker local to another skill does not invalidate this row. Keep
+  // shared blockers (allocation, resources, effects) fail-closed.
+  const canAverageRows=sharedBlockers.length===0;
   const varyingNames=varying.map(entry=>entry.name);
   const observedSlots=varying.map(({elixirState:{index}})=>({index,skillId:build.skills.elixirs[index].skillId}));
   const rows=first.rows.map(row=>{
     const samples=states.map(({value,weight})=>({value:value.rows.find(r=>r.rowIndex===row.rowIndex&&r.id===row.id),weight}));
+    const rowSupported=canAverageRows&&samples.every(({value})=>value?.supported&&Number.isFinite(value.values.dps));
     const stable=(key)=>samples.every(({value})=>value?.[key]===row[key])?row[key]:null;
     const channel=samples.length>1?averageObservedChannelCost(samples):null;
     const manaPerSecond=channel?channel.manualManaPerSecond:weighted(samples,r=>r?.manualManaPerSecond);
     const lifePerSecond=channel?channel.manualLifePerSecond:weighted(samples,r=>r?.manualLifePerSecond);
     const channelCostTotalOnly=Boolean(channel&&channel.channelCost.rate!==0);
-    const routes = supported ? states.map(({direct,weight,active},index)=>{
+    const routes = rowSupported ? states.map(({direct,weight,active},index)=>{
       const entry=samples[index].value;
       const skill=direct.find(skill=>skill.rowIndex===row.rowIndex&&skill.id===row.id);
       const trace=entry.conversionTrace??skill?.trace;
@@ -136,7 +143,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
       return {active,uptime:100*weight,excluded:excludedSeasonHitRoutes(skill),groups:groups.map(group=>({...group,trace:(group.trace??[])
         .filter(effect=>effect.stage==='conversion'||effect.stage==='gained-as-extra')}))};
     }) : [];
-    return {...row,supported,blockers:[...new Set(samples.flatMap(({value})=>value?.blockers??[]))],
+    return {...row,supported:rowSupported,blockers:[...new Set(samples.flatMap(({value})=>value?.blockers??[]))],
       ...(routes.length===1&&routes[0].groups.length===1&&{conversionTrace:routes[0].groups[0].trace}),
       ...(varying.length&&routes.length&&{
         elixirDamageRoutes:{names:varyingNames,states:routes},
@@ -150,28 +157,32 @@ export function applyObservedElixirUptime(build,report,calculateState) {
         elixirDpsStates:{names:varyingNames,observedSlots,manaPerSecond,lifePerSecond,channelCostTotalOnly,states:states.map(({active,weight},index)=>{
           const sample=samples[index].value;
           const dps=sample.values.dps;
+          const {burstActivationRate,burstExtraRate}=sample.values;
           const mana=channelCostTotalOnly?null:sample.manualManaPerSecond;
           const life=channelCostTotalOnly?null:sample.manualLifePerSecond;
           return {active,uptime:100*weight,dps,weightedDps:Number.isFinite(dps)?dps*weight:null,
+            burstActivationRate,burstExtraRate,
             manaPerSecond:mana,lifePerSecond:life,
             weightedManaPerSecond:Number.isFinite(mana)?mana*weight:null,
             weightedLifePerSecond:Number.isFinite(life)?life*weight:null};
         })},
       }),
-      dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
-      minionDamageByType:supported?averageDamageMap(samples,'minionDamageByType','minionDps'):undefined,
-      moduleDotDpsByAction:supported?averageDamageMap(samples,'moduleDotDpsByAction','minionDps'):undefined,
-      damageByType:supported?averageDamageMap(samples,'damageByType','dps'):undefined,
-      ...(Object.hasOwn(row,'executeDps')&&{executeDps:supported?weighted(samples,value=>value?.executeDps):null}),
-      permafrostBreakdown:supported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
-      dotDefense:supported?averageDotDefense(samples,'dotDefense'):undefined,
-      frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,
+      dotBreakdown:rowSupported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
+      minionDamageByType:rowSupported?averageDamageMap(samples,'minionDamageByType','minionDps'):undefined,
+      moduleDotDpsByAction:rowSupported?averageDamageMap(samples,'moduleDotDpsByAction','minionDps'):undefined,
+      damageByType:rowSupported?averageDamageMap(samples,'damageByType','dps'):undefined,
+      ...(Object.hasOwn(row,'executeDps')&&{executeDps:rowSupported?weighted(samples,value=>value?.executeDps):null}),
+      permafrostBreakdown:rowSupported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
+      dotDefense:rowSupported?averageDotDefense(samples,'dotDefense'):undefined,
+      frostDefense:rowSupported?averageDotDefense(samples,'frostDefense'):undefined,
       permafrostHitDps:weighted(samples,value=>value?.permafrostHitDps),
       manaPerUse:stable('manaPerUse'),lifePerUse:stable('lifePerUse'),
       manualManaPerSecond:manaPerSecond,manualLifePerSecond:lifePerSecond,
       ...(channel&&{channelCost:channel.channelCost}),
       values:{...row.values,manualRate:weighted(samples,r=>r?.values.manualRate),
-        ...Object.fromEntries(damageFieldsFor(row).map(key=>[key,supported?weighted(samples,r=>r?.values[key]??0):null]))}};
+        ...Object.fromEntries(['burstActivationRate','burstExtraRate'].filter(key=>Object.hasOwn(row.values,key))
+          .map(key=>[key,weighted(samples,r=>r?.values[key])])),
+        ...Object.fromEntries(damageFieldsFor(row).map(key=>[key,rowSupported?weighted(samples,r=>r?.values[key]??0):null]))}};
   });
   const recovery=(first.manualResources?.recovery??[]).map(r=>({...r,value:weighted(states,
     value=>value.manualResources?.recovery.find(row=>row.id===r.id)?.value)}));
@@ -180,7 +191,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
     .filter(channel=>channel.rate!==0).map(channel=>channel.rowIndex)):[]);
   report.fullDps={...first,supported,rows,dps:supported?weighted(states,value=>value.dps):null,
     scope:'ss14-observed-elixir-uptime',
-    blockers:[...new Set(states.flatMap(({value})=>value.blockers).concat(sameRows?[]:['영약 상태에 따라 공격 스킬 구성이 달라 전체 DPS를 평균낼 수 없습니다.']))],
+    blockers:[...new Set(states.flatMap(({value})=>value.blockers).concat(compositionBlockers))],sharedBlockers,
     manualResources:manualResourceBalance(rows,recovery,skillInputs)};
   report.elixirUptime={supported,rows:observed.map(row=>({path:row.path,name:row.name,uptime:row.elixirState.uptime})),
     ...(varying.length===1&&{activeDps:states[1].value.dps,inactiveDps:first.dps}),

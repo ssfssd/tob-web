@@ -543,7 +543,7 @@ export function projectSeasonComponents(build, { data = SS14_COMPONENTS, require
   });
   const effects=rows.flatMap(row=>row.effects);
   if(fixedNumbed?.effect)effects.push(fixedNumbed.effect);
-  return { rows, effects, fixedNumbed, generatedAt: data.generatedAt, allocation,
+  return { rows, effects, fixedNumbed, generatedAt: data.generatedAt, allocation, slateOptionInputs:resolvedSlates.optionInputs,
     counts: { selected: rows.length, mapped: rows.filter((row) => row.status === "mapped").length, effects: rows.reduce((n, row) => n + row.effects.length, 0) },
     limitation: "SS14 미리보기 원문의 수치와 직접 선택한 일부 조건을 연결합니다. 조건 미입력·배치 오류는 제외하며 나머지 특수 효과·전체 경로·출시 후 값은 별도 검증이 필요합니다." };
 }

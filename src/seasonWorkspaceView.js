@@ -497,10 +497,10 @@ function dpsControls(document, report, formValues, showDummy = false) {
   </details>`;
 }
 
-function dpsResults(report, { embedded = false } = {}) {
+function dpsResults(report, { embedded = false, partial = false } = {}) {
   const r = report.fullDps;
-  const assumed = embedded && preferredSeasonDpsMetric(report) === 'assumedDps';
-  const displayRows = assumed ? report.assumedDps.rows : r.rows;
+  const assumed = embedded && !partial && preferredSeasonDpsMetric(report) === 'assumedDps';
+  const displayRows = partial ? r.rows.filter(row=>row.supported) : assumed ? report.assumedDps.rows : r.rows;
   const blockers = [...new Set(r.blockers)];
   const joint = report.theaAverage?.combat && report.theaAverage.supported ? report.theaAverage : null;
   const repeated = r.rows.filter(row => row.shotgun?.hits > 1);
@@ -519,10 +519,10 @@ function dpsResults(report, { embedded = false } = {}) {
     <p>${r.supported ? report.theaAverage ? report.theaAverage.estimated ? "자동 은총 추정 평균" : "자동 은총 주기 평균" : "입력한 전투 조건 기준" : `입력·효과 ${blockers.length}건 확인 필요`}</p>
     ${blockers.length ? `<details data-role="season-dps-blockers"><summary>계산에 필요한 입력·효과 확인 (${blockers.length})</summary>${seasonCalculationIssues(report).map(group=>`<section data-cause="${group.cause}"><h6>${group.label} (${group.reasons.length})</h6><ul>${group.reasons.map(b=>`<li>${escape(b)}</li>`).join('')}</ul></section>`).join('')}
       <button type="button" data-action="advisor-open-section" data-section="combat">전투 조건 편집</button><button type="button" data-action="advisor-open-section" data-section="hero">히어로 특성 편집</button></details>` : ""}`}
-    <details data-role="season-dps-breakdown"><summary>${assumed ? '발동 유형별 방어 전 DPS' : embedded ? '발동 유형별 DPS' : '스킬별 DPS'}</summary>
-    ${displayRows.length ? `<div class="season-dps-table-scroll" tabindex="0" role="region" aria-label="스킬별 DPS 표"><table aria-label="${assumed?'스킬별 방어 전 DPS':'스킬별 전투 DPS'}"><thead><tr><th scope="col">스킬</th>${columns.map(([,label])=>`<th scope="col">${label}</th>`).join('')}</tr></thead>
+    <details data-role="season-dps-breakdown"><summary>${partial?'포함된 스킬 DPS':assumed ? '발동 유형별 방어 전 DPS' : embedded ? '발동 유형별 DPS' : '스킬별 DPS'}</summary>
+    ${displayRows.length ? `<div class="season-dps-table-scroll" tabindex="0" role="region" aria-label="스킬별 DPS 표"><table aria-label="${partial?'부분 DPS에 포함된 스킬':assumed?'스킬별 방어 전 DPS':'스킬별 전투 DPS'}"><thead><tr><th scope="col">스킬</th>${columns.map(([,label])=>`<th scope="col">${label}</th>`).join('')}</tr></thead>
       <tbody>${displayRows.map(row => `<tr><th scope="row">${rowLabel(row)}</th>${columns.map(([key]) => `<td>${displayDps(row.values[key] ?? (row.supported && key !== "dps" ? 0 : null))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : ''}
-    ${!assumed&&!r.supported ? "<p>스킬별 수치는 확인된 효과만 반영합니다.</p>" : ""}
+    ${!partial&&!assumed&&!r.supported ? "<p>스킬별 수치는 확인된 효과만 반영합니다.</p>" : ""}
     <details><summary>${assumed?'입력한 조건의 계산 근거':'적용 조건·근거'}</summary>
     ${joint?.projectileTie ? `<p data-role="season-projectile-order">동시 적중 순서 미확인 · ${joint.fissureTie?'후속 적중':'기존 투사체'} 우선 ${number(joint.projectileTie.arrivalsFirstDps)} DPS · 새 시전 우선 ${joint.projectileTie.newCastFirstDps === null ? '계산 불가' : number(joint.projectileTie.newCastFirstDps) + ' DPS'}</p>` : ''}
     ${report.theaAverage?.supported ? `<p>측정 ${number(report.theaAverage.seconds)}초 · 준비 ${number(report.theaAverage.warmup)}초 · 은총 유지율 ${number(report.theaAverage.uptime)}% · 은총 지속 ${number(report.theaAverage.duration)}초 · 재사용 대기 ${number(report.theaAverage.cooldown)}초</p>` : ""}

@@ -180,10 +180,10 @@ function wornGearCandidates(document, report) {
   });
 }
 
-function sameGearOptionChanges(edit, document, before, after) {
-  const id=edit.kind==='gear-selection'?edit.value:edit.value?.kind==='gear'?edit.value.item.itemId:null;
-  if(!id||document.targetBuild.gear?.slots?.[edit.slotIndex]?.itemId!==id)return [];
-  return gearOptionComparisons(before,after,[edit.slotIndex]).map(describeSeasonOptionChange).filter(Boolean);
+function recommendedGearOptionChanges(slotIndex,before,after,removedOffhand=false) {
+  const changes=index=>gearOptionComparisons(before,after,[index]).map(describeSeasonOptionChange).filter(Boolean);
+  const primary=changes(slotIndex);
+  return removedOffhand?[...primary,...changes(1).map(line=>line.startsWith('서브 무기 · ')?line:'서브 무기 · '+line)]:primary;
 }
 
 function craftCandidates(document, slot) {
@@ -264,13 +264,15 @@ function resourceCandidates(document,report){
   }
   return candidates;
 }
-export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',includeCorrosion=false,lockedSlots=[],active=()=>true,progress=()=>{}}={}){
+export async function rankSeasonUpgrades(document,report,{mode='options',slot='all',group='all',skill='all',assemble=false,shelf=[],source='all',includeCorrosion=false,showNonImproving=false,lockedSlots=[],active=()=>true,progress=()=>{}}={}){
   const metric=preferredSeasonDpsMetric(report);
   const base={document,report},baseline=compareSeasonDpsSnapshots(base,base,metric);
   const result={metric,rows:[],resources:[],checked:0,blocked:0,total:0,reasons:baseline.reasons,base:baseline.baseValue};
   const skillReplacement=group==='skillReplacement';
   const manaReplacement=group==='manaReplacement';
   const equipment=mode==='gear'||group==='replacement'||group==='legendary'||manaReplacement;
+  const nonImproving=showNonImproving&&!manaReplacement&&(equipment||skillReplacement);
+  if(nonImproving)result.nonImproving=true;
   if(skillReplacement)result.blockedSkills=[];
   if(equipment)result.blockedGear=[];
   const reasonCounts=new Map();
@@ -278,7 +280,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     result.blocked++;
     const unique=[...new Set(reasons)];
     for(const reason of unique)reasonCounts.set(reason,(reasonCounts.get(reason)??0)+1);
-    if(skillReplacement&&candidate)result.blockedSkills.push({...candidate,reasons:unique,canOpen});
+    if(skillReplacement&&candidate)result.blockedSkills.push({...candidate,reasons:unique,canOpen,needsInput});
     if(equipment&&candidate)result.blockedGear.push({...candidate,reasons:unique,canOpen,needsInput});
   }
   const selectedSkill=group==='skills'||skillReplacement?String(skill):'all';
@@ -310,7 +312,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
   const unit = group==='unit';
   if(impact)result.impacts=[];
   if(equipment&&!Object.hasOwn(GEAR_UPGRADE_SOURCES,source))throw Error('장비 추천의 후보 출처를 선택하세요.');
-  const assembleShelf=equipment&&!manaReplacement&&assemble&&source==='shelf'&&slot==='all';
+  const assembleShelf=equipment&&!manaReplacement&&!nonImproving&&assemble&&source==='shelf'&&slot==='all';
   const locked=new Set(assembleShelf?lockedSlots:[]);
   const previousOffhand=equipment && normalizeBuild(document.targetBuild).gear.slots[1]?.itemId;
   const canReplace=({edits:[edit]})=>!locked.has(edit.slotIndex)
@@ -389,7 +391,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       continue;
     }
     if(!comparison.supported){
-      const needsInput=equipment&&comparison.reasons.some(reason=>reason.startsWith('현재: ')
+      const needsInput=(equipment||skillReplacement)&&comparison.reasons.some(reason=>reason.startsWith('현재: ')
         &&inputDestinations(after,reason.slice(4),after[metric]).some(link=>link.edit&&link.key));
       block(comparison.reasons,candidate,true,needsInput);
       continue;
@@ -407,10 +409,13 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     const manaImpact=manaReplacement&&Number.isFinite(candidateMana)&&comparison.delta>=0&&candidateMana<baseMana
       ? {base:baseMana,value:candidateMana,saved:baseMana-candidateMana} : null;
     const rankDelta=row=>row.manaImpact?.saved??row.skillImpact?.delta??row.delta;
-    if(manaReplacement ? manaImpact : (skillImpact?.delta??comparison.delta)>0){
-      if(previousOffhand && candidate.edits[0].slotIndex===0 && !next.targetBuild.gear?.slots?.[1]?.itemId)candidate.detail+=' · 서브 무기 해제';
+    const delta=skillImpact?.delta??comparison.delta;
+    if(manaReplacement ? manaImpact : nonImproving ? delta<=0 : delta>0){
+      const slotIndex=candidate.edits[0].slotIndex;
+      const removedOffhand=previousOffhand&&slotIndex===0&&!next.targetBuild.gear?.slots?.[1]?.itemId;
+      if(removedOffhand)candidate.detail+=' · 서브 무기 해제';
       const option = unit ? {label:candidate.label,hypothetical:true} : candidate;
-      const optionChanges = equipment?sameGearOptionChanges(candidate.edits[0],document,report,after):[];
+      const optionChanges = equipment?recommendedGearOptionChanges(slotIndex,report,after,removedOffhand):[];
       result.rows.push({...option,metric,value:comparison.value,delta:comparison.delta,percent:comparison.percent,
         ...(!unit&&upgradeDetails(report,after,metric)),
         ...(optionChanges.length&&{optionChanges}),
@@ -473,7 +478,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
     const details=combination.flatMap((edit,index)=>{
       const removedOffhand=edit.slotIndex===0 && gear[1]?.itemId && !combined.targetBuild.gear.slots[1]?.itemId;
       return [`${SEASON_GEAR_SLOT_LABELS[edit.slotIndex]} · ${seed.details[index]}${removedOffhand?' · 서브 무기 해제':''}`,
-        ...sameGearOptionChanges(edit,document,report,combinedReport)];
+        ...recommendedGearOptionChanges(edit.slotIndex,report,combinedReport,removedOffhand)];
     });
     while(!exact&&seed&&selectedSlots.size<SEASON_GEAR_SLOT_LABELS.length){
       const available=shelf.filter(item=>!selectedItems.has(item.id));
@@ -495,7 +500,7 @@ export async function rankSeasonUpgrades(document,report,{mode='options',slot='a
       const removedOffhand=best.edit.slotIndex===0 && combined.targetBuild.gear.slots[1]?.itemId && !best.next.targetBuild.gear.slots[1]?.itemId;
       combination.push(best.edit);
       details.push(`${SEASON_GEAR_SLOT_LABELS[best.edit.slotIndex]} · ${best.detail}${removedOffhand?' · 서브 무기 해제':''}`);
-      details.push(...sameGearOptionChanges(best.edit,combined,combinedReport,best.after));
+      details.push(...recommendedGearOptionChanges(best.edit.slotIndex,combinedReport,best.after,removedOffhand));
       selectedSlots.add(best.edit.slotIndex);
       selectedItems.add(best.edit.value.id);
       combined=best.next;

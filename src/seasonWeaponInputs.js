@@ -4,6 +4,11 @@ import { findItemById } from './catalog.js';
 
 export const DUAL_WIELD_ATTACK_SOURCE = 'https://tlidb.com/en/Attack';
 
+const singleHitAlternatingSkills = new Set([
+  'Blade_of_Glory', 'Earthshatter', 'Kinetic_Thrust', 'Overpower', 'Ravaging_Slash',
+]);
+const singlePhysicalHitDetail = /\nSimple\n(?:Casts this skill to attack in a (?:fan-shaped|square) area in front|Casts the skill and pummels the ground in front), dealing Attack Physical Damage equal to ([\d.]+)%(?: of)? Base Damage on hit\.\nDetails\n[^\n]+:\nDeals Attack Physical Damage equal to \1%(?: of)? Base Damage$/u;
+
 const types = { physical: "물리", fire: "화염", cold: "냉기", lightning: "번개", erosion: "부식" };
 export const WEAPON_FIELDS = Object.fromEntries([
   ["weaponSpeed", { label: "보정 전 무기 초당 공격 횟수", min: .01, max: 20 }],
@@ -32,8 +37,8 @@ export function seasonDamageContext(build, index, id) {
   const weapon = attack ? seasonWeaponProfile(build) : null;
   const offhandTags = findItemById(build?.gear?.slots?.[1]?.itemId)?.tags;
   const card = SS14_CARDS_EN.records[id];
-  const usesAlternation = card?.sourceRecordKey === 'Moon_Strike' || card?.sourceRecordKey === 'Blade_of_Glory'
-    && /\nDetails\nBlade of Glory:\nDeals Attack Physical Damage equal to [\d.]+% of Base Damage$/u.test(card.detail);
+  const usesAlternation = card?.sourceRecordKey === 'Moon_Strike' || singleHitAlternatingSkills.has(card?.sourceRecordKey)
+    && singlePhysicalHitDetail.test(card.detail);
   const canAlternate = weapon?.enabled && usesAlternation
     && card.sourceSeasonEvidence?.actualSeason === 14 && card.sourceSeasonEvidence.verificationComplete
     && offhandTags?.includes('mainHand') && !offhandTags.includes('twoHand');

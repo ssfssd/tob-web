@@ -13,6 +13,7 @@ import { theaElixirTimingKeys } from './seasonTheaEvents.js';
 import { isThea } from './seasonTheaRevelation.js';
 import { observedSkillCostFields } from './seasonDps.js';
 import { usesExtensionInput } from './seasonExtensions.js';
+import { seasonPartialDpsReview } from './seasonCalculationIssues.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -295,15 +296,25 @@ export function compareSeasonDpsSnapshots(before, after, metric = 'fullDps') {
 
 // An explicitly bounded comparison of saved inputs, never a full-build or cost
 // optimizer. Unknown changes and different combat scenarios cannot be ranked.
-export function recommendSeasonWorkspaces(document, candidates, metric = "life", { baselineReport, describeDpsChange, describeEncounterChanges } = {}) {
-  if (!Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
+export function recommendSeasonWorkspaces(document, candidates, metric = "life", {
+  baselineReport, describeDpsChange, describeEncounterChanges, confirmationFor = ()=>null,
+} = {}) {
+  const partialMetric = metric === 'partialDps';
+  if (!partialMetric && !Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
   exportSeasonWorkspace(document);
-  const dpsMetric = metric === 'fullDps' || metric === 'assumedDps';
-  const calculate = metric === 'assumedDps' || dpsMetric && describeDpsChange ? calculateEditorSeasonBuild : calculateSeasonBuild;
+  const dpsMetric = partialMetric || metric === 'fullDps' || metric === 'assumedDps';
+  const encounterMetric = partialMetric ? 'fullDps' : metric;
+  const calculate = partialMetric || metric === 'assumedDps' || dpsMetric && describeDpsChange ? calculateEditorSeasonBuild : calculateSeasonBuild;
   const baseline = baselineReport ?? calculate(document.targetBuild, { sourceBuild: document.sourceBuild });
-  const baseValue = metricValue(baseline, metric);
+  const confirmedPartial = (doc, report) => {
+    const review=seasonPartialDpsReview(doc,report);
+    return review && review.confirmation===confirmationFor(doc.id) ? review : null;
+  };
+  const baselinePartial = partialMetric ? confirmedPartial(document,baseline) : null;
+  const baselineExclusions = baselinePartial ? stable(baselinePartial.exclusionScope) : null;
+  const baseValue = partialMetric ? baselinePartial?.dps ?? null : metricValue(baseline, metric);
   const baselineReasons = validationReasons(document, baseline);
-  if (!Number.isFinite(baseValue)) baselineReasons.push("기준 문서의 선택 지표가 미지원입니다.");
+  if (!Number.isFinite(baseValue)) baselineReasons.push(partialMetric?'기준 빌드의 제외 항목을 먼저 확인하세요.':"기준 문서의 선택 지표가 미지원입니다.");
   const seen = new Set([document.id]);
   const rows = candidates.filter((c) => c.id !== document.id).map((candidate) => {
     const reasons = [...baselineReasons];
@@ -315,28 +326,35 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life",
       exportSeasonWorkspace(candidate);
       report = calculate(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
       reasons.push(...validationReasons(candidate, report));
-      if (stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
-      if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,metric)
+      if (!dpsMetric && stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
+      if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,encounterMetric)
         : scenario(document.targetBuild) !== scenario(candidate.targetBuild)) {
         reasons.push("기본 속성·전투 조건이 서로 다릅니다.");
         if (dpsMetric && describeEncounterChanges) row.encounterChanges=describeEncounterChanges(
-          {document,report:baseline},{document:candidate,report},metric);
+          {document,report:baseline},{document:candidate,report},encounterMetric);
       }
       if (!dpsMetric && unresolved(baseline) !== unresolved(report)) reasons.push("미해석 효과 또는 근거가 달라 우열을 확정할 수 없습니다.");
       if (["directDps", "expectedHitDps", "elixirAverageDps"].includes(metric) && baseline.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id
         !== report.coupledSkills.rows.find((r) => r.rowIndex === 0)?.id) reasons.push("서로 다른 스킬의 직접 DPS는 비교하지 않습니다.");
-      row.value = metricValue(report, metric);
-      if (!Number.isFinite(row.value)) reasons.push("후보의 선택 지표가 미지원입니다.");
+      if (partialMetric) {
+        const partial=confirmedPartial(candidate,report);
+        if (!partial) reasons.push('이 빌드에서 제외 항목을 확인해야 합니다.');
+        else if (baselineExclusions && baselineExclusions!==stable(partial.exclusionScope)) reasons.push('제외 항목이나 슬롯 설정이 다릅니다.');
+        else if (!reasons.length) row.value=partial.dps;
+      } else {
+        row.value = metricValue(report, metric);
+        if (!Number.isFinite(row.value)) reasons.push("후보의 선택 지표가 미지원입니다.");
+      }
     } catch { reasons.push("SS14 후보 문서 형식 검증 실패"); }
     if (!reasons.length) {
       row.delta = row.value - baseValue;
-      if (dpsMetric && describeDpsChange) row.changes=describeDpsChange(baseline,report,metric);
+      if (dpsMetric && !partialMetric && describeDpsChange) row.changes=describeDpsChange(baseline,report,metric);
     }
     return row;
   });
   const eligible = rows.filter((r) => !r.reasons.length).sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
-  const best = eligible[0]?.delta > 0 ? eligible.filter((r) => r.value === eligible[0].value).map((r) => r.id) : [];
-  return { metric, baseValue, baselineReasons, rows, best, fullBuildSupported: false,
+  const best = !partialMetric && eligible[0]?.delta > 0 ? eligible.filter((r) => r.value === eligible[0].value).map((r) => r.id) : [];
+  return { metric, baseValue, baselineReasons, rows, best, excluded:baselinePartial?.excluded, fullBuildSupported: false,
     scope: "saved-ss14-documents-confirmed-subset", gameProbability: null, expectedGameCost: null,
     limitation: "저장된 후보의 확인된 효과만 비교합니다. 미해석 효과가 같아도 전체 성능 우열을 보장하지 않으며 전체 빌드·최적해·제작 기대비용 추천이 아닙니다." };
 }

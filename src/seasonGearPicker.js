@@ -3,8 +3,10 @@ import { seasonGearSlotsForIndex } from './seasonGearSlots.js';
 import { calculateEditorSeasonBuild } from './seasonAssumedDps.js';
 import { editSeasonWorkspace } from './seasonWorkspace.js';
 import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
+import { compareSeasonPartialDps } from './seasonCalculationIssues.js';
 import { itemGearKind } from './seasonItemCraft.js';
 import { normalizeBuild } from './engine.js';
+import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { summarizeSeasonOptionSources } from './seasonNumericStats.js';
 import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { getSkillEnergyUsage } from './skillRuntimeModel.js';
@@ -400,6 +402,7 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
   const baseline={document,report}, candidate={document:next,report:after};
   const comparison=compareSeasonDpsSnapshots(baseline,candidate,metric);
   const assumedComparison=metric==='assumedDps'?comparison:compareSeasonDpsSnapshots(baseline,candidate,'assumedDps');
+  const partialComparison=metric==='fullDps'&&!comparison.supported?compareSeasonPartialDps(baseline,candidate,comparison):null;
   const stats=[];
   for(const [key,label] of Object.entries({strength:'힘',dexterity:'민첩',intelligence:'지혜',life:'최대 HP',mana:'최대 MP',shield:'최대 보호막',armor:'아머',evasion:'회피'})){
     const a=report.character.values[key], b=after.character.values[key];
@@ -408,7 +411,11 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
   const gear=edit.kind==='gear-selection'||(edit.kind==='shelf-apply'&&edit.value.kind==='gear');
   const offhandRemoved=gear && edit.slotIndex===0 && !!normalizeBuild(document.targetBuild).gear.slots[1]?.itemId && !next.targetBuild.gear?.slots?.[1]?.itemId;
   const slots = gear ? (offhandRemoved ? [edit.slotIndex,1] : [edit.slotIndex]) : [];
-  const options = gearOptionComparisons(report,after,slots);
+  const options = edit.kind==='swap-rings'?[7,8].flatMap(index=>gearOptionComparisons(report,after,[index]).map(({before,after})=>{
+    const label=option=>option&&{...option,label:option.label.startsWith(SEASON_GEAR_SLOT_LABELS[index]+' · ')
+      ?option.label:SEASON_GEAR_SLOT_LABELS[index]+' · '+option.label};
+    return {before:label(before),after:label(after)};
+  })):gearOptionComparisons(report,after,slots);
   let skill;
   const useAssumed = assumedComparison.supported && (metric==='assumedDps' || !comparison.supported);
   const dpsBasis = useAssumed ? 'assumedDps' : 'fullDps';
@@ -438,7 +445,7 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
       weaponDamageRoutes:hands,elixirDamageRoutes:states,elixirDpsStates,removedSupports,
       ...(energyChanged?{energyChange:{before:beforeEnergy,after:afterEnergy}}:{})};
   }
-  return {comparison,offhandRemoved,assumedComparison,stats,options,dpsBasis,
+  return {comparison,offhandRemoved,assumedComparison,partialComparison,stats,options,dpsBasis,
     ...(slots.some(index=>index<2)&&{weaponComparisons:weaponComparisons(document.targetBuild,next.targetBuild,slots)}),
     ...(comparable?compareSeasonDamageBreakdown(report,after,dpsBasis):{skillDpsChanges:[],skillSpeedChanges:[],manualUsageChanges:[],numbedDamageChanges:[],uptimeChanges:[]}),
     ...compareSeasonResourceCosts(report,after,dpsBasis,{allActive:gear,rowIndex:skillEdit?edit.rowIndex:undefined}),

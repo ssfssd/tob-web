@@ -9171,7 +9171,9 @@ function renderHeroTraitWorkspace() {
           <button class="hero-trait-remove" data-action="hero-remove">${ui("heroTraitRemove")}</button>
         </div>
       </header>
-      <p class="calculation-limit-notice" data-role="hero-calculation-unsupported" role="note">${calculationCopy("TLIDB SS13 원문에서 대상·연산·수치가 확인된 특성·추억 효과만 계산합니다 · 나머지는 원인별 미지원", "Only trait and memory effects with verified TLIDB SS13 targets, operations, and values are calculated · the rest remain unsupported by reason")}</p>
+      <details class="ingame-calculation-note"><summary>${calculationCopy("계산 지원 범위", "Calculation coverage")}</summary>
+        <p class="calculation-limit-notice" data-role="hero-calculation-unsupported" role="note">${calculationCopy("확인된 SS13 특성·추억 효과를 계산합니다.", "The planner calculates verified SS13 trait and memory effects.")}</p>
+      </details>
       <nav class="hero-stage-tabs" aria-label="${calculationCopy("특성 레벨 선택", "Trait level")}">
         ${stages.map((stage) => `<button data-action="hero-stage-activate" data-stage-level="${stage.requiredLevel}" aria-pressed="${stage.requiredLevel === activeStageLevel}">${ui("levelValue", { value: stage.requiredLevel })}${stage.locked ? ` · ${ui("heroTraitLocked")}` : ""}</button>`).join("")}
       </nav>
@@ -9518,12 +9520,12 @@ function renderHeroMemoryEditor() {
       ${draft.screenshotMatchLabel
         ? `<p class="screenshot-editor-match" data-role="screenshot-editor-match">${escapeHtml(ui("screenshotRecognizedEditorHint", { name: draft.screenshotMatchLabel }))}</p>`
         : ""}
-      <p class="calculation-limit-notice" data-role="hero-memory-calculation-unsupported" role="note">${calculationCopy("TLIDB SS13 원문에서 대상·연산·수치가 확인된 추억 효과만 계산합니다 · 나머지는 원인별 미지원", "Only memory effects with verified TLIDB SS13 targets, operations, and values are calculated · the rest remain unsupported by reason")}</p>
       ${isRevivalExtraSlot
         ? `<p class="hero-memory-revival-extra-hint">${ui("heroMemoryRevivalExtraEditorHint", { modifier: draft.effect.valueModifierPercent })}</p>`
         : ""}
       <details class="hero-memory-coverage-disclosure">
-        <summary>${calculationCopy("데이터 출처·한국어 표시 범위", "Data sources and locale coverage")}</summary>
+        <summary>${calculationCopy("계산 범위·출처", "Calculation coverage and sources")}</summary>
+        <p class="calculation-limit-notice" data-role="hero-memory-calculation-unsupported" role="note">${calculationCopy("확인된 SS13 추억 효과를 계산합니다.", "The planner calculates verified SS13 memory effects.")}</p>
         ${renderHeroMemoryCoverage(memoryType, dataset.activeHeroMemoryReport)}
       </details>
       <div class="hero-memory-editor-body">

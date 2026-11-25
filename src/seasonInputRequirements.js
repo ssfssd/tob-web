@@ -8,6 +8,8 @@ import { THEA_SS14_ID } from './seasonHeroSelection.js';
 import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing, SEAL_CONVERSION_UNRESOLVED } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
+import { MISSING_DESTINY_ROLL } from './seasonDestiny.js';
+import { MISSING_MEMORY_ROLL } from './seasonMemoryRolls.js';
 import { NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED, REVELATION_NUMBED_REQUIRED } from './seasonTheaCombatInputs.js';
 const customOptions={ id:'custom', label:'사용자 옵션', section:'combat', role:'custom-options', pattern:/사용자 옵션 \d+/u };
 const routes = [
@@ -24,6 +26,32 @@ const routes = [
 ];
 export function inputDestinations(report,reason,dps=report?.fullDps) {
   const links=[];
+  const slateInputs=(report?.componentProjection?.slateOptionInputs??[]).filter(input=>input.reason===reason);
+  if(slateInputs.length)return slateInputs.map(({key,label})=>({section:'divinity',type:'slate-option',role:'slate-option-search',key,label}));
+  if(reason.endsWith(MISSING_MEMORY_ROLL)){
+    const slots=new Map();
+    for(const row of report?.componentProjection?.rows??[]){
+      if(reason!==MISSING_MEMORY_ROLL&&reason!==`${row.name}: ${MISSING_MEMORY_ROLL}`)continue;
+      if(!row.blockers?.some(blocker=>blocker.reason===MISSING_MEMORY_ROLL))continue;
+      const missing=row.memoryRollControls?.find(control=>control.value==='');
+      if(!missing||slots.has(missing.index))continue;
+      const index=missing.index;
+      slots.set(index,{section:'hero',type:'memory',index,edit:'memory-roll',key:missing.key,label:`${[45,60,75][index]}레벨 추억 수치 입력`});
+    }
+    return [...slots.values()];
+  }
+  if(reason.endsWith(MISSING_DESTINY_ROLL))
+    return (report?.componentProjection?.rows??[]).flatMap(row=>{
+      if(reason!==MISSING_DESTINY_ROLL&&reason!==`${row.name}: ${MISSING_DESTINY_ROLL}`)return [];
+      if(!row.blockers?.some(blocker=>blocker.reason===MISSING_DESTINY_ROLL))return [];
+      const location=/^pact\.slots\.([0-2])\.(?:rings\.(innerRing[1-6]|midRing[1-3])|undeterminedFate\.slots\.([0-4]))$/u.exec(row.path);
+      const missing=row.destinyRollControls?.find(control=>control.value==='');
+      if(!location||!missing)return [];
+      const [,position,ring,extra]=location;
+      const index=Number(position);
+      const label=ring?`${ring.startsWith('inner')?'내환':'중환'} ${ring.at(-1)}`:`미정 숙명 ${Number(extra)+1}`;
+      return [{section:'pact',index,ring:ring??`extra-${extra}`,edit:'destiny-roll',key:missing.key,label:`정령 ${index+1} · ${label} 수치 입력`}];
+    });
   if (/고정 스킬 소모 감소와 소모량 배율|현재 1회 MP·HP 소모를 다시 입력/u.test(reason))
     return (dps?.rows??[]).filter(row=>row.castCostObservation&&row.blockers?.includes(reason))
       .map(row=>({section:'combat',tab:'conditions',label:`스킬 ${row.rowIndex+1} 관측 소모 입력`,edit:'dps-input',key:`${row.rowIndex}:observedFinalManaCost`}));
@@ -246,8 +274,10 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       ||!row.blockers?.some(t=>reason.includes(t)))continue;
     const dot=(report?.fullDps?.dotAllocationGroups??[]).some(group=>group.slots.some(slot=>
       slot.rowIndex===row.rowIndex&&slot.field===key));
-    add('combat','스킬 '+(row.rowIndex+1)+(key==='dotUptime'||key==='permafrostUptime'?' 유지율 입력':' 조건 입력'),
-      'dps-input',row.rowIndex+':'+key,dot||key==='useShare'?{tab:'conditions'}:{});
+    const quickField=key==='useShare'?'시전 시간 배분':key==='hitChance'?'대상 적중률':null;
+    const label=quickField??(key==='dotUptime'||key==='permafrostUptime'?'유지율':'조건');
+    add('combat','스킬 '+(row.rowIndex+1)+' '+label+' 입력',
+      'dps-input',row.rowIndex+':'+key,dot||quickField&&row.rowIndex<5?{tab:'conditions'}:{});
   }
   if(links.length)return links.filter((l,i)=>links.findIndex(v=>v.key===l.key&&v.index===l.index)===i);
   if(/주력 스킬을 선택/.test(reason))return [{section:'skills',index:0,label:'주력 스킬 선택'}];

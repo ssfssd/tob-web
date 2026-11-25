@@ -4,6 +4,7 @@ import { SS14_DESTINY_RULES } from './data/ss14DestinyRules.generated.js';
 
 const pattern = /[+]?\(-?\d+(?:\.\d+)?–-?\d+(?:\.\d+)?\)/gu;
 const tokens = (text) => [...text.matchAll(pattern)].map((m) => m[0]);
+export const MISSING_DESTINY_ROLL = 'SS14 운명 수치를 현재 원문 범위에서 직접 확인하세요. 이전 시즌 수치는 자동 적용하지 않습니다.';
 
 // Older planner builds counted every equipped spirit node.
 export const pactNodeActive = (slot, key) => !slot?.inactiveNodes?.includes(key);
@@ -51,6 +52,13 @@ export function seasonDestinyOptions(ringSlot) {
     if(!entry?.completeModifierText||entry.instructions.split('\n')[0]!==instruction||!ko)return [];
     return [{id:identity.catalogId,slug:identity.slug,name:ko.name,detail:ko.detail}];
   });
+}
+
+export function pactRingDisplayName(ring,installed) {
+  const id=installed?.destinyId;
+  if(!id)return ring.name;
+  const identity=SS14_DESTINY.identities.find(row=>row.id===id||row.catalogId===id);
+  return seasonDestinyOptions(ring.slotId).find(option=>option.id===identity?.catalogId)?.name??'미확인 숙명';
 }
 
 export function seasonDestinyRow(build, index, ring, { data = SS14_DESTINY, extraIndex } = {}) {
@@ -122,7 +130,7 @@ export function seasonDestinyRow(build, index, ring, { data = SS14_DESTINY, extr
   row.text = rendered.join("\n");
   if(row.activation)row.text=row.text.replace(`${header}\n`,'');
   if (complete && koRendered.every((t) => t !== null)) row.koText.detail = koRendered.join("\n");
-  if (!complete) row.reason = "SS14 운명 수치를 현재 원문 범위에서 직접 확인하세요. 이전 시즌 수치는 자동 적용하지 않습니다.";
+  if (!complete) row.reason = MISSING_DESTINY_ROLL;
   return row;
 }
 

@@ -163,45 +163,64 @@ function renderWeaponComparisons(comparisons, action) {
   }).join('');
 }
 
-export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,extraDetails='',action='장착'}={}){
+export function renderSlotPreview(p,esc,{showDps=true,showResourcesInline=false,showOptionsInline=false,extraDetails='',action='장착',partialConfirmation=null}={}){
   const line=(label,a,b)=>`<li>${label} · ${fmt(a)} → ${fmt(b)} (${signed(b-a)})</li>`;
-  const contributions=p.options.map(describeSeasonOptionChange).filter(Boolean).map(change=>`<li>${esc(change)}</li>`).join('');
+  const optionChanges=p.options.map(describeSeasonOptionChange).filter(Boolean);
+  const optionList=optionChanges.length?`<ul>${optionChanges.map(change=>`<li>${esc(change)}</li>`).join('')}</ul>`:'';
+  const inlineOptions=!showOptionsInline||!optionList?'':optionChanges.length>3
+    ?`<details data-role="slot-option-diff"><summary>옵션 변화 ${optionChanges.length}개</summary>${optionList}</details>`
+    :`<section data-role="slot-option-diff" aria-label="옵션 변화">${optionList}</section>`;
   const {supported,baseValue,value,reasons,encounterMatches}=p.comparison;
+  const partial=p.partialComparison?.confirmation===partialConfirmation?p.partialComparison:null;
   const missingWeaponBase=!supported&&!p.assumedComparison?.supported&&p.weaponComparisons?.length
     && reasons.includes('현재: '+WEAPON_PHYSICAL_BASE_UNVERIFIED);
   const isWeaponBaseReason=reason=>reason.replace(/^(?:기준|현재): /u,'')===WEAPON_PHYSICAL_BASE_UNVERIFIED;
   const otherReasons=missingWeaponBase?reasons.filter(reason=>!isWeaponBaseReason(reason)):reasons;
   const weaponBlocker=missingWeaponBase?`<p data-role="weapon-dps-blocker">${esc(WEAPON_PHYSICAL_BASE_UNVERIFIED)}</p>`:'';
-  const blocked=!supported&&otherReasons.length?`<details><summary>${encounterMatches===false?'전투 조건 변경':'전체 DPS 비교 보류'}</summary><ul>${comparisonReasons(otherReasons,esc)}</ul></details>`:'';
+  const blocked=!supported&&!partial&&otherReasons.length?`<details><summary>${encounterMatches===false?'전투 조건 변경':'전체 DPS 비교 보류'}</summary><ul>${comparisonReasons(otherReasons,esc)}</ul></details>`:'';
   const {baseValue:assumedBefore,value:assumedAfter,supported:assumedSupported}=p.assumedComparison??{};
   const repeated=supported && Number.isFinite(assumedBefore) && Number.isFinite(assumedAfter)
     && fmt(baseValue)===fmt(assumedBefore) && fmt(value)===fmt(assumedAfter)
     && signed(value-baseValue)===signed(assumedAfter-assumedBefore);
-  const assumed=(showDps||supported)&&Number.isFinite(assumedBefore)&&Number.isFinite(assumedAfter)&&!repeated
+  const assumed=!partial&&(showDps||supported)&&Number.isFinite(assumedBefore)&&Number.isFinite(assumedAfter)&&!repeated
     ? dpsRow('방어 전',assumedBefore,assumedAfter,assumedSupported):'';
-  const overall=showDps&&(Number.isFinite(baseValue)||Number.isFinite(value))?dpsRow('전체',baseValue,value,supported):'';
+  const overall=!showDps?'':partial?dpsRow('부분 DPS · 미지원 제외',partial.baseValue,partial.value,true)
+    :Number.isFinite(baseValue)||Number.isFinite(value)?dpsRow('전체',baseValue,value,supported):'';
   const table=overall||assumed?`<table class="slot-dps-table" aria-label="${esc(action)} 전후 DPS"><thead><tr><th scope="col">DPS</th><th scope="col">${esc(action)} 전</th><th scope="col">${esc(action)} 후</th><th scope="col">변화</th></tr></thead><tbody>${overall}${assumed}</tbody></table>`:'';
   const resources=renderResourceChanges(p,esc,{skill:showResourcesInline,action:action==='장착'?'교체':action});
-  const changes=`${showDps?'':table}${renderDamageBreakdown(p,esc,{before:`${action} 전`,after:`${action} 후`})}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${contributions?'<h4>옵션</h4><ul>'+contributions+'</ul>':''}${showResourcesInline?'':resources}${extraDetails}`;
+  const changes=`${showDps?'':table}${renderDamageBreakdown(p,esc,{before:`${action} 전`,after:`${action} 후`})}${p.stats.length?'<h4>캐릭터 수치</h4><ul>'+p.stats.map(v=>line(v.label,v.a,v.b)).join('')+'</ul>':''}${!inlineOptions&&optionList?'<h4>옵션</h4>'+optionList:''}${showResourcesInline?'':resources}${extraDetails}`;
   const details=changes?`<details><summary>변경 수치</summary>${changes}${showDps?'':blocked}</details>`:blocked;
-  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${weaponBlocker}${showDps?table:''}${renderWeaponComparisons(p.weaponComparisons,esc(action))}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
+  const body=`${p.offhandRemoved?'<p>서브 무기 해제 예정</p>':''}${weaponBlocker}${showDps?table:''}${inlineOptions}${renderWeaponComparisons(p.weaponComparisons,esc(action))}${showResourcesInline?resources:''}${details}${showDps&&changes?blocked:''}`;
   return body?`<section aria-label="${esc(action)} 전 수치 비교">${body}</section>`:'';
 }
 export function shelfTools(kind,index,filled,button,candidate=false){
   const attrs=`data-kind="${kind}" data-index="${index}"`;
   const wearable=kind==='gear'||kind==='memory';
   const create=candidate?button('후보만 보관','workshop-store',attrs):wearable?button(kind==='gear'?'장비 제작':'추억 제작','workshop-open',attrs):'';
-  return `<div class="native-slot-actions">${create}${button(wearable?'보관함에서 장착':'보관함 열기','shelf-open',attrs)}${filled&&!candidate?button(wearable?'장착 중인 '+(kind==='gear'?'장비':'추억')+' 보관':'보관함에 저장','shelf-save',attrs):''}</div>`;
+  return `<div class="native-slot-actions">${create}${button(wearable?'보관함에서 장착':'보관함 열기','shelf-open',attrs+(wearable?' data-role="slot-shelf-open"':''))}${filled&&!candidate?button(wearable?'장착 중인 '+(kind==='gear'?'장비':'추억')+' 보관':'보관함에 저장','shelf-save',attrs):''}</div>`;
 }
-export function mobileDpsBar(s,blockedStatus='확인 필요'){
+export const plannerSearchKey = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase('ko').replace(/\s/gu,'');
+
+export function pickerSearchMatcher(query, matchWords=false) {
+  const complete=plannerSearchKey(query);
+  const words=matchWords?query.trim().split(/\s+/u).map(plannerSearchKey):[];
+  return text=>{
+    const key=plannerSearchKey(text);
+    return key.includes(complete)||(words.length>1&&words.every(word=>key.includes(word)));
+  };
+}
+
+export function mobileDpsBar(s,blockedStatus='확인 필요',{partial,review}={}){
   const assumed=s.report.assumedDps;
   const d=s.report.fullDps;
   const showAssumed=!d.supported&&assumed?.supported;
-  const value=showAssumed?assumed.dps:d.dps;
+  const value=partial?.dps??(showAssumed?assumed.dps:d.dps);
   const change=compactSeasonEditDelta(showAssumed?s.editComparison?.assumed:s.editComparison);
-  const body=`<span>${showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):blockedStatus}</b><small data-mobile-delta>${!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small>`;
+  const body=`<span>${partial?'부분 DPS · 미지원 제외':showAssumed?SEASON_ADVISOR_METRICS.assumedDps:'전체 DPS'}</span><b data-mobile-dps>${s.pending.size?'입력 적용 대기':Number.isFinite(value)?fmt(value):blockedStatus}</b><small data-mobile-delta>${!partial&&!s.pending.size&&change?(change.previous?'직전 ':'')+signed(change.value.delta):''}</small>`;
   const hasBlockers=d.blockers?.length||assumed?.blockers?.length;
-  if (!s.pending.size&&!d.supported&&!showAssumed&&hasBlockers)
-    return `<button type="button" class="mobile-dps-bar" aria-label="전체 DPS 보류 이유 보기" data-ss14-action="result-tab" data-tab="calculation" data-show-dps="true" data-focus-role="calculation-requirements">${body}</button>`;
+  if(review)
+    return `<button type="button" class="mobile-dps-bar" aria-label="${partial?'부분 DPS 제외 항목 보기':'미지원 항목 보기'}" data-ss14-action="result-tab" data-tab="calculation" data-focus-role="partial-dps-review">${body}</button>`;
+  if (!s.pending.size&&!d.supported&&hasBlockers)
+    return `<button type="button" class="mobile-dps-bar" aria-label="${blockedStatus==='입력 필요'?'전체 DPS 입력 항목 보기':'전체 DPS 보류 이유 보기'}" data-ss14-action="result-tab" data-tab="calculation" data-show-dps="true" data-focus-role="calculation-requirements">${body}</button>`;
   return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기">${body}</a>`;
 }

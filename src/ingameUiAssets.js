@@ -18,3 +18,21 @@ export function talentTreeIcon(tree) {
 export const coreCardOrnament = `<img class="ingame-core-ornament" src="/assets/ingame-ui/game/core-ornament.png" alt="" aria-hidden="true">`;
 
 export const skillOrbitOrnament = `<span class="ingame-skill-orbit-art" aria-hidden="true"></span>`;
+
+// These IDs retain their original catalog identity. Match the images to the
+// SS14 Korean and English cards before overriding an older catalog URL.
+const ss14GearIconNames = Object.freeze({
+  'gear-tlidb-ss13-112260': 'Helmet_Epic_336',
+  'gear-tlidb-ss13-112170': 'Armor_Epic_451',
+  'gear-tlidb-ss13-112172': 'Armor_Epic_452',
+  'gear-tlidb-ss13-112171': 'Armor_Epic_450',
+  'gear-tlidb-ss13-113286': 'Amulet_Epic_334',
+  'gear-tlidb-ss13-113343': 'Belt_Epic_227',
+  'gear-tlidb-ss13-112443': 'Shoes_Epic_433',
+});
+
+export function seasonGearCardIcon(id) {
+  if (id === 'gear-tlidb-ss13-111412') return 'assets/tlidb-icons/f346669d2b6e27b5590e3cfd.webp';
+  const name = Object.hasOwn(ss14GearIconNames,id) ? ss14GearIconNames[id] : null;
+  return name ? `https://cdn.tlidb.com/UIV2/Common/Icon/UI/Textures/EquipCommon/NoAtlas_112_160/Icon_Equip_${name}_112.webp` : '';
+}

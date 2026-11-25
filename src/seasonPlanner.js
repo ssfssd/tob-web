@@ -1,11 +1,14 @@
-import { matchingTrainingDummy } from "./seasonTrainingDummy.js";
+import { trainingDummySelection } from "./seasonTrainingDummy.js";
 import { usesExtensionInput } from './seasonExtensions.js';
 import { downloadJson } from "./downloadJson.js";
 import { isOfflineEdition, setPlannerHtml } from "./offlinePresentation.js";
-import { createSeasonWorkspace, resetSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, saveSeasonWorkspaces, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
+import { createSeasonWorkspace, resetSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, saveSeasonWorkspaces, deleteSeasonWorkspace, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
 import { prepareSeasonMigration } from "./seasonMigration.js";
 import { calculateEditorSeasonBuild } from "./seasonAssumedDps.js";
+import { seasonPartialDpsReview } from "./seasonCalculationIssues.js";
+import { talentSearchKey } from "./seasonBoardScenes.js";
 import { renderSeasonPlanner, renderNativeDps, renderEditHistory, renderEffectSources, renderBoardComparison, renderDrawerBar, renderSkillPickerFooter, renderSkillCandidateResult, renderEquippedSkillStats, skillSealSummary, nativeSaveStatus } from "./seasonPlannerView.js";
+import { plannerSearchKey, pickerSearchMatcher } from './seasonEditorTools.js';
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { seasonExclusiveSupportSlots } from "./seasonSupport.js";
 import { filterSeasonSelection } from "./seasonSelectionSearch.js";
@@ -25,7 +28,8 @@ import { createItemWorkshop, editItemWorkshop, finishedWorkshopItem, openGearWor
 import { itemGearKind } from './seasonItemCraft.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels, previewSlotEdit } from './seasonGearPicker.js';
 import { observedManaInputState } from './seasonWorkspaceView.js';
-import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
+import { getSeasonSelectionOptions, isTwoHandedWeapon, SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
+import { createDefaultBuild, normalizeBuild } from './engine.js';
 import { seasonTalentNodes } from './seasonNativeSelections.js';
 import {prismForm} from './seasonPrismEditor.js';
 import {inverseFields,inverseGeometry} from './seasonInverseImage.js';
@@ -35,7 +39,7 @@ import { canLookUpIngameBuild, lookUpIngameBuild } from './seasonIngameBuildCode
 import { prepareIngameBuildImport } from './seasonIngameBuildImport.js';
 import {customOptionEditorText} from './seasonCustomOptions.js';
 import { filterSpiritPicker, SPIRIT_PICKER_GROUPS } from './seasonSpiritPicker.js';
-import { inspectSeasonAllocation } from './seasonAllocation.js';
+import { newSeasonTalentAllocationIssue } from './seasonAllocation.js';
 import {createSeasonDraft} from './seasonDraft.js';
 import {SUPPORT_CATEGORIES,supportSearchKey} from './seasonSupportMatrix.js';
 import {containsHanScript} from './gameTextPresentation.js';
@@ -43,6 +47,7 @@ import {findSeasonScreenshotGearValues,findSeasonScreenshotSkillLevel,seasonScre
 import {normalizeScreenshotRegion,screenshotRegionFromPoints} from './screenshotRecognition.js';
 
 export const ACTIVE_SEASON_WORKSPACE_KEY = "tob.activeSeasonWorkspace.v1";
+const partialDpsKey = id => `tob.partialDpsConfirmation.v1.${id}`;
 const stringKinds = new Set(["name", "custom-options", "hero-selection", "hero-choice", "skill-selection", "gear-selection", "support-selection", "memory-selection", "slate-affix", "talent-board", "spirit-selection", "destiny-selection", "thea-board", "elixir-selection", "module-selection", "module-option", "nether-layout", "nether-quality", "nether-banishment"]);
 export function readSeasonPlannerEdit(input) {
   const d = input.dataset, kind = d.seasonEdit;
@@ -60,6 +65,11 @@ const shelfFits = (entry,kind,index) => entry.kind === kind && (kind === 'gear'
 // The current editor has one SS14 document and one calculation. Historical
 // build keys are never written here, including when no SS14 copy exists yet.
 export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = false, recoverDraft = false } = {}) {
+  const readPartialDpsConfirmation = id => {
+    if (!id) return null;
+    try { return storage.getItem(partialDpsKey(id)) || null; }
+    catch { return null; }
+  };
   const loaded = loadSeasonWorkspaces(storage);
   let selectedId;
   try { selectedId = storage.getItem(ACTIVE_SEASON_WORKSPACE_KEY); } catch { /* Loading error remains visible below. */ }
@@ -76,7 +86,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   if(draft?.recovered)document=draft.recovered;
   let savedDocument=loaded.documents.find(d=>d.id===document?.id)??null;
   const state = { document, documents: loaded.documents, section: "overview", overlay: null, dirty: !!draft?.recovered, pending: new Map(), error, notice: draft?.recovered?(draft.copied?'미저장 변경을 복구 사본으로 열었습니다.':'미저장 변경을 복구했습니다.'):'', draftError:draft?.error??'', report: null,
+    partialDpsConfirmation: readPartialDpsConfirmation(document?.id),
     history: createSeasonEditHistory(), gearIndex: 0, skillIndex: 0, supportIndex: null, picker: null, logImport: null, slateEditor:createSlateEditorState(), resultTab:'stats', analysisMetric:null, analysis:null };
+  function defaultSavedDpsMetric() {
+    const review=seasonPartialDpsReview(state.document,state.report);
+    return review && review.confirmation===state.partialDpsConfirmation ? 'partialDps' : preferredSeasonDpsMetric(state.report);
+  }
   let savedTarget = document ? JSON.stringify((savedDocument??document).targetBuild) : "", logRequest = 0;
   let rankingRequested = false;
   if(draft?.recovered&&savedDocument)state.history.record(savedDocument.targetBuild,document.targetBuild);
@@ -89,11 +104,22 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     } catch(e){state.draftSaved=false;state.draftError=e.message||'임시 저장에 실패했습니다. 저장 버튼으로 빌드를 보관하세요.';}
   }
   let root;
+  function currentBuildCopy(suffix) {
+    const copy=importSeasonWorkspace(exportSeasonWorkspace(state.document));
+    copy.targetBuild.name=copy.targetBuild.name.slice(0,160-suffix.length)+suffix;
+    return copy;
+  }
   function captureAnalysisOrigin() {
     if(!state.dirty&&savedDocument?.id===state.document.id)return null;
-    const origin=importSeasonWorkspace(exportSeasonWorkspace(state.document));
-    origin.targetBuild.name=origin.targetBuild.name.slice(0,148)+' · 분석 기준 사본';
-    return origin;
+    return currentBuildCopy(' · 분석 기준 사본');
+  }
+  const rankControls=['upgradeGroup','upgradeSlot','replacementSlot','upgradeSkill','upgradeSource','upgradeResultDirection',
+    'assembleEquipment','assembleCraft','assembleRolls','includeUpgradeCorrosion','lockedEquipmentSlots'];
+  const rankBasis=document=>JSON.stringify([document.sourceBuild,document.targetBuild]);
+  const gearShelfBasis=rows=>JSON.stringify(rows.filter(row=>row.kind==='gear'));
+  function captureRankReturn(document,{blockedIndex,openedIndex}={}) {
+    return {basis:rankBasis(document),job:state.upgrades,blockedIndex,openedIndex,
+      controls:Object.fromEntries(rankControls.map(key=>[key,state[key]]))};
   }
   try { state.shelfCount=readShelf(storage).length; } catch { /* Opening the shelf reports the storage error. */ }
   function storeEntry(entry) {
@@ -127,6 +153,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     state.shelfRows=list.filter(row=>all?row.kind===kind:shelfFits(row,kind,index)).reverse();
     state.overlay={type:'shelf',kind,index,all,counts:Object.fromEntries(['memory','gear','divinity','prism'].map(k=>[k,list.filter(row=>row.kind===k).length]))};
   }
+  function shelfGearTargets(entry,build) {
+    const main=normalizeBuild(build).gear.slots[0]?.itemId;
+    return SEASON_GEAR_SLOT_LABELS.flatMap((_,index)=>
+      (index!==1||!isTwoHandedWeapon(main))&&shelfFits(entry,'gear',index)?[index]:[]);
+  }
+  function previewShelfItem(entry, preferredIndex=entry.index) {
+    const panel=state.overlay, baseline=panel.boardDraft??state;
+    const targets=panel.all&&entry.kind==='gear'?shelfGearTargets(entry,baseline.document.targetBuild):[panel.all?entry.index:panel.index];
+    const index=targets.includes(preferredIndex)?preferredIndex:targets[0];
+    const preview=index===undefined?null:previewSlotEdit(baseline.document,baseline.report,{kind:'shelf-apply',slotIndex:index,value:entry},{includeSnapshot:true});
+    Object.assign(panel,{candidate:entry.id,candidateIndex:index,candidateTargets:targets,preview});
+  }
   let viewportEvents;
   let customOptionTimer;
   let skillCandidateTimer;
@@ -140,6 +178,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     picker.preview=previewSlotEdit(state.document,state.report,picker.edit);
     picker.removalPreview=null;
     picker.previewDocument=picker.draft.document;
+  }
+  function resetGearCandidate(changes={}) {
+    const {query='',filter='',gearKind=''}=state.picker??{};
+    state.picker={query,filter,gearKind,candidate:'',...changes};
   }
   function selectGearCandidate(index,id){
     const draft=itemGearKind(id)?openGearWorkshop(index,state.document.targetBuild,id):null;
@@ -208,19 +250,33 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       api.flush();
       state.talentPicking=false;
       state.section=section;
-      state.overlay={type:'board',section,document:state.document,report:state.report,pending:new Map()};
+      state.overlay={type:'board',section,document:state.document,report:state.report,pending:new Map(),history:createSeasonEditHistory()};
       state.focusRole='board-heading';
     },
-    stageBoard(next) {
-      const report=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
-      Object.assign(state.overlay,{document:next,report});
+    stageBoard(next,{record=true}={}) {
+      const draft=state.overlay;
+      if(next===draft.document)return;
+      const report=next===state.document?state.report:calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
+      if(record&&!draft.history.record(draft.document.targetBuild,next.targetBuild))return;
+      Object.assign(draft,{document:next,report});
     },
-    stageTalentAllocation(next,index) {
-      const path='talents.boards.'+index;
-      const key=issue=>JSON.stringify([issue.reason,issue.nodeId]);
-      const before=new Set(inspectSeasonAllocation(api.workingDocument().targetBuild).issues.filter(i=>i.path===path).map(key));
-      const added=inspectSeasonAllocation(next.targetBuild).issues.find(i=>i.path===path&&!before.has(key(i)));
-      if(added)throw new Error(added.reason);
+    restoreBoard(redo=false) {
+      const draft=state.overlay;
+      if(draft?.type!=='board'||draft.rosterBase)return;
+      api.flush();
+      const target=draft.history[redo?'redo':'undo'](draft.document.targetBuild);
+      if(!target)return;
+      const original=JSON.stringify(target)===JSON.stringify(state.document.targetBuild);
+      api.stageBoard(original?state.document:{...draft.document,targetBuild:target},{record:false});
+      if(draft.section==='divinity')state.slateEditor=createSlateEditorState();
+      state.focusRole=(redo?draft.history.canRedo:draft.history.canUndo)?(redo?'board-redo':'board-undo'):'board-heading';
+    },
+    stageTalentAllocation(next,index,{showLockedInInspector=false}={}) {
+      const added=newSeasonTalentAllocationIssue(api.workingDocument().targetBuild,next.targetBuild,index);
+      if(added){
+        if(showLockedInInspector){state.focusRole='talent-inspector';return;}
+        throw new Error(added.reason);
+      }
       api.stageBoard(next);
     },
     applyBoard() {
@@ -287,6 +343,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const resultScroll = globalThis.document.querySelector?.('.native-dps-dock')?.scrollTop ?? 0;
       const modalScroll = globalThis.document.querySelector?.(".season-native-modal-body")?.scrollTop ?? 0;
       const cardScroll = root.querySelector?.('.pact-cards')?.scrollTop ?? 0;
+      const talentMap=root.querySelector?.('.talent-drawer [data-talent-panel]');
+      const talentScroll=talentMap?.scrollLeft??0;
       const previousList=root.querySelector?.('.gear-drawer .native-picker-list');
       const listScroll=previousList?.scrollTop??0;
       const candidatePane=root.querySelector?.('.gear-comparison-body[data-candidate]');
@@ -322,6 +380,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       const nextPane=root.querySelector?.('.gear-comparison-body[data-candidate]');
       if(nextPane&&candidateScroll)nextPane.scrollTop=candidateScroll;
+      const nextTalentMap=root.querySelector?.('.talent-drawer [data-talent-panel]');
+      if(nextTalentMap){
+        if(nextTalentMap.dataset.talentPanel===talentMap?.dataset.talentPanel)nextTalentMap.scrollLeft=talentScroll;
+        if(state.revealTalentNode){
+          const selected=nextTalentMap.querySelector('[data-talent-node][aria-pressed="true"]')?.getBoundingClientRect();
+          if(selected){
+            const map=nextTalentMap.getBoundingClientRect();
+            if(selected.left<map.left)nextTalentMap.scrollLeft+=selected.left-map.left;
+            else if(selected.right>map.right)nextTalentMap.scrollLeft+=selected.right-map.right;
+          }
+        }
+      }
+      state.revealTalentNode=false;
       for (const field of globalThis.document.querySelectorAll?.("[data-season-edit]") ?? []) {
         const pending = state.pending.get(editKey(readSeasonPlannerEdit(field)));
         if (pending) field.value = pending.value;
@@ -348,7 +419,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (state.focusRole) {
         const detail = globalThis.document.querySelector?.(`[data-role="${state.focusRole}"]`);
         if (detail) {
-          for(let p=detail;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+          const ancestor=detail.matches?.('summary[data-focus-collapsed]')?detail.parentElement?.parentElement:detail;
+          for(let p=ancestor;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
           const focusTarget=detail.matches?.('button,input,select,textarea,summary,[tabindex]') ? detail
             : detail.querySelector?.(detail.tagName==='DETAILS'?'summary':'input,select,textarea');
           focusTarget?.focus({preventScroll:true});
@@ -361,6 +433,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         const scope=f.inResults?root.querySelector?.('#native-result-panel'):
           root.querySelector?.('.season-native-modal-body')??root.querySelector?.('.season-native-scroll');
         const field=[...(scope?.querySelectorAll?.('[data-season-edit]')??[])].find(el=>el.dataset.seasonEdit===f.edit
+          && (f.edit!=='memory-roll'||el.type!=='range')
           && (f.row===undefined || el.dataset.row===f.row && el.dataset.support===f.support)
           && ((el.dataset.key??el.dataset.roll)===f.key || (el.dataset.fieldAliases && JSON.parse(el.dataset.fieldAliases).includes(f.key))));
         if(field){
@@ -390,6 +463,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.section='skills';state.skillIndex=index;state.supportIndex=support;
       state.overlay={type:'skills',index,supportIndex:support,returnSection:current?.returnSection,returnRole:current?.returnRole,
         originSlot:current?.originSlot??(fromSlot?{index,support}:null),initial:current?.initial??{document:state.document,report:state.report}};state.picker=null;
+      if(Number.isInteger(support)&&support<5&&support===host.unlockedSupportCount)
+        state.picker={candidate:'',query:'',unlockSupportSlot:true};
       state.focusRole='slot-detail-heading';
     },
     openMemory(index) {
@@ -413,6 +488,20 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         state.error='';
         state.focusRole='board-heading';
         return;
+      }
+      if(state.overlay?.type==='shelf'){
+        const {slotReturn,all}=state.overlay;
+        if(slotReturn && !equipped){
+          state.overlay=slotReturn.overlay;
+          state.picker=slotReturn.picker;
+          state.focusRole='slot-shelf-open';
+          return;
+        }
+        if(all){
+          state.overlay=null;
+          state.focusRole='home-shelf';
+          return;
+        }
       }
       if(state.overlay?.type==='board') {
         state.slateEditor=createSlateEditorState();state.pactRoster=null;state.slateDrag=null;
@@ -447,6 +536,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       if (!state.focusRole && ['files','saves','share'].includes(state.overlay?.type)) state.focusRole='open-'+state.overlay.type;
       if(state.overlay?.type==='reset-build')state.focusRole='reset-build';
+      if(state.overlay?.type==='ring-swap')state.focusRole='ring-swap-open';
       if(state.fromOverview){
         state.section='overview';state.fromOverview=false;
         if(state.homeGearRole){state.focusRole=state.homeGearRole;state.homeGearRole=null;}
@@ -503,13 +593,18 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       try { storage.setItem(ACTIVE_SEASON_WORKSPACE_KEY, state.document.id); }
       catch { state.notice += " 다음 시작 빌드 선택은 저장하지 못했습니다."; }
     },
-    compare() {
+    compare(savedId) {
       api.flush();
       const loaded = loadSeasonWorkspaces(storage);
       if (loaded.error) throw new Error(loaded.error);
       state.documents = loaded.documents;
-      state.analysis = recommendSeasonWorkspaces(state.document, loaded.documents, state.analysisMetric ?? preferredSeasonDpsMetric(state.report), {
+      const candidates=savedId?loaded.documents.filter(document=>document.id===savedId):loaded.documents;
+      if(savedId&&!candidates.length)throw new Error('저장 빌드를 찾을 수 없습니다.');
+      const fallback=defaultSavedDpsMetric();
+      const metric=state.analysisMetric==='partialDps'&&fallback!=='partialDps'?fallback:state.analysisMetric??fallback;
+      state.analysis = recommendSeasonWorkspaces(state.document, candidates, metric, {
         baselineReport:state.report,
+        confirmationFor:id=>id===state.document.id?state.partialDpsConfirmation:readPartialDpsConfirmation(id),
         describeEncounterChanges:encounterInputChanges,
         describeDpsChange:(before,after,dpsBasis)=>({
           dpsBasis,
@@ -558,10 +653,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.upgrades=job;
       const active=()=>state.upgrades===job;
       try{
+        const shelf=usesShelf?readShelf(storage):[];
+        if(usesShelf)job.shelfBasis=gearShelfBasis(shelf);
         const result=await rankSeasonUpgrades(state.document,state.report,{slot:(replacement?state.replacementSlot:state.upgradeSlot)??'all',group,skill:state.upgradeSkill??'all',
           assemble:(replacement?state.assembleEquipment:group==='craft'?state.assembleCraft:group==='gear'&&state.assembleRolls)===true,source,
           includeCorrosion:state.includeUpgradeCorrosion===true,lockedSlots:state.lockedEquipmentSlots,
-          shelf:usesShelf?readShelf(storage):[],active,
+          showNonImproving:state.upgradeResultDirection==='nonImproving',
+          shelf,active,
           progress(checked,total){
             Object.assign(job,{checked,total});
             const out=root?.querySelector?.('[data-upgrade-progress]');
@@ -585,7 +683,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const next = loaded.documents.find(d => d.id === id);
       if (!next) throw new Error("저장한 빌드를 찾을 수 없습니다.");
       state.document = next; state.documents = loaded.documents; state.pending.clear(); state.dirty = false; state.overlay = null; state.fromOverview=false; state.error = "";
+      state.partialDpsConfirmation=readPartialDpsConfirmation(next.id);
       state.rankTrialOrigin=null;
+      state.rankTrialReturn=null;
       rankingRequested=false;
       state.calculationIndex=0;
       state.history.clear(); state.supportIndex = null; state.picker = null; savedTarget = JSON.stringify(next.targetBuild);
@@ -596,7 +696,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       state.notice=next.targetBuild.name+" 빌드를 열었습니다.";
       try { storage.setItem(ACTIVE_SEASON_WORKSPACE_KEY, id); } catch { state.notice = "빌드를 열었지만 다음 시작 선택은 저장하지 못했습니다."; }
     },
-    openRequirement({section,tab,index=0,supportIndex,type,role,edit,key}) {
+    openRequirement({section,tab,index=0,supportIndex,ring,type,role,edit,key}) {
       if(tab==='conditions'){
         state.resultTab=tab;state.focusRole=role;
         state.focusField=edit?{edit,key,inResults:true}:null;
@@ -609,7 +709,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if(type==='memory')api.openMemory(index);
       if(['talents','pact','divinity'].includes(section)){
         if(section==='talents')state.talentIndex=index;
-        if(section==='pact')state.pactIndex=index;
+        if(section==='pact'){state.pactIndex=index;state.pactRing=ring??null;state.pactRoster=null;}
+        if(section==='divinity'&&type==='slate-option'){
+          const [selectedId,socket]=key.split('|');
+          state.slateEditor={...createSlateEditorState(),selectedId,socket};
+        }
         api.openBoard(section);
       }
       if(section==='skills'&&(!type||type==='skills'))api.openSkill(index,supportIndex??null);
@@ -826,27 +930,48 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       draft.document=doc;
     },
     input(event) {
-      if(event.target.hasAttribute?.('data-blocked-candidate-filter')){
+      if(event.target.hasAttribute?.('data-talent-search')&&state.overlay?.section==='talents'){
+        state.overlay.talentSearch={index:Number(event.target.dataset.index),query:event.target.value};
+        const query=talentSearchKey(event.target.value);
+        const stage=event.target.closest('.tree-stage');
+        const results=stage.querySelector('[data-talent-results]');
+        results.hidden=!query;
+        let found=false;
+        for(const row of results.querySelectorAll('[data-talent-search-result]')){
+          row.hidden=!query||!row.dataset.talentSearchResult.includes(query);
+          found||=!row.hidden;
+        }
+        results.querySelector('[data-talent-search-empty]').hidden=found;
+        for(const node of stage.querySelectorAll('[data-talent-search-node]'))
+          node.classList.toggle('tree-search-match',Boolean(query&&node.dataset.talentSearchNode.includes(query)));
+        return;
+      }
+      if(event.target.hasAttribute?.('data-blocked-candidate-filter')||event.target.hasAttribute?.('data-blocked-candidate-input-only')){
         const panel=event.target.closest('[data-role="ranking-exclusions"]');
-        const key=value=>String(value).normalize('NFKC').toLocaleLowerCase('ko').replace(/\s/gu,'');
-        const query=key(event.target.value);
+        const search=panel.querySelector('[data-blocked-candidate-filter]').value;
+        const query=plannerSearchKey(search);
+        const inputOnly=panel.querySelector('[data-blocked-candidate-input-only]').checked;
+        if(state.upgrades)state.upgrades.blockedFilter={query:search,inputOnly};
         let visible=false;
         for(const entry of panel.querySelectorAll('[data-blocked-candidate-name]')){
-          entry.hidden=!key(entry.dataset.blockedCandidateName).includes(query);
+          entry.hidden=!plannerSearchKey(entry.dataset.blockedCandidateName).includes(query)
+            ||inputOnly&&!entry.hasAttribute('data-blocked-candidate-needs-input');
           visible||=!entry.hidden;
         }
         panel.querySelector('[data-blocked-candidate-empty]').hidden=visible;
         return;
       }
-      if(event.target.hasAttribute?.('data-memory-search')){
-        const picker=event.target.closest('[data-memory-picker]');
+      if(event.target.hasAttribute?.('data-memory-search')||event.target.hasAttribute?.('data-destiny-search')){
+        const kind=event.target.hasAttribute('data-memory-search')?'memory':'destiny';
+        const picker=event.target.closest(`[data-${kind}-picker]`);
         const key=value=>String(value).normalize('NFKC').toLocaleLowerCase('ko').replace(/\s/gu,'');
+        const query=key(event.target.value);
         let matches=0;
-        for(const option of picker.querySelectorAll('[data-memory-choice]')){
-          option.hidden=!key(option.dataset.search).includes(key(event.target.value));
+        for(const option of picker.querySelectorAll(`[data-${kind}-choice]`)){
+          option.hidden=!key(option.dataset.search).includes(query);
           if(!option.hidden)matches++;
         }
-        picker.querySelector('[data-memory-empty]').hidden=matches>0;
+        picker.querySelector(`[data-${kind}-empty]`).hidden=matches>0;
         return;
       }
       if(event.target.hasAttribute?.('data-skill-candidate-level')){
@@ -873,12 +998,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           try {
             api.flush();
             const opened=[...comparison.querySelectorAll('details[open]')].map(detail=>detail.dataset.role);
-            setPlannerHtml(comparison,renderBoardComparison(state));
+            const detail=renderBoardComparison(state);
+            setPlannerHtml(comparison,detail);
             for(const detail of comparison.querySelectorAll('details[data-role]'))detail.open=opened.includes(detail.dataset.role);
-            if(bar)bar.outerHTML=renderDrawerBar(state);
+            if(bar)bar.outerHTML=renderDrawerBar(state,Boolean(detail));
+            const undo=root.querySelector('[data-role="board-undo"]'), redo=root.querySelector('[data-role="board-redo"]');
+            if(undo)undo.disabled=!state.overlay.history.canUndo;
+            if(redo)redo.disabled=!state.overlay.history.canRedo;
           } catch(error) {
             comparison.textContent=error.message;
-            if(bar){bar.querySelector('strong').textContent='입력 확인';bar.querySelector('small').textContent='전체 DPS';bar.querySelector('button').disabled=true;}
+            if(bar){bar.querySelector('strong').textContent='입력 확인';bar.querySelector('small').textContent='전체 DPS';bar.querySelector('[data-ss14-action="board-apply"]').disabled=true;}
           }
         }
         return;
@@ -915,16 +1044,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (input.hasAttribute('data-workshop-name')) {draft.name=input.value;return;}
         if (input.dataset.seasonEdit) {
           const edit=readSeasonPlannerEdit(input);
-          const pair=input.closest?.('.craft-roll-pair');
+          const pair=input.closest?.('.craft-roll-pair,.memory-enhancement-control');
           if(pair && input.value!=='' && input.validity.valid){
             const linked=pair.querySelector(input.type==='range'?'input[type=number]':'input[type=range]');
             if(linked)linked.value=input.value;
           }
           if(draft.kind==='memory')edit.enhancedBase=true;
-          if(edit.kind==='memory-enhancement' && input.type==='range') {
-            const output=input.closest('label')?.querySelector('[data-memory-level]');
-            if(output)output.textContent='+'+edit.value;
-          }
           if (edit.kind === 'workshop-affix') edit.value=input.value;
           draft.pending.set(editKey(edit),edit);
           const bar=root?.querySelector?.('.drawer-dps');
@@ -932,11 +1057,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           return;
         }
       }
+      if(input.hasAttribute?.('data-saved-build-search')&&state.overlay?.type==='saves'){
+        state.overlay.query=input.value;
+        const query=plannerSearchKey(input.value);
+        const rows=[...root.querySelectorAll('[data-saved-build-name]')];
+        for(const row of rows)row.hidden=!row.dataset.savedBuildName.includes(query);
+        root.querySelector('[data-saved-build-empty]').hidden=rows.some(row=>!row.hidden);
+        return;
+      }
       if(input.hasAttribute?.('data-shelf-search')){
         state.overlay.query=input.value;
-        const query=input.value.trim().toLocaleLowerCase('ko');
+        const matches=pickerSearchMatcher(input.value,state.overlay.kind==='gear');
         const rows=[...root.querySelectorAll('[data-shelf-record]')];
-        for(const row of rows)row.hidden=!row.dataset.shelfRecord.includes(query);
+        for(const row of rows)row.hidden=!matches(row.dataset.shelfRecord);
         root.querySelector('[data-shelf-empty]').hidden=rows.some(row=>!row.hidden);
         return;
       }
@@ -956,23 +1089,27 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if (input.hasAttribute?.("data-picker-filter")) {
         state.picker ??= { candidate: "", query: "" };
         state.picker.query = input.value;
-        const key = value => String(value).normalize("NFKC").toLocaleLowerCase("ko").replace(/\s/gu, "");
-        let count = 0, hiddenSelection = false;
-        for (const option of globalThis.document.querySelectorAll("[data-picker-option]")) {
-          option.hidden = !key(option.dataset.search).includes(key(input.value));
-          if (!option.hidden) count++;
-          else if (option.dataset.id === state.picker.candidate) hiddenSelection = true;
+        const matches = pickerSearchMatcher(input.value,state.section==='gear');
+        const options = [...input.closest('.native-item-picker').querySelectorAll('[data-picker-option]')];
+        let hiddenSelection = false;
+        for (const option of options) {
+          option.hidden = !matches(option.dataset.search);
+          if (option.hidden && option.dataset.id === state.picker.candidate) hiddenSelection = true;
         }
         if (hiddenSelection) {
-          Object.assign(state.picker,{candidate:'',preview:null,edit:null});
+          if(state.section==='gear')resetGearCandidate();
+          else Object.assign(state.picker,{candidate:'',preview:null,edit:null});
           const caret=input.selectionStart;
           api.render();
           const search=root?.querySelector?.('[data-picker-filter]');
           search?.focus({preventScroll:true});
           if (caret != null) search?.setSelectionRange(caret,caret);
         } else {
-          const empty=globalThis.document.querySelector('[data-picker-empty]');
-          if (empty) empty.hidden=count>0;
+          const tabStop = options.find(option => !option.hidden && option.getAttribute('aria-pressed') === 'true')
+            ?? options.find(option => !option.hidden);
+          for (const option of options) option.tabIndex = option === tabStop ? 0 : -1;
+          const empty=input.closest('.native-item-picker').querySelector('[data-picker-empty]');
+          if (empty) empty.hidden=Boolean(tabStop);
           for (const group of root?.querySelectorAll?.('[data-gear-result-group]') ?? []) {
             group.hidden = !group.querySelector('[data-picker-option]:not([hidden])');
           }
@@ -1120,6 +1257,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         state.includeUpgradeCorrosion=input.checked;
         state.upgrades=null;api.render();return;
       }
+      if(input.hasAttribute?.('data-upgrade-result-direction')){
+        state.upgradeResultDirection=input.value==='nonImproving'?'nonImproving':'improving';
+        state.upgrades=null;state.focusRole='upgrade-result-direction';api.render();return;
+      }
       if(input.hasAttribute?.('data-upgrade-slot')||input.hasAttribute?.('data-replacement-slot')||input.hasAttribute?.('data-upgrade-skill')){
         if(input.hasAttribute('data-upgrade-skill'))state.upgradeSkill=input.value;
         else if(input.hasAttribute('data-replacement-slot'))state.replacementSlot=input.value;
@@ -1170,7 +1311,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       if(event.target.hasAttribute?.('data-gear-filter')){
-        state.picker={...state.picker,query:state.picker?.query??'',filter:event.target.value,candidate:'',preview:null,edit:null};api.render();return;
+        resetGearCandidate({filter:event.target.value});
+        state.focusRole='gear-filter-select';
+        api.render();
+        return;
+      }
+      if(input.hasAttribute?.('data-shelf-gear-target')&&state.overlay?.type==='shelf'&&state.overlay.all){
+        api.run(()=>{
+          const entry=readShelf(storage).find(row=>row.kind==='gear'&&row.id===state.overlay.candidate);
+          if(!entry)throw Error('보관 항목을 찾을 수 없습니다.');
+          previewShelfItem(entry,Number(input.value));
+          state.focusRole='shelf-gear-target';
+        });
+        return;
       }
       if(input.hasAttribute?.('data-skill-tag')){
         const tag=input.dataset.skillTag, tags=new Set(state.picker?.tags??[]);
@@ -1185,7 +1338,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         return;
       }
       if (event.target.hasAttribute?.('data-analysis-metric')) {
-        if (Object.hasOwn(SEASON_ADVISOR_METRICS, event.target.value)) {
+        if (Object.hasOwn(SEASON_ADVISOR_METRICS, event.target.value) ||
+            event.target.value==='partialDps'&&defaultSavedDpsMetric()==='partialDps') {
           state.analysisMetric = event.target.value;
           state.analysis = null;
           state.focusRole = 'saved-comparison-metric';
@@ -1233,6 +1387,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         api.run(()=>api.flush());
         return;
       }
+      if(input.dataset.seasonEdit==='dummy-level'){
+        api.run(()=>{
+          api.flush();
+          state.focusRole='training-dummy-picker';
+        });
+        return;
+      }
       // Number/text fields commit on blur without removing the button that the
       // user is clicking. Selects rebuild their dependent option controls.
       if (event.target.tagName === "INPUT" || input.dataset.seasonEdit==='custom-options') {
@@ -1245,8 +1406,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if (!state.error && event.target.dataset.seasonEdit==='dps-input' && event.target.dataset.key?.startsWith('enemy:')) {
           const enemy=state.document.targetBuild.ss14Inputs.dps?.enemy;
           for(const picker of root?.querySelectorAll?.('[data-season-edit="dummy-level"]') ?? []) {
-            picker.value=String(matchingTrainingDummy(enemy)?.level ?? '');
-            if (!picker.value) picker.options[0].textContent='직접 설정한 방어';
+            const selection=trainingDummySelection(enemy);
+            picker.querySelector('option[value="custom"]').hidden=selection!=='custom';
+            picker.value=selection;
           }
         }
         const bar=root?.querySelector?.('.drawer-dps');
@@ -1328,6 +1490,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const d = target?.dataset ?? legacy.dataset;
       const action = d.ss14Action ?? d.action;
       if (action === "open-preserved-build") return false;
+      if (action === 'board-show-changes') {
+        const detail=root?.querySelector?.('#ss14-board-change-detail');
+        const disclosure=detail?.querySelector('details');
+        const focusTarget=disclosure?.querySelector('summary')??detail;
+        if(disclosure)disclosure.open=true;
+        focusTarget?.scrollIntoView({block:'nearest'});
+        focusTarget?.focus({preventScroll:true});
+        return true;
+      }
       if (action === 'look-up-ingame-code') {
         void api.lookUpIngameCode();
         return true;
@@ -1340,6 +1511,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         if(action==='toggle-navigation'){state.navCollapsed=!state.navCollapsed;state.focusRole='nav-toggle';return;}
         if(state.section==='overview' && !state.overlay && ['inspect-gear','inspect-skill','inspect-socket','overview-board'].includes(action))state.fromOverview=true;
         if(action==='overview-board' && ['talents','pact','divinity'].includes(d.section)){api.openBoard(d.section);return;}
+        if(action==='board-undo'||action==='board-redo'){api.restoreBoard(action==='board-redo');return;}
         if(state.section==='overview'&&!state.overlay) {
           if(d.role==='home-shelf'){
             state.fromOverview=true;state.homeGearRole=d.role;
@@ -1401,6 +1573,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(rowIndex===state.skillIndex && Number.isInteger(state.supportIndex) && state.supportIndex>=count)api.openSkill(rowIndex);
           return;
         }
+        if(action==='skill-swap' && state.overlay?.type==='skills' && !Number.isInteger(state.supportIndex)){
+          api.flush();
+          const destination=Number(d.index);
+          api.edit({kind:'skill-swap',rowIndex:state.skillIndex,value:destination});
+          api.openSkill(destination);
+          return;
+        }
         if(state.overlay?.type==='board' && action==='close'){api.closeOverlay();return;}
         if(action==='board-apply' && state.overlay?.type==='board'){api.applyBoard();return;}
         if(!state.overlay && ['talents','pact','divinity'].includes(state.section) && (action==='board-open'||target?.closest?.('[data-board-overview]'))) {
@@ -1454,39 +1633,52 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const all=d.scope==='all'||state.overlay?.all===true;
           const boardDraft=state.overlay?.type==='board'?state.overlay:state.overlay?.boardDraft;
           if(action==='shelf-open'||action==='shelf-tab'){
+            const editor=state.overlay;
+            const fromSlot=editor?.type==='gear'||editor?.type==='workshop'&&editor.slotDraft;
+            if(fromSlot && !all && workshop())api.flushWorkshop();
             openShelf(list,kind,slot,all);
             if(boardDraft)state.overlay.boardDraft=boardDraft;
+            if(fromSlot && !all)state.overlay.slotReturn={overlay:editor,picker:state.picker};
+            else if(editor?.slotReturn)state.overlay.slotReturn=editor.slotReturn;
             if(action==='shelf-tab')state.focusRole='shelf-tab-'+kind;
             return;
           }
           if(action==='shelf-save'){storeEntry(captureShelf(api.workingDocument().targetBuild,kind,slot));state.notice='보관함에 저장했습니다.';return;}
           const pos=list.findIndex(v=>v.id===d.id&&v.kind===kind);
           if(pos<0)throw Error('보관 항목을 찾을 수 없습니다.');
-          const index=all?list[pos].index:slot;
+          let index=all?list[pos].index:slot;
           if(action==='shelf-use' && ['prism','divinity'].includes(kind)){
             if(boardDraft)state.overlay=boardDraft;
             else api.openBoard(kind==='prism'?'talents':'divinity');
             api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});return;
           }
           if(action==='shelf-remove'){
-            const query=state.overlay.query;
+            const {query,slotReturn}=state.overlay;
             list.splice(pos,1);
             writeShelf(list,kind==='gear');
             openShelf(list,kind,slot,all);
-            Object.assign(state.overlay,{query,boardDraft});
+            Object.assign(state.overlay,{query,boardDraft,slotReturn});
             return;
           }
           if(action==='shelf-preview'){
-            const baseline=boardDraft??state;
-            const preview=previewSlotEdit(baseline.document,baseline.report,{kind:'shelf-apply',slotIndex:index,value:list[pos]},{includeSnapshot:true});
-            Object.assign(state.overlay,{candidate:d.id,candidateIndex:index,preview});
+            previewShelfItem(list[pos],state.overlay?.candidate===d.id?state.overlay.candidateIndex:index);
             state.focusRole='shelf-candidate';
             return;
           }
-          if(action==='shelf-use'){api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});state.overlay=null;state.picker=null;if(kind==='memory')api.openMemory(index);if(kind==='gear')api.openGear(index,false);state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;}
+          if(action==='shelf-use'){
+            if(all&&kind==='gear'){
+              index=state.overlay.candidateIndex;
+              if(state.overlay.candidate!==d.id||!shelfGearTargets(list[pos],state.document.targetBuild).includes(index))throw Error('장착할 수 있는 부위를 선택하세요.');
+            }
+            api.edit({kind:'shelf-apply',slotIndex:index,value:list[pos]});
+            state.overlay=null;state.picker=null;
+            if(kind==='memory')api.openMemory(index);
+            if(kind==='gear')api.openGear(index,false);
+            state.slateEditor=createSlateEditorState();state.notice='보관 항목을 적용했습니다.';return;
+          }
         }
         if (handleSlateEditorAction(api,action,d)) {
-          if (['slate-type','slate-select','slate-socket'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
+          if (['slate-type','slate-select'].includes(action) || action==='slate-cell' && !state.slateEditor.draft) state.focusRole='slate-inspector';
           return;
         }
         if (action === 'talent-slot') { state.talentIndex=Number(d.index); state.talentNode=null;state.talentPicking=false;if(state.overlay){delete state.overlay.prism;delete state.overlay.inverse;}return; }
@@ -1531,13 +1723,19 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if(action==='talent-choose'){
           api.edit({kind:'talent-board',slotIndex:Number(d.index),value:d.id});
+          if(state.overlay)delete state.overlay.talentSearch;
           state.talentNode=null;state.talentCoreGroup=null;state.talentPicking=false;return;
         }
-        if (action === 'talent-allocate') { api.allocateTalent(d.id,1); return; }
-        if (action === 'talent-inspect') { state.talentNode=d.id; state.focusRole='talent-inspector'; return; }
+        if (action === 'talent-allocate') { api.allocateTalent(d.id,1,{showLockedInInspector:true}); return; }
+        if (action === 'talent-inspect') {
+          state.talentNode=d.id;
+          state.revealTalentNode=d.talentSearchResult!==undefined;
+          state.focusRole='talent-inspector';
+          return;
+        }
         if (action === 'pact-inspect') {
           if(state.overlay?.rosterBase){
-            api.stageBoard(state.overlay.rosterBase);delete state.overlay.rosterBase;
+            api.stageBoard(state.overlay.rosterBase,{record:false});delete state.overlay.rosterBase;
           }
           state.pactRoster=null; state.pactIndex=Number(d.index); state.pactRing=d.key??null; state.focusRole='pact-inspector'; return;
         }
@@ -1548,7 +1746,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             if(d.id){
               const candidate=d.id===original.targetBuild.pact?.slots?.[index]?.spirit?.spiritId?original
                 :editSeasonWorkspace(original,{kind:'spirit-selection',slotIndex:index,value:d.id});
-              api.stageBoard(candidate);
+              api.stageBoard(candidate,{record:false});
             }
           }
           state.pactIndex=index;state.pactRoster={index,id:d.id||null,query:state.pactRoster?.query??'',group:state.pactRoster?.group??'all'};return;
@@ -1559,7 +1757,11 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if (action === 'pact-clear') {api.edit({kind:'spirit-selection',slotIndex:Number(d.index),value:''});state.pactRing=null;return;}
         if (action === 'pact-roster-apply') {
-          if(state.overlay?.type==='board')delete state.overlay.rosterBase;
+          if(state.overlay?.type==='board'&&state.overlay.rosterBase){
+            const draft=state.overlay;
+            draft.history.record(draft.rosterBase.targetBuild,draft.document.targetBuild);
+            delete draft.rosterBase;
+          }
           if (state.pactRoster?.id && state.pactRoster.id!==api.workingDocument().targetBuild.pact?.slots?.[state.pactRoster.index]?.spirit?.spiritId) api.edit({kind:'spirit-selection',slotIndex:state.pactRoster.index,value:state.pactRoster.id});
           state.pactRoster=null; state.pactRing=null; return;
         }
@@ -1575,8 +1777,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.focusRole='pact-inspector';
           return;
         }
-        if (action === 'pact-allocation' || action === 'pact-remove-destiny') {
-          api.edit({kind:action==='pact-allocation'?action:'destiny-selection',slotIndex:Number(d.index),key:d.key,value:action==='pact-allocation'?Number(d.value):''});
+        if (action === 'pact-allocation' || action === 'pact-select-destiny') {
+          api.edit({kind:action==='pact-allocation'?action:'destiny-selection',slotIndex:Number(d.index),key:d.key,value:action==='pact-allocation'?Number(d.value):d.id??''});
+          if(action==='pact-select-destiny')state.focusRole='pact-destiny-choice';
+          else if(d.key==='sequence'&&d.focusRole==='pact-destiny-choice')state.focusRole='pact-destiny-choice';
           return;
         }
         if (action === 'talent-step') {
@@ -1625,6 +1829,17 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if (!edit) throw new Error('겹친 구간이 바뀌었습니다. 적용 구간을 다시 확인하세요.');
           api.edit(edit);
           state.focusField={edit:edit.kind,key:edit.key,inResults:true};
+          return;
+        }
+        if(action==='confirm-partial-dps'){
+          const review=!state.pending.size?seasonPartialDpsReview(state.document,state.report):null;
+          if(review){
+            state.partialDpsConfirmation=state.partialDpsConfirmation===review.confirmation?null:review.confirmation;
+            try { storage.setItem(partialDpsKey(state.document.id),state.partialDpsConfirmation??''); }
+            catch { state.notice='제외 설정을 이 브라우저에 저장하지 못했습니다.'; }
+            if (state.analysis?.metric==='partialDps') state.analysis=null;
+            state.focusRole='partial-dps-toggle';
+          }
           return;
         }
         if (action === 'result-tab') {
@@ -1680,15 +1895,22 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const row=d.index==='assembled'?state.upgrades?.assembled:state.upgrades?.rows?.[Number(d.index)];
           if(!row||state.pending.size)return;
           if(action==='rank-open-copy'){
-            if(!row.saved)return;
-            const loaded=loadSeasonWorkspaces(storage);
-            if(loaded.error)throw Error(loaded.error);
-            if(!loaded.documents.some(document=>document.id===row.saved))throw Error('저장한 사본을 찾을 수 없습니다.');
+            if(row.saved){
+              const loaded=loadSeasonWorkspaces(storage);
+              if(loaded.error)throw Error(loaded.error);
+              if(!loaded.documents.some(document=>document.id===row.saved))throw Error('저장한 사본을 찾을 수 없습니다.');
+            }
             const origin=captureAnalysisOrigin();
-            const originId=origin?.id??state.document.id;
-            if(origin)saveSeasonWorkspace(storage,origin);
+            const baseline=origin??state.document, baselineReport=state.report;
+            const returnState=captureRankReturn(baseline,{openedIndex:d.index});
+            const copy=row.saved?null:copySeasonUpgrade(state.document,state.report,row);
+            const changes=[origin,copy].filter(Boolean);
+            if(changes.length)saveSeasonWorkspaces(storage,changes);
+            if(copy)row.saved=copy.id;
             api.open(row.saved,{preserveCurrent:true});
-            state.rankTrialOrigin=originId;
+            state.editComparison=editComparison.reset(state.document,state.report,{document:baseline,report:baselineReport});
+            state.rankTrialOrigin=baseline.id;
+            state.rankTrialReturn=returnState;
             state.resultTab='analysis';
             state.focusRole='return-rank-origin';
             return;
@@ -1707,10 +1929,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const metric=state.upgrades.metric;
           const copy=skill?copySeasonSkillTrial(state.document,row):copySeasonGearTrial(state.document,row);
           const origin=captureAnalysisOrigin();
-          const originId=origin?.id??state.document.id;
+          const baseline=origin??state.document, baselineReport=state.report;
+          const returnState=captureRankReturn(baseline,{blockedIndex:Number(d.index)});
           saveSeasonWorkspaces(storage,origin?[origin,copy]:[copy]);
           api.open(copy.id,{preserveCurrent:true});
-          state.rankTrialOrigin=originId;
+          state.editComparison=editComparison.reset(state.document,state.report,{document:baseline,report:baselineReport});
+          state.rankTrialOrigin=baseline.id;
+          state.rankTrialReturn=returnState;
           if(!skill&&state.report.fullDps.supported){
             api.openGear(row.edits[0].slotIndex,false);
             state.notice='장비 시험 사본을 열었습니다.';
@@ -1731,11 +1956,29 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           return;
         }
         if(action==='return-rank-origin'&&state.rankTrialOrigin){
+          const back=state.rankTrialReturn;
           api.open(state.rankTrialOrigin);
           state.section='overview';state.resultTab='analysis';state.focusRole='result-tab-analysis';
+          if(back){
+            Object.assign(state,back.controls);
+            if(back.basis===rankBasis(state.document)&&(!back.job.usesShelf||back.job.shelfBasis===gearShelfBasis(readShelf(storage)))){
+              state.upgrades=back.job;
+              state.upgrades.openBlockedCandidate=back.blockedIndex;
+              if(Number.isInteger(back.blockedIndex))state.focusRole='rank-blocked-trial-'+back.blockedIndex;
+              else if(back.openedIndex!==undefined)state.focusRole='rank-open-copy-'+back.openedIndex;
+            }
+          }
           return;
         }
         if (action === 'compare-builds') { api.compare(); return; }
+        if (action === 'compare-saved' && state.overlay?.type==='saves' && d.id && d.id!==state.document.id) {
+          state.analysisMetric=defaultSavedDpsMetric();
+          api.compare(d.id);
+          state.overlay=null;
+          state.resultTab='analysis';
+          state.focusRole='saved-build-comparison';
+          return;
+        }
         if (action === 'reset-comparison') { api.resetComparison(); return; }
         if (["section", "advisor-open-section", "inspect-skill", "inspect-gear", "inspect-socket", "edit-slot", "requirement"].includes(action)) state.picker = null;
         if (["inspect-skill","inspect-gear"].includes(action) && globalThis.matchMedia?.("(max-width:760px)").matches) state.focusRole = "slot-detail-heading";
@@ -1769,15 +2012,21 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         else if (action === "requirement") {
           api.openRequirement({section:d.section,index:Number(d.index)||0,supportIndex:/^[0-4]$/u.test(d.support??'')?Number(d.support):null,
-            type:d.type,role:d.focusRole,edit:d.field,key:d.fieldKey});
+            ring:d.ring,type:d.type,role:d.focusRole,edit:d.field,key:d.fieldKey});
         }
         else if (action === "close") api.closeOverlay();
-        else if (action === "picker-gear-kind") state.picker={gearKind:d.category,filter:'',candidate:'',query:state.picker?.query??''};
-        else if (action === "picker-group") state.picker={...state.picker,filter:d.filter,candidate:'',preview:null,edit:null};
+        else if (action === "picker-gear-kind") {
+          resetGearCandidate({gearKind:d.category,filter:''});
+          state.focusRole=d.role;
+        }
+        else if (action === "picker-group") {
+          resetGearCandidate({filter:d.filter});
+          state.focusRole=d.role;
+        }
         else if (action === "open-picker") state.picker = { candidate: "", query: "" };
         else if (action === 'gear-candidate-list') {
-          const {query,filter,gearKind,candidate}=state.picker;
-          state.picker={query,filter,gearKind,candidate:''};
+          const {candidate}=state.picker;
+          resetGearCandidate();
           state.focusRole='gear-option-'+candidate;
         }
         else if (action === "cancel-picker") state.picker = null;
@@ -1801,7 +2050,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(gear&&state.picker?.candidate===d.id&&workshop())return;
           if(gear)selectGearCandidate(index,d.id);
           else selectSkillCandidate(d.id);
-          if (gear) state.focusRole='candidate-detail';
+          state.focusRole='candidate-detail';
         }
         else if (action === "equip-item" || action === "clear-slot") {
           if (!["gear-selection", "skill-selection", "support-selection"].includes(d.kind)) throw new Error("선택할 슬롯을 확인하세요.");
@@ -1819,7 +2068,66 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         else if (action === "effect-sources") state.overlay = { type: "effects" };
         else if (action === "save") api.save();
         else if (action === "saves") { const loaded = loadSeasonWorkspaces(storage); if (loaded.error) throw new Error(loaded.error); state.documents = loaded.documents; state.overlay = { type: "saves" }; }
+        else if (action === 'new-build' && state.overlay?.type==='saves' && !state.overlay.deleteCandidate) {
+          const blank=createSeasonWorkspace(prepareSeasonMigration(createDefaultBuild()));
+          const backup=state.dirty?currentBuildCopy(' · 편집 사본'):null;
+          saveSeasonWorkspaces(storage,backup?[backup,blank]:[blank]);
+          api.open(blank.id,{preserveCurrent:true});
+          state.section='overview';
+          state.resultTab='stats';
+          state.focusRole='build-name';
+          if(backup)state.notice='새 빌드를 열었습니다. 이전 편집은 사본으로 저장했습니다.';
+        }
+        else if (action === 'request-delete-save' && state.overlay?.type==='saves') {
+          const target=state.documents.find(document=>document.id===d.id);
+          if(!target)throw Error('저장한 빌드를 찾을 수 없습니다.');
+          state.overlay.deleteCandidate=target;
+          state.overlay.notice='';
+          state.focusRole='dialog-heading';
+        }
+        else if (action === 'cancel-delete-save' && state.overlay?.type==='saves') {
+          state.overlay.deleteCandidate=null;
+          state.focusRole='dialog-heading';
+        }
+        else if (action === 'confirm-delete-save' && state.overlay?.type==='saves' && state.overlay.deleteCandidate) {
+          const target=state.overlay.deleteCandidate;
+          const active=state.document.id===target.id;
+          const draft=active?importSeasonWorkspace(exportSeasonWorkspace(state.document)):null;
+          state.documents=deleteSeasonWorkspace(storage,target);
+          state.analysis=null;
+          for(const job of [state.upgrades,state.rankTrialReturn?.job]){
+            for(const row of [...(job?.rows??[]),job?.assembled])
+              if(row?.saved===target.id)delete row.saved;
+          }
+          if(active||state.rankTrialOrigin===target.id){
+            state.rankTrialOrigin=null;
+            state.rankTrialReturn=null;
+          }
+          if(draft){
+            state.document=draft;
+            savedDocument=null;
+            savedTarget=JSON.stringify(draft.targetBuild);
+            state.dirty=false;
+            state.partialDpsConfirmation=null;
+            state.history.clear();
+            state.picker=null;
+            recalculate();
+            state.editComparison=editComparison.reset(state.document,state.report);
+            state.notice='저장본을 삭제했습니다. 현재 편집 내용은 화면에 남아 있습니다.';
+          }
+          state.overlay.deleteCandidate=null;
+          state.overlay.notice=active?state.notice:'저장 빌드를 삭제했습니다.';
+          state.focusRole='dialog-heading';
+        }
         else if (action === "open") api.open(d.id);
+        else if(action==='preview-ring-swap'&&!state.overlay) {
+          state.overlay={type:'ring-swap',preview:previewSlotEdit(state.document,state.report,{kind:'swap-rings'})};
+          state.focusRole='dialog-heading';
+        }
+        else if(action==='apply-ring-swap'&&state.overlay?.type==='ring-swap'){
+          api.edit({kind:'swap-rings'});
+          api.closeOverlay();
+        }
         else if (action === 'reset-build') {state.overlay={type:'reset-build'};state.focusRole='dialog-heading';}
         else if (action === 'confirm-reset-build') api.resetBuild();
         else if (action === "files") state.overlay = { type: "files", ...(state.overlay?.type==='board'?{boardDraft:state.overlay}:{}) };
@@ -1847,10 +2155,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(action==='remove-slate')state.slateEditor=createSlateEditorState();
         }
         else if (action === "copy") {
-          const copy = importSeasonWorkspace(exportSeasonWorkspace(state.document));
-          const named = editSeasonWorkspace(copy, { kind: "name", value: `${copy.targetBuild.name} · 사본` });
-          const saved = saveSeasonWorkspace(storage, named);
-          api.open(saved.id);
+          const saved = saveSeasonWorkspace(storage, currentBuildCopy(' · 사본'));
+          api.open(saved.id,{preserveCurrent:true});
         } else if (action === "download-build") {
           const doc=api.workingDocument();
           downloadJson("TOB-SS14-"+doc.targetBuild.name.replace(/[<>:"/\\|?*]/gu,"_")+".json",exportSeasonWorkspace(doc));
@@ -1971,7 +2277,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         api.render();
       }
     },
-    allocateTalent(id,step,{inspector=false,target}={}) {
+    allocateTalent(id,step,{inspector=false,target,showLockedInInspector=false}={}) {
       if(state.overlay?.section!=='talents'||(target===undefined&&![-1,1].includes(step)))return;
       const index=state.talentIndex??0,doc=api.workingDocument(),build=doc.targetBuild,board=build.talents?.boards?.[index];
       const nodes=index===3&&hasRevelation(build)?revelationNodeOptions(build):seasonTalentNodes(board?.treeSlug);
@@ -1986,7 +2292,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const value=target??current+step;
       if(value===current||value<0||value>node.max)return;
       const next=editSeasonWorkspace(doc,{kind:reflected?'inverse-point':'talent-node',slotIndex:index,key:id,value});
-      api.stageTalentAllocation(next,index);
+      api.stageTalentAllocation(next,index,{showLockedInInspector});
     },
     talentContextMenu(event) {
       const node=event.target?.closest?.('[data-talent-node]');
@@ -2013,6 +2319,20 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       });
     },
     keydown(event) {
+      const pickerControl = event.target?.closest?.('[data-picker-filter], [data-picker-option]');
+      if (pickerControl && !event.isComposing && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        const options = [...pickerControl.closest('.native-item-picker').querySelectorAll('[data-picker-option]:not([hidden])')];
+        if (!options.length) return;
+        const index = options.indexOf(pickerControl);
+        const last = options.length - 1;
+        const next = event.key === 'ArrowDown' ? Math.min(index + 1, last) : index < 0 ? last : Math.max(index - 1, 0);
+        for (const [position, option] of options.entries()) option.tabIndex = position === next ? 0 : -1;
+        event.preventDefault();
+        options[next].focus({preventScroll:true});
+        options[next].scrollIntoView({block:'nearest'});
+        return;
+      }
       const talent=event.target?.closest?.('[data-talent-node]');
       if(talent&&state.overlay?.section==='talents'&&event.key==='Delete'&&!event.altKey&&!event.ctrlKey&&!event.metaKey){
         event.preventDefault();api.run(()=>api.allocateTalent(talent.dataset.id,-1));return;
@@ -2050,6 +2370,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if(state.overlay?.type==='board'||workshop()){
         if(event.key==='Escape'){event.preventDefault();api.run(()=>api.closeOverlay());return;}
         if((event.ctrlKey||event.metaKey)&&['s','z','y'].includes(event.key.toLowerCase())){
+          if(state.overlay?.type==='board'&&!event.altKey&&['z','y'].includes(event.key.toLowerCase())
+            &&!event.target?.closest?.('input,textarea,select,[contenteditable=true]')){
+            event.preventDefault();api.run(()=>api.restoreBoard(event.shiftKey||event.key.toLowerCase()==='y'));return;
+          }
           if(event.key.toLowerCase()==='s'||!event.target?.closest?.('input,textarea'))event.preventDefault();
           return;
         }
@@ -2061,7 +2385,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); api.run(() => api.save()); }
       if (event.key === "Escape" && state.overlay) { event.preventDefault(); api.run(() => { api.flush(); api.closeOverlay(); }); }
       if (event.key === "Tab" && state.overlay) {
-        const nodes = [...(globalThis.document.querySelectorAll?.('.season-native-modal button:not([disabled]), .season-native-modal input:not([disabled]), .season-native-modal select:not([disabled]), .season-native-modal textarea:not([disabled]), .season-native-modal summary, .season-native-modal a[href]') ?? [])].filter(el => el.getClientRects?.().length);
+        const nodes = [...(globalThis.document.querySelectorAll?.('.season-native-modal button:not([disabled]), .season-native-modal input:not([disabled]), .season-native-modal select:not([disabled]), .season-native-modal textarea:not([disabled]), .season-native-modal summary, .season-native-modal a[href]') ?? [])].filter(el => el.tabIndex >= 0 && el.getClientRects?.().length);
         const first = nodes[0], last = nodes.at(-1);
         if (event.shiftKey && globalThis.document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && globalThis.document.activeElement === last) { event.preventDefault(); first?.focus(); }

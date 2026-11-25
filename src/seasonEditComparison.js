@@ -169,8 +169,11 @@ export function createSeasonEditComparison(document, report) {
       current = next;
       return this.result();
     },
-    reset(document, report) {
-      baseline = capture(document, report); current = baseline; previous = null; changed = false;
+    reset(document, report, origin) {
+      current = capture(document, report);
+      baseline = origin ? capture(origin.document,origin.report) : current;
+      previous = null;
+      changed = content(baseline.document) !== content(current.document);
       return this.result();
     },
     result() {

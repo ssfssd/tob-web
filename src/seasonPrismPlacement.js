@@ -77,7 +77,7 @@ export function inspectSeasonPrism(build, item, page) {
   const p = build.talents?.placedPrism; const board = build.talents?.boards?.[p?.boardIndex];
   const fail = reason => ({ supported: false, reason });
   if (!item || !board || !Number.isInteger(p.boardIndex) || !Number.isInteger(p.x) || !Number.isInteger(p.y)) return fail("프리즘 배치·보관함 연결을 확인하세요.");
-  if (build.talents.placedInverseImage || board.placedPrism || board.placedInverseImage
+  if (build.talents.placedInverseImage?.boardIndex === p.boardIndex || board.placedPrism || board.placedInverseImage
     || (board.prismSlots ?? []).some(Boolean) || (board.inverseImageSlots ?? []).some(Boolean)
     || Object.values(board.reflectedNodePoints ?? {}).some(Boolean)) return fail("역상·추가 변환과 함께 배치한 프리즘 계산은 미지원입니다.");
   if (item.rarity !== "rare" || item.legendaryRandomAffixModifierId || item.baseAffixModifierId !== "1204200001")

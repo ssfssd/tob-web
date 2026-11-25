@@ -22,14 +22,14 @@ import { SEASON_CHARACTER_INPUTS, seasonRulePins } from "./seasonCharacter.js";
 import { observedManaRecoveryBasis, validObservedManaRecoveryBasis } from "./seasonSurvival.js";
 import { seasonOffenseRulePins, validBaseCriticalRating } from "./seasonOffense.js";
 import { seasonGameCritical, validGameCriticalBinding } from "./seasonGameData.js";
-import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
+import { rebindSeasonSkillInputs, readPeriodicBurstUptime, writePeriodicBurstUptime } from './seasonSkillInputs.js';
 import { SEASON_BLESSINGS, validBlessingCount, seasonBlessingPins } from "./seasonBlessings.js";
 import { seasonMemoryRows, validSeasonMemoryBases, validSeasonMemoryRolls } from "./seasonMemories.js";
 import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
 import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, observedSkillCostFields, seasonDotWindowAssignment } from "./seasonDps.js";
-import { trainingDummyLevels } from "./seasonTrainingDummy.js";
+import { trainingDummyDefenseFields, trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
 import { validBingEvents, editBingEvents } from './seasonBingRecovery.js';
@@ -68,6 +68,77 @@ function targetFor(source, id, name, levels, inputs) {
     target.skills[category][index] = { ...target.skills[category][index], skillId, level: levels[rowIndex] };
   });
   return applySeasonHeroSelection(applySeasonSlateSelections(applySeasonSupportSelections(applySeasonSelections(target, inputs.selections, levels, inputs.selectionMode === "isolated-v1"), inputs.supportSelections), inputs.slateSelections), inputs);
+}
+
+function swapSeasonSkillRows(target,from,to) {
+  if(![from,to].every(index=>Number.isInteger(index)&&index>=0&&index<9)||from===to||(from<5)!==(to<5))
+    throw Error('같은 종류의 다른 스킬 슬롯을 선택하세요.');
+  const normalized=normalizeBuild(target), active=from<5, start=active?0:5;
+  const group=active?'active':'passive', rows=normalized.skills[group];
+  if(!rows[from-start]?.skillId)throw Error('옮길 스킬을 먼저 장착하세요.');
+  for(const [source,destination] of [[from,to],[to,from]]){
+    const row=rows[source-start];
+    if(!row.skillId)continue;
+    const card=getSeasonSelectionRecord('skills',row.skillId);
+    if(!card||!getSeasonSelectionOptions('skills',destination).some(option=>option.id===row.skillId)
+      ||row.supports.some((support,index)=>support&&!supportFitsSocket(support.supportId,card,destination,index)))
+      throw Error('이 칸에 장착할 수 없는 스킬 또는 보조가 있습니다.');
+  }
+  const move=index=>index===from?to:index===to?from:index;
+  const remap=(entries,pattern,offset=0)=>entries&&Object.fromEntries(Object.entries(entries).map(([key,value])=>
+    [key.replace(pattern,(_,prefix,index)=>prefix+(move(Number(index)+offset)-offset)),value]));
+  const inputs=target.ss14Inputs;
+  if(inputs.dps?.skills?.[0]?.periodicBurstUptime!==undefined)
+    writePeriodicBurstUptime(inputs.dps,readPeriodicBurstUptime(inputs.dps));
+  inputs.skills=remap(inputs.skills,/^()(\d+)$/u);
+  if(inputs.offense)inputs.offense=remap(inputs.offense,/^()(\d+)$/u);
+  if(inputs.dps)inputs.dps.skills=remap(inputs.dps.skills,/^()(\d+)$/u);
+  for(const key of ['supports','supportSelections'])if(inputs[key])inputs[key]=remap(inputs[key],/^()(\d+)(?=:)/u);
+  if(inputs.extensionInputs&&active)inputs.extensionInputs=remap(inputs.extensionInputs,/^(module:)(\d+)(?=:)/u);
+  if(inputs.componentConditions){
+    const byRow=remap(inputs.componentConditions,/^(skills\.(?:rows|netherBuff|curse)\.)(\d+)(?=[.:])/u);
+    const buffs=remap(byRow,/^(skills\.netherBuff\.\d+:nether-(?:buff|warcry-enemies)-)(\d+)$/u);
+    inputs.componentConditions=remap(buffs,
+      active?/^(skills\.active\.)(\d+)(?=\.)/u:/^(skills\.passive\.)(\d+)(?=\.)/u,start);
+  }
+  const beforeRows=target.skills?.[group]??[];
+  target.skills={...normalized.skills,...target.skills,[group]:rows.map((_,index)=>{
+    const source=move(index+start)-start;
+    return {...beforeRows[source],...rows[source]};
+  })};
+  const ids=Array.from({length:9},(_,index)=>normalized.selections.skills[move(index)]??null);
+  const supports=[...target.skills.active,...target.skills.passive].flatMap(row=>row?.supports?.map(link=>link?.supportId).filter(Boolean)??[]);
+  target.selections={...target.selections,skills:ids,supports};
+  target.selectionProjection={...target.selectionProjection,skills:[...ids],supports:[...supports]};
+  [target.skillLevels[from],target.skillLevels[to]]=[target.skillLevels[to],target.skillLevels[from]];
+  inputs.selections??={gear:{},skills:{}};
+  inputs.selections.skills[from]=ids[from];
+  inputs.selections.skills[to]=ids[to];
+  (inputs.configurations??={}).skills=captureSeasonConfiguration(target,'skills');
+}
+
+function swapSeasonRings(target) {
+  const slots=normalizeBuild(target).gear.slots, left=slots[7], right=slots[8];
+  if(!left&&!right)throw Error('교환할 반지를 먼저 장착하세요.');
+  if([[7,right],[8,left]].some(([index,item])=>item&&!getSeasonSelectionOptions('gear',index).some(option=>option.id===item.itemId)))
+    throw Error('반대쪽에 장착할 수 없는 반지가 있습니다.');
+  [slots[7],slots[8]]=[right,left];
+  target.gear={...target.gear,slots};
+  const gear=slots.map(slot=>slot?.itemId??null);
+  target.selections={...target.selections,gear};
+  target.selectionProjection={...target.selectionProjection,gear:[...gear]};
+  const inputs=target.ss14Inputs;
+  const swap=index=>index==='7'?'8':'7';
+  const remap=(entries,pattern)=>Object.fromEntries(Object.entries(entries).map(([key,value])=>
+    [key.replace(pattern,(_,prefix,index)=>prefix+swap(index)),value]));
+  inputs.gear=remap(inputs.gear,/^()([78])$/u);
+  if(inputs.selections?.gear){
+    delete inputs.selections.gear[7];
+    delete inputs.selections.gear[8];
+  }
+  if(inputs.extensionInputs)inputs.extensionInputs=remap(inputs.extensionInputs,/^(craft:)([78])(?=:)/u);
+  if(inputs.componentConditions)inputs.componentConditions=remap(inputs.componentConditions,/^(gear\.slots\.)([78])(?=\.)/u);
+  (inputs.configurations??={}).gear=captureSeasonConfiguration(target,'gear');
 }
 
 function inheritGearResourceStates(before, after, slotIndex) {
@@ -315,6 +386,8 @@ export function editSeasonWorkspace(document, edit) {
     target.customAffixes=restoreCustomOptionText(edit.value,target.customAffixes);
     target.ss14Inputs.configurations??={};
     target.ss14Inputs.configurations.combat=captureSeasonConfiguration(target,'combat');
+  } else if (edit.kind === 'swap-rings') {
+    swapSeasonRings(target);
   } else if (edit.kind === 'shelf-apply') {
     if (gearId && normalizeBuild(target).gear.slots[edit.slotIndex]?.itemId !== gearId)
       for (const key of Object.keys(target.ss14Inputs.componentConditions ?? {}))
@@ -388,6 +461,8 @@ export function editSeasonWorkspace(document, edit) {
     target.ss14Inputs.configurations.talents = captureSeasonConfiguration(target, "talents");
     target.ss14Inputs.theaRulesReceipt = theaRulePin();
     target.ss14Inputs.componentReceipts = { ...target.ss14Inputs.componentReceipts, ...pinSeasonComponentReceipts(target, ["talents"]) };
+  } else if (edit.kind === "skill-swap") {
+    swapSeasonSkillRows(target,edit.rowIndex,edit.value);
   } else if (edit.kind === "skill-level") {
     if (!Number.isInteger(edit.rowIndex) || !normalizeBuild(target).selections.skills[edit.rowIndex]
       || !Number.isInteger(edit.value) || edit.value < 1 || edit.value > 100) throw new Error("선택한 스킬의 레벨을 1~100 사이 정수로 입력하세요.");
@@ -571,10 +646,10 @@ export function editSeasonWorkspace(document, edit) {
     }
   } else if (edit.kind === "dummy-level") {
     const dummy = trainingDummyLevels.find(row => row.level === edit.value);
-    if (!dummy) throw new Error("허수아비 레벨을 확인하세요.");
-    editSeasonDpsInput(target, "enemy:armor", dummy.armor);
-    for (const type of ["fire", "cold", "lightning", "erosion"]) {
-      editSeasonDpsInput(target, "enemy:" + type, dummy.resistance);
+    if (!dummy && edit.value !== "") throw new Error("허수아비 레벨을 확인하세요.");
+    for (const field of trainingDummyDefenseFields) {
+      const value = dummy ? (field === "armor" ? dummy.armor : dummy.resistance) : "";
+      editSeasonDpsInput(target, "enemy:" + field, value);
     }
   } else if (edit.kind === 'confirm-dot-allocation') {
     const group=calculateSeasonBuild(target,{includeTheaAverage:false}).fullDps.dotAllocationGroups?.find(group=>group.id===edit.key);
@@ -738,6 +813,8 @@ export function editSeasonWorkspace(document, edit) {
   if (remeasure) pinManaObservation(next.targetBuild,next.targetBuild.ss14Inputs);
   if (gearId) inheritGearResourceStates(document.targetBuild, next.targetBuild, edit.slotIndex);
   if(edit.kind==='shelf-apply'&&!validDocument(next))throw Error('보관 항목의 SS14 수치 연결을 확인할 수 없습니다.');
+  if(edit.kind==='swap-rings'&&!validDocument(next))throw Error('교환할 반지의 SS14 옵션 연결을 확인하세요.');
+  if(edit.kind==='skill-swap'&&!validDocument(next))throw Error('이동할 스킬과 연결된 입력을 확인하세요.');
   return next;
 }
 
@@ -842,6 +919,16 @@ export function saveSeasonWorkspaces(storage, changes, { now = new Date() } = {}
 
 export function saveSeasonWorkspace(storage, document, options) {
   return saveSeasonWorkspaces(storage,[document],options)[0];
+}
+
+export function deleteSeasonWorkspace(storage, { id, revision }) {
+  const loaded=loadSeasonWorkspaces(storage);
+  if(loaded.error)throw Error(loaded.error);
+  const current=loaded.documents.find(document=>document.id===id);
+  if (!current || current.revision!==revision) throw Error('저장 목록이 바뀌었습니다. 불러오기를 다시 열어 확인하세요.');
+  const documents=loaded.documents.filter(document=>document.id!==id);
+  storage.setItem(SEASON_WORKSPACE_STORAGE_KEY,json({schemaVersion:1,documents}));
+  return documents;
 }
 
 export function exportSeasonWorkspace(document) {

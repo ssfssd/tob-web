@@ -7,6 +7,7 @@ import { SEASON_LOCAL_WEAPON_STATS, SEASON_GLOBAL_FLAT_STATS, SEASON_GEAR_LEVEL_
 import { SS14_GEAR_EN } from './data/ss14Gear.en.generated.js';
 import { SEASON_BLESSING_CAP_STATS } from './seasonBlessings.js';
 import { SEASON_CURSE_STATS } from './seasonCurseEffects.js';
+import { EMPTY_REGULAR_SLATE } from './seasonDivinity.js';
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
 import { seasonDirectDamageStat, seasonDpsSpecialStat } from "./seasonCoupledCalculation.js";
@@ -695,8 +696,9 @@ function coverage(build, report, effects, gearEffects) {
   for (const id of new Set((board?.cells ?? []).map(c => c.slateInstanceId))) {
     const slate = board.slateInventory?.find(s => s.instanceId === id);
     const verifiedSpecial = report.componentProjection.rows.find(r => r.itemId === slate?.slateId && r.slateControls && r.path.endsWith(`.${id}`));
-    if (!verifiedSpecial && (!slate || slate.slateId !== "six_gods" || !Object.keys(slate.slotSelectionsByKey ?? {}).length))
-      blockers.push("배치된 특수 석판 또는 옵션 없는 석판의 전체 공격 효과를 확인하지 못했습니다.");
+    if(slate?.slateId==='six_gods'){
+      if(!Object.keys(slate.slotSelectionsByKey??{}).length)blockers.push(EMPTY_REGULAR_SLATE);
+    }else if(!verifiedSpecial)blockers.push('배치된 특수 석판의 전체 공격 효과를 확인하지 못했습니다.');
   }
   // The legacy selectedSkill field is a UI selection, never a damage modifier.
   if (Object.keys(build.calculation ?? {}).some(k => k !== "selectedSkill") || Object.keys(build.conditions ?? {}).length)
@@ -1534,11 +1536,12 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
   if (new Set(syntheticRows.map(r=>r.id)).size > 1
     && syntheticRows.reduce((count,r)=>count+(input?.skills?.[r.rowIndex]?.minionCount??0),0)>syntheticTroopMapCap)
     blockers.push(`스마트 웨폰 소환체 수 합계가 맵 상한(${syntheticTroopMapCap}기)을 초과했습니다.`);
+  const sharedBlockers = [...new Set(blockers)];
   blockers.push(...rows.flatMap(r => r.blockers));
   const unique = [...new Set(blockers)];
   const supported = rows.length > 0 && unique.length === 0;
   return { supported, scope: "ss14-fixed-scenario-full-dps", dps: supported ? round(rows.reduce((n, r) => n + r.values.dps, 0)) : null,
-    rows, blockers: unique, heroMechanics, burstRecovery, observedCommandRow:sharedCommand?.rowIndex,
+    rows, blockers: unique, sharedBlockers, heroMechanics, burstRecovery, observedCommandRow:sharedCommand?.rowIndex,
     ...(!report.beforeDefense&&finite(fixedErosion)&&{fixedErosionResistance:fixedErosion}),
     ...(reapingOverlapOverflow.length && { reapingOverlapOverflow }),
     ...(reapingAllocationGroups.length && { reapingAllocationGroups }),

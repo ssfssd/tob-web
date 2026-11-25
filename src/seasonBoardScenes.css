@@ -48,11 +48,22 @@
 .talent-drawer .board-comparison .board-inspector {border:0;border-top:1px solid #343438;padding:12px 0 0;margin-top:8px}
 .talent-drawer [data-role="talent-inspector"] {scroll-margin-block:12px 80px}
 .tree-effects-toggle {margin-top:10px}
+.tree-search {display:grid;gap:4px;min-width:0}
+.tree-search-results:not([hidden]) {display:grid;gap:3px;max-height:145px;overflow:auto}
+.season-native .tree-search-results button {display:flex;align-items:center;justify-content:space-between;gap:6px;text-align:start;min-height:38px}
+.season-native .tree-search-results button[hidden] {display:none}
+.tree-search-results button small {flex:none}
+.season-native .tree-map .tree-point.tree-search-match,.season-native .tree-extra .tree-point.tree-search-match {outline:2px solid #f3c66f;outline-offset:2px}
 .tree-core-slots {display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .season-native .tree-core-slots button {display:flex;gap:7px;align-items:center;background:#232426;border-color:#45464b;text-align:left;padding:7px 10px}
 .tree-core-slots img {width:32px;height:32px;object-fit:contain}
 .tree-core-slots small {display:block;color:#aab2be;font-size:11px}
 .tree-core-slots+[aria-label="핵심 재능 후보"] {margin:0 0 10px;padding:8px;border:1px solid #45464b}
+.season-native .tree-core button.tree-core-candidate {display:flex;flex:1 1 15rem;align-items:flex-start;gap:8px;min-width:0;min-height:44px;text-align:start}
+.tree-core-candidate > img {flex:none}
+.tree-core-candidate > span {min-width:0;overflow-wrap:anywhere}
+.tree-core-candidate small {display:block;margin-top:3px;white-space:pre-line;line-height:1.35}
+.tree-core-lock {flex-basis:100%;margin:0 0 4px;font-size:12px}
 .tree-map-scroll {overflow-x:auto;min-width:0;padding:0 5px 12px}
 .tree-map.show-effects {min-width:630px;height:560px}
 .tree-map-scroll:has(.show-effects) .tree-thresholds {min-width:630px}
@@ -88,6 +99,9 @@
 .points-stepper {display:flex;align-items:center;gap:12px;margin-top:8px}.season-native .points-stepper button {min-width:38px;font-size:18px}.board-empty {margin:4px 0}
 .contract-scene {grid-template-columns:minmax(0,1fr) minmax(200px,1fr);background:#19252d}
 .contract-stage {min-width:0}.contract-wheel {position:relative;aspect-ratio:5/4;width:100%;background:url("../assets/ingame-ui/game/pact-wheel.png") center/28% auto no-repeat}
+.contract-scene.with-side-inspector {grid-template-columns:minmax(0,1fr)}
+.contract-scene.with-side-inspector .contract-wheel {max-width:540px;margin-inline:auto}
+.pact-drawer .board-comparison .board-inspector {padding:0;border:0;background:transparent}
 .pact-board-actions {grid-column:1/-1;display:flex;align-items:start;gap:8px;flex-wrap:wrap}
 .season-native .pact-board-actions details {margin:0;flex:1 1 130px}
 .season-native .contract-wheel .pact-gem.outer {width:8%;border:2px solid #efbe63;background:radial-gradient(#893a20,#30212b)}
@@ -129,7 +143,8 @@
 .season-native .slate-board-cell.is-selected {border-color:#ffe2a0;box-shadow:none}.season-native .slate-board-cell.can-place {border:1px dashed #c2a367;background-color:#3a3731}
 .season-native .slate-board-cell[data-ghost=valid] {background:#547e79;box-shadow:inset 0 0 0 2px #9ef1d5}.season-native .slate-board-cell[data-ghost=invalid] {background:#774749;box-shadow:inset 0 0 0 2px #f39f95}
 @media(min-width:1000px) {.tree-scene:has(.board-inspector) {grid-template-columns:minmax(0,1.8fr) minmax(165px,1fr)}}
-@media(max-width:900px) {.contract-scene {grid-template-columns:minmax(0,1fr)}.contract-wheel {max-width:420px;margin:auto}.tree-scene {gap:7px;padding:8px}}
+@media(max-width:900px) {.contract-scene {grid-template-columns:minmax(0,1fr)}.contract-wheel,.contract-scene.with-side-inspector .contract-wheel {max-width:420px;margin:auto}.tree-scene {gap:7px;padding:8px}}
+@media(max-width:760px) {.pact-drawer .board-comparison {order:0}}
 @media(max-width:600px) {.tree-rail img {width:20px}.ss-board-scene {padding:7px}.tree-core .tree-point span {font-size:11px}.native-slate-editor {padding:6px}.slate-palette {max-width:100%}}
 
 .slate-add-tools {display:flex;align-items:start;gap:8px;flex-wrap:wrap}

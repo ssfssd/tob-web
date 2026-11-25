@@ -9,6 +9,7 @@ import { TALENT_SUBTREE_SLUGS_BY_GOD } from './talentBoardModel.js';
 
 const templates = { corner_of_divinity: "A_Corner_of_Divinity", stars_fall: "Fallen_Starlight", starfire: "Sparks_of_Moth_Fire",
   moth_fire: "When_Sparks_Set_the_Prairie_Ablaze", void_gap: "Space_Rift", residence_of_stars: "Residence_of_Stars", genealogy: "Pedigree_of_Gods" };
+export const EMPTY_REGULAR_SLATE = '일반 석판 옵션을 하나 이상 선택하세요.';
 const safeKo = s => typeof s === "string" && /[가-힣]/u.test(s) && !/\p{Script=Han}/u.test(s) ? s : "한국어 원문 미제공";
 const items = [...getCatalogItems("slates"), ...SS14_CURRENT_DATABASE.identities.filter(i=>i.categoryId==="slates")];
 const entries = SS14_COMPONENTS.pages["https://tlidb.com/en/Divinity_Slate"].parsed.entries;
@@ -103,7 +104,7 @@ export function seasonSlateTemplates(build, { requireBindings = true } = {}) {
     const controls = slotTypes.map((type, index) => ({ key: `${slate.instanceId}|slot_${index + 1}`, instanceId: slate.instanceId,
       slot: `slot_${index + 1}`, type, index, value: slate.slotSelectionsByKey?.[`slot_${index + 1}`]?.valueId ?? "" }));
     if (copyOptions[slate.slateId]) controls.push({ key: `${slate.instanceId}|copy_direction`, instanceId: slate.instanceId, slot: "copy_direction", type: slate.slateId, index: 0, value: selectedCopy(slate) ?? "" });
-    for (const c of controls) if (!c.value || !selectionAllowed(c.type, c.value)) blockers.push({ reason: `${c.index + 1}번째 석판 옵션을 SS14 허용 종류에서 선택하세요.` });
+    for (const c of controls) if (!c.value || !selectionAllowed(c.type, c.value)) blockers.push({ reason: `${c.index + 1}번째 석판 옵션을 SS14 허용 종류에서 선택하세요.`, slot:c.slot });
     const permitted = slotTypes.length ? controls.map(c => c.slot) : slate.slateId === "void_gap" ? ["copy_left", "copy_right"] : ["effect"];
     if (Object.keys(slate.slotSelectionsByKey ?? {}).some(key => !permitted.includes(key))) blockers.push({ reason: "특수 석판의 SS14 슬롯과 저장 옵션이 일치하지 않습니다." });
     if (slate.slateId === "void_gap" && ["copy_left", "copy_right"].filter(k => slate.slotSelectionsByKey?.[k]?.valueId === k).length > 1) blockers.push({ reason: "복제 방향을 하나만 선택하세요." });
@@ -147,7 +148,18 @@ export function resolveSeasonSlates(build) {
   const board = build.divinity?.boards?.find(b => b.boardId === build.divinity.activeBoardId);
   // Legacy regular options already have individual component receipts. Only
   // newly bound regular boards need the extra slot-contract validation row.
-  const special = seasonSlateTemplates(build).filter(r => r.slate.slateId !== "six_gods" || build.ss14Inputs?.slateSelections?.[r.slate.instanceId]);
+  const templates=seasonSlateTemplates(build);
+  const special = templates.filter(r => r.slate.slateId !== "six_gods" || build.ss14Inputs?.slateSelections?.[r.slate.instanceId]);
+  const optionInputs=templates.flatMap(({slate,controls,blockers,name})=>{
+    const number=board.slateInventory.findIndex(item=>item.instanceId===slate.instanceId)+1;
+    const input=(control,reason)=>({key:control.key,reason,
+      label:`석판 ${number} · ${control.slot==='copy_direction'?'복제 방향':`옵션 ${control.index+1}`} 선택`});
+    if(slate.slateId==='six_gods')return Object.keys(slate.slotSelectionsByKey??{}).length?[]:[input(controls[0],EMPTY_REGULAR_SLATE)];
+    return blockers.flatMap(({slot,reason})=>{
+      const control=controls.find(c=>c.slot===slot&&!c.value);
+      return control?[input(control,`${name}: ${reason}`)]:[];
+    });
+  });
   const placed = new Set(board?.cells.map(c => c.slateInstanceId));
   const slates = (board?.slateInventory ?? []).filter(s => placed.has(s.instanceId));
   const selections = [];
@@ -188,5 +200,5 @@ export function resolveSeasonSlates(build) {
     });
   };
   for (const slate of slates) selections.push(...resolve(slate));
-  return { special, selections };
+  return { special, selections, optionInputs };
 }

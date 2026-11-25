@@ -17,6 +17,10 @@ export const DIVINITY_BOARD_MASK = Object.freeze([
   Object.freeze([0, 0, 1, 1, 0, 0]),
 ]);
 
+export function divinityCellIsOpen(board,x,y) {
+  return board.mask?.[x]?.[y] === 1;
+}
+
 const SOURCE_SHAPES = {
   a_1: [[0, 0], [0, 1], [1, 1], [1, 2]],
   a_2: [[0, 0], [1, 0], [2, 0], [2, 1]],
@@ -419,7 +423,7 @@ function placementFitsMask(board, instanceId, anchor) {
   if (!canPlaceSlate(board, instanceId, anchor)) return false;
   const instance = findInstance(board, instanceId);
   return transformedShape(instance.shape, instance.rotation, instance.flippedH, instance.flippedV)
-    .every(({ x, y }) => board.mask?.[anchor.x + x]?.[anchor.y + y] === 1);
+    .every(({ x, y }) => divinityCellIsOpen(board,anchor.x+x,anchor.y+y));
 }
 
 export function autoPlaceSlate(board, instanceId) {

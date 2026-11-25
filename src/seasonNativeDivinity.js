@@ -1,5 +1,5 @@
 import { SS14_MECHANICS } from "./data/ss14Mechanics.generated.js";
-import { createDivinityBoard, createSlateInstance, addSlateToInventory, autoPlaceSlate, moveSlate, rotatePlacedSlate, deleteSlateInstance, placeSlate, canPlaceSlate, transformedShape, DIVINITY_SHAPES } from "./divinityBoardModel.js";
+import { createDivinityBoard, createSlateInstance, addSlateToInventory, autoPlaceSlate, moveSlate, rotatePlacedSlate, deleteSlateInstance, placeSlate, canPlaceSlate, transformedShape, DIVINITY_SHAPES, divinityCellIsOpen } from "./divinityBoardModel.js";
 import { SS14_LOG_SLATES } from './data/ss14LogSlates.generated.js';
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
@@ -35,7 +35,7 @@ export function canPlaceNativeSlate(board, slate, anchor) {
   if (!Number.isInteger(anchor?.x) || !Number.isInteger(anchor?.y)) return false;
   const candidate = {...board,slateInventory:[...board.slateInventory.filter(s=>s.instanceId!==slate.instanceId),slate]};
   return canPlaceSlate(candidate,slate.instanceId,anchor) && transformedShape(slate.shape,slate.rotation,slate.flippedH,slate.flippedV)
-    .every(p=>board.mask?.[anchor.y+p.y]?.[anchor.x+p.x]===1);
+    .every(p=>divinityCellIsOpen(board,anchor.x+p.x,anchor.y+p.y));
 }
 function placeNativeSlate(board, slate, anchor) {
   if (!canPlaceNativeSlate(board,slate,anchor)) throw new Error('다른 석판과 겹치거나 보드 밖입니다. 빈 위치를 선택하세요.');

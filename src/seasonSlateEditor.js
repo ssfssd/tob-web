@@ -1,4 +1,4 @@
-import { createDivinityBoard, transformedShape } from './divinityBoardModel.js';
+import { createDivinityBoard, transformedShape, divinityCellIsOpen } from './divinityBoardModel.js';
 import { nativeSlateOptions, nativeSlateShapes, nativeSlateDraft, canPlaceNativeSlate } from './seasonNativeDivinity.js';
 import { seasonSlateTemplates, seasonSlateOptions, regularSlateFamilies, hasDuplicatePedigreeCore } from './seasonDivinity.js';
 import { isSeasonNether, netherLayouts, netherQualityOptions } from './seasonNether.js';
@@ -7,6 +7,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/gu,c=>({'&':'&amp;','<
 const button = (label,action,attrs='') => `<button type="button" data-ss14-action="${action}" ${attrs}>${label}</button>`;
 const colors = ['#79b1ce','#b6a0d8','#c7aa74','#79b8a4','#d69287','#85a2d5','#b0bd7d','#c18eae'];
 const labels = {'Regular Talent':'재능','Micro Talent':'미소 재능','Medium Talent':'중위 재능','Legendary Medium Talent':'레전드 중위 재능','Core Talent':'핵심 재능','Micro Talent or Medium Talent':'하위 또는 중위 재능','Medium Talent or Core Talent':'중위 또는 핵심 재능','Ultimate Nether King Talent Node':'명왕 재능','starfire':'복제 방향','void_gap':'복제 방향'};
+const genericOptionNames = new Set(['재능','미소 재능','하위 재능','중위 재능','레전드 중위 재능','핵심 재능','명왕 재능']);
 // Preview is transient UI; the same transformed cells and mask validate the drop.
 export function showSlateFootprint(root,cell,drag) {
   const grid=root.querySelector?.('.slate-interactive-board');
@@ -70,7 +71,7 @@ export function renderSlateEditor(s,{compact=false,inspectorOnly=false,hideInspe
   const boardHtml=Array.from({length:board.width*board.height},(_,i)=>{
     const x=i%board.width,y=Math.floor(i/board.width),cell=board.cells.find(c=>c.x===x&&c.y===y);
     const index=board.slateInventory.findIndex(r=>r.instanceId===cell?.slateInstanceId),slate=board.slateInventory[index];
-    const active=board.mask?.[y]?.[x]===1;
+    const active=divinityCellIsOpen(board,x,y);
     if (!active&&!cell&&!validAnchor({x,y})) return '<span class="slate-board-void" aria-hidden="true"></span>';
     const chosen=!!slate&&slate.instanceId===selected?.instanceId,canPlace=validAnchor({x,y});
     const corner=cell&&!board.cells.some(c=>c.slateInstanceId===cell.slateInstanceId&&(c.y<y||c.y===y&&c.x<x));
@@ -104,10 +105,10 @@ export function renderSlateEditor(s,{compact=false,inspectorOnly=false,hideInspe
       <div class="slate-socket-heading"><h3>옵션 소켓</h3><span>${controls.filter(c=>c.value).length} / ${controls.length}</span></div>
       <div class="slate-sockets">${controls.map(c=>{
         const option=seasonSlateOptions(c.type).find(o=>o.id===c.value);
-        return `<div>${row.nether?selectControl(`소켓 ${c.index+1} 색상`,'nether-quality',c.quality,netherQualityOptions,`data-key="${esc(selected.instanceId)}" data-slot="${c.index}"`):''}${button(`<small>${c.index+1}. ${esc(c.type.startsWith('regular:')?'재능':labels[c.type]??'명왕 재능')}</small><span>${esc(option?.detail||(c.value?'이전 선택 보존 · SS14 원문 확인 필요':'비어 있음 · 옵션 선택'))}</span>`,'slate-socket',`data-id="${esc(selected.instanceId)}" data-slot="${esc(c.slot)}" class="slate-socket" aria-pressed="${control?.slot===c.slot}" aria-label="옵션 ${c.index+1} 선택"`)}</div>`;
+        return `<div>${row.nether?selectControl(`소켓 ${c.index+1} 색상`,'nether-quality',c.quality,netherQualityOptions,`data-key="${esc(selected.instanceId)}" data-slot="${c.index}"`):''}${button(`<small>${c.index+1}. ${esc(c.type.startsWith('regular:')?'재능':labels[c.type]??'명왕 재능')}</small><span>${esc(option?.detail||(c.value?'이전 옵션 · 확인 필요':'옵션 선택'))}</span>`,'slate-socket',`data-id="${esc(selected.instanceId)}" data-slot="${esc(c.slot)}" data-role="slate-socket-${esc(c.slot)}" class="slate-socket" aria-expanded="${control?.slot===c.slot}" aria-label="옵션 ${c.index+1} 선택"`)}</div>`;
       }).join('')}</div>
       ${!row?'<p>이전 석판의 종류를 확인할 수 없습니다. 배치와 저장된 옵션은 유지합니다.</p>':''}
-      ${control?`<section class="slate-option-picker" aria-label="석판 옵션 선택"><header><label>이름·효과 검색<input type="search" data-slate-search value="${esc(ui.query)}" aria-label="석판 옵션 검색" /></label>${button('옵션 비우기','slate-option',`data-key="${esc(control.key)}" data-id=""`)}</header><div class="slate-option-list">${choices.map(o=>button(`<small>${esc(o.name)}</small><span>${esc(o.detail)}</span>`,'slate-option',`data-key="${esc(control.key)}" data-id="${esc(o.id)}" data-slate-option data-search="${esc(`${o.name} ${o.detail}`)}" aria-pressed="${o.id===control.value}"${`${o.name} ${o.detail}`.replace(/\s/gu,'').toLowerCase().includes(ui.query.replace(/\s/gu,'').toLowerCase())?'':' hidden'}`)).join('')}</div><p data-slate-empty${choices.some(o=>`${o.name} ${o.detail}`.replace(/\s/gu,'').toLowerCase().includes(ui.query.replace(/\s/gu,'').toLowerCase()))?' hidden':''}>일치하는 옵션이 없습니다.</p></section>`:''}
+      ${control?`<section class="slate-option-picker" aria-label="석판 옵션 선택"><header><input type="search" data-slate-search data-role="slate-option-search" value="${esc(ui.query)}" placeholder="이름·효과 검색" aria-label="석판 옵션 검색" />${control.value?button('옵션 비우기','slate-option',`data-key="${esc(control.key)}" data-id=""`):''}</header><div class="slate-option-list">${choices.map(o=>button(`${o.detail&&o.name!==o.detail&&!genericOptionNames.has(o.name)?`<small>${esc(o.name)}</small>`:''}<span>${esc(o.detail||o.name)}</span>`,'slate-option',`data-key="${esc(control.key)}" data-id="${esc(o.id)}" data-slate-option data-search="${esc(`${o.name} ${o.detail}`)}" aria-pressed="${o.id===control.value}"${`${o.name} ${o.detail}`.replace(/\s/gu,'').toLowerCase().includes(ui.query.replace(/\s/gu,'').toLowerCase())?'':' hidden'}`)).join('')}</div><p data-slate-empty${choices.some(o=>`${o.name} ${o.detail}`.replace(/\s/gu,'').toLowerCase().includes(ui.query.replace(/\s/gu,'').toLowerCase()))?' hidden':''}>검색 결과 없음</p></section>`:''}
       ${row?.detail?`<details class="native-option-source"><summary>석판 효과·출처</summary><p>${esc(row.detail)}</p>${/^https:\/\/tlidb\.com\/(ko|en)\//u.test(row.page?.sourceUrl??'')?`<a href="${esc(row.page.sourceUrl)}" target="_blank" rel="noreferrer">SS14 원문 보기</a>`:''}</details>`:''}`;
   } else detail='';
   const inspector=detail?`<section class="slate-detail-panel" aria-label="선택한 석판" data-role="slate-inspector" tabindex="-1">${detail}</section>`:'';
@@ -132,9 +133,17 @@ export function handleSlateEditorAction(api, action, data) {
   } else if (action==='slate-shape') { ui.draft.shape=data.id;ui.draft.rotation=0; }
   else if (action==='slate-draft-rotate') ui.draft.rotation=(ui.draft.rotation+1)%4;
   else if (action==='slate-cancel') { ui.draft=null;ui.moving=false; }
-  else if (action==='slate-select'||action==='slate-socket') Object.assign(ui,{selectedId:data.id,draft:null,moving:false,socket:action==='slate-socket'?data.slot:null,query:''});
+  else if (action==='slate-select'||action==='slate-socket') {
+    const open=action==='slate-socket'&&(ui.selectedId!==data.id||ui.socket!==data.slot);
+    Object.assign(ui,{selectedId:data.id,draft:null,moving:false,socket:open?data.slot:null,query:''});
+    if(action==='slate-socket')state.focusRole=open?'slate-option-search':'slate-socket-'+data.slot;
+  }
   else if (action==='slate-move-mode') Object.assign(ui,{selectedId:data.id,draft:null,moving:!ui.moving});
-  else if (action==='slate-option') api.edit({kind:'slate-affix',key:data.key,value:data.id});
+  else if (action==='slate-option') {
+    api.edit({kind:'slate-affix',key:data.key,value:data.id});
+    if(ui.socket!==null)state.focusRole='slate-socket-'+ui.socket;
+    Object.assign(ui,{socket:null,query:''});
+  }
   else if (action==='slate-cell') {
     const anchor={x:Number(data.x),y:Number(data.y)};
     if (ui.draft) {

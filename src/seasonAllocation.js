@@ -1,6 +1,6 @@
 import { SS14_RULES } from "./data/ss14Rules.generated.js";
 import { SS14_COMPONENTS } from "./data/ss14Components.generated.js";
-import { transformedShape } from "./divinityBoardModel.js";
+import { transformedShape, divinityCellIsOpen } from "./divinityBoardModel.js";
 import {inverseGeometry} from './seasonInverseImage.js';
 
 // Validate the saved geometry as supplied. This does not certify SS14 template
@@ -68,7 +68,7 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
     for (const cell of cells) {
       const key = `${cell.x}:${cell.y}`;
       if (!Number.isInteger(cell.x) || !Number.isInteger(cell.y) || cell.x < 0 || cell.y < 0
-        || cell.x >= board.width || cell.y >= board.height || board.mask?.[cell.x]?.[cell.y] !== 1) issue("divinity", "석판이 판의 허용 칸 밖에 배치되었습니다.");
+        || cell.x >= board.width || cell.y >= board.height || !divinityCellIsOpen(board,cell.x,cell.y)) issue("divinity", "석판이 판의 허용 칸 밖에 배치되었습니다.");
       if (positions.has(key)) issue("divinity", "석판 배치 칸이 겹칩니다.");
       positions.add(key);
       if (!ids.includes(cell.slateInstanceId)) issue("divinity", "배치 칸에 연결된 석판이 보관함에 없습니다.");
@@ -89,4 +89,11 @@ export function inspectSeasonAllocation(build, { rules = SS14_RULES, components 
   }
   return { issues, checks, valid: issues.length === 0,
     limitation: "재능의 원문 포인트 상한·해금과 석판 문서의 겹침·범위·모양을 검사합니다. SS14 전체 경로·특수 배치 규칙 검증은 별도입니다." };
+}
+
+export function newSeasonTalentAllocationIssue(before,after,index) {
+  const path=`talents.boards.${index}`;
+  const key=issue=>JSON.stringify([issue.reason,issue.nodeId]);
+  const previous=new Set(inspectSeasonAllocation(before).issues.filter(issue=>issue.path===path).map(key));
+  return inspectSeasonAllocation(after).issues.find(issue=>issue.path===path&&!previous.has(key(issue)));
 }

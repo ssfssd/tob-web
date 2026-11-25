@@ -77,7 +77,7 @@
 .slate-sockets { display:grid;gap:8px; }.season-native .slate-socket { width:100%;text-align:left;display:flex;flex-direction:column;gap:6px;padding:12px;background:#172936;border:1px solid #496170; }
 .slate-socket small { color:#b8c9d3;font-size:12px; }.slate-socket span { font-size:13px;line-height:1.6;white-space:pre-line; }
 .slate-option-picker { margin-top:16px;padding-top:8px;border-top:1px solid #496170; }
-.slate-option-picker>header { display:flex;gap:8px;align-items:end;margin-bottom:8px; }.slate-option-picker>header label { flex:1; }.slate-option-picker>header button { font-size:12px;margin-bottom:8px;white-space:nowrap; }
+.slate-option-picker>header { display:flex;gap:8px;align-items:center;margin-bottom:8px; }.slate-option-picker>header input { flex:1;min-width:0; }.slate-option-picker>header button { font-size:12px;white-space:nowrap; }
 .slate-option-list { max-height:340px;overflow:auto;display:grid;gap:5px; }
 .season-native .slate-option-list button { text-align:left;background:#142633;display:flex;flex-direction:column;gap:5px;padding:10px; }
 .slate-option-list small { color:#b8c9d3; }.slate-option-list span { font-size:13px;line-height:1.6;white-space:pre-line; }
@@ -85,6 +85,7 @@
 .slate-shapes { display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;max-height:220px;overflow:auto; }
 .season-native .slate-shapes button { display:flex;align-items:center;gap:8px;font-size:12px;padding:8px; }
 .native-slate-editor button[aria-pressed=true] { background:#34424a;border-color:#ddc180;color:#fff1cf; }
+.season-native .slate-socket[aria-expanded=true] { background:#34424a;border-color:#ddc180;color:#fff1cf; }
 .season-native-scroll:has(.native-slate-editor)>section>h1 { margin-bottom:12px; }
 .slate-combat-conditions { border:1px solid #405664;padding:10px 16px;background:#101d27e6; }
 .season-native:has(.native-slate-editor) .native-dps-dock { display:flex;flex-direction:column; }
@@ -139,6 +140,31 @@
 .native-edit-history,.native-log-actions,.native-save-row,.season-native-modal>header,.season-native-modal>footer,
 .slate-editor-heading,.slate-socket-heading,.slate-detail-panel>header,.slate-option-picker>header { flex-wrap:wrap; }
 .native-save-row>div { min-width:0;display:flex;flex-wrap:wrap;gap:6px; }
+.native-save-row>span { min-width:0;overflow-wrap:anywhere; }
+.native-save-row[hidden] { display:none; }
+.season-native .ss14-saved-build-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:4px 10px;
+  padding:8px 0;
+}
+.season-native .ss14-saved-build-row[hidden] { display:none; }
+.season-native .ss14-saved-build-row .saved-build-open {
+  text-align:start;
+  min-width:0;
+  min-height:40px;
+  overflow-wrap:anywhere;
+  padding:4px 6px;
+  border-color:transparent;
+  background:transparent;
+}
+.season-native .ss14-saved-build-row .saved-build-open:is(:hover,:focus-visible) { border-color:#88764e; }
+.season-native .saved-build-meta { display:flex;flex-wrap:wrap;gap:3px 8px;color:#bccbd5;font-size:12px; }
+.season-native .saved-build-meta small { font-size:inherit; }
+@media (max-width:430px) {
+  .season-native .ss14-saved-build-row { grid-template-columns:minmax(0,1fr); }
+  .season-native .ss14-saved-build-row>div { padding-inline:6px; }
+}
 .slate-placed-list button { flex-wrap:wrap; }
 .slate-palette button span,.slate-placed-list button span { min-width:0;overflow-wrap:anywhere; }
 .season-native .native-dps-dock>button { margin:4px 0; }

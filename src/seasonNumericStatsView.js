@@ -132,7 +132,10 @@ export function renderSeasonNumericStats(report) {
   const mana = assumed?.manaReservation ?? c.values;
   const manaReservations = assumed?.manaReservations ?? c.manaReservations;
   const summaryCalculation = assumed?.rows.find(row => row.rowIndex === summarySkill?.rowIndex);
-  const summaryRate = assumed ? summaryCalculation?.useRate : summarySkill?.values.rate;
+  const summaryDpsRow = activeRows.find(row => row.rowIndex === summarySkill?.rowIndex && row.id === summarySkill?.id);
+  const observedUseRate = summaryDpsRow?.elixirDpsStates?.states.length && Number.isFinite(summaryDpsRow.values.manualRate);
+  const summaryRate = observedUseRate ? summaryDpsRow.values.manualRate
+    : assumed ? summaryCalculation?.useRate : summarySkill?.values.rate;
   const summaryCritical = assumed ? summaryCalculation?.detail?.critical?.effectiveCriticalChance : summarySkill?.values.criticalChance;
   const averaged = assumed ? assumed.measuredResources : report.theaAverage?.supported;
   const elixirUptime=assumed?assumed.elixirUptime:report.elixirUptime;
@@ -166,7 +169,7 @@ export function renderSeasonNumericStats(report) {
     }).join('');
   return `<section class="native-numeric-stats" data-role="native-numeric-stats" aria-label="SS14 수치 계산">
     ${summarySkill ? `<button type="button" class="native-stat-link" data-ss14-action="result-tab" data-tab="calculation" data-index="${summarySkill.rowIndex}" aria-label="${summaryLabel} ${esc(safeName(summarySkill.name))} 계산 보기"><strong>${esc(safeName(summarySkill.name))}</strong><span aria-hidden="true">›</span></button>
-      <dl class="native-stat-list" aria-label="${averaged?'전투 시작 시 ':''}${summaryLabel} 수치">${Number.isFinite(summaryRate) ? cell(summarySkill.rateLabel, summaryRate, "primary-rate", "회/초") : ''}${Number.isFinite(summaryCritical) ? cell("크리티컬 확률", summaryCritical, "primary-critical-chance", "%") : ''}</dl>` : '<button type="button" data-ss14-action="section" data-section="skills">주력 스킬 선택</button>'}
+      <dl class="native-stat-list" aria-label="${averaged?'전투 시작 시 ':''}${summaryLabel} 수치">${Number.isFinite(summaryRate) ? cell(observedUseRate?'영약 유지율 반영 사용 횟수':summarySkill.rateLabel, summaryRate, "primary-rate", "회/초") : ''}${Number.isFinite(summaryCritical)&&!observedUseRate ? cell("크리티컬 확률", summaryCritical, "primary-critical-chance", "%") : ''}</dl>` : '<button type="button" data-ss14-action="section" data-section="skills">주력 스킬 선택</button>'}
     ${resources.length ? `<dl class="native-stat-list" aria-label="캐릭터 자원">${resources.map(([label,value,key]) => cell(label,value,key)).join('')}</dl>` : ''}
     ${defenseRows ? `<details class="native-numeric-detail" data-role="numeric-defense-overview"><summary>방어·저항</summary><dl class="native-stat-list native-defense-overview" aria-label="캐릭터 방어">${defenseRows}</dl>
       ${hasRawResistance ? '<small class="native-stat-note">* 상한 적용 전</small>' : ''}</details>` : ''}

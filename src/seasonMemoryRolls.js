@@ -5,6 +5,7 @@ export function memoryRange(fragment) {
 }
 export const validMemoryRollValue = (control, value) => typeof value === "number" && Number.isFinite(value)
   && value >= control.min && value <= control.max;
+export const MISSING_MEMORY_ROLL = 'SS14 추억 범위 선택값을 현재 원문 범위에서 직접 확인하세요.';
 
 export function bindMemoryRolls({ row, ko, page, memory, index, id, tierId, kind, bindings = {} }) {
   const controls = [];
@@ -26,6 +27,6 @@ export function bindMemoryRolls({ row, ko, page, memory, index, id, tierId, kind
   });
   const render = (r) => r.renderTemplate.replace(/\{\{roll_(\d+)\}\}/gu, (_, n) => values[Number(n) - 1]);
   const sameKoRanges = ko?.rollFragments?.length === fragments.length && ko.rollFragments.every((f, i) => f === fragments[i]);
-  return { controls, reason: complete ? "" : "SS14 추억 범위 선택값을 현재 원문 범위에서 직접 확인하세요.",
+  return { controls, reason: complete ? "" : MISSING_MEMORY_ROLL,
     text: complete ? render(row) : row.text, koText: complete && sameKoRanges ? render(ko) : ko?.text };
 }
