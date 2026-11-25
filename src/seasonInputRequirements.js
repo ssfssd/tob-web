@@ -30,6 +30,10 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
   if(customOptions.pattern.test(reason))return [customOptions];
   if(reason.startsWith('두 영약 동시 활성 시간 비율'))
     return [{section:'combat',label:'영약 동시 활성 비율 입력',edit:'extension-input',key:'elixir:overlap'}];
+  if(reason.startsWith('자동 은총의 영약 가동률'))
+    return [...(report?.componentProjection?.rows??[]).flatMap(({elixirState})=>elixirState&&elixirState.uptime!==0&&elixirState.uptime!==100
+      ? [{section:'combat',label:`영약 ${elixirState.index+1} 가동률 입력`,edit:'extension-input',key:`elixir:${elixirState.index}:uptime`}] : []),
+    {section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
   if(reason==='영약의 최종 효과 배율을 선택하세요.')
     return (report?.componentProjection?.rows??[]).flatMap(({elixirState,extensionControls=[]})=>{
       if(elixirState?.scale!=='')return [];

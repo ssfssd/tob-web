@@ -1,4 +1,4 @@
-import { manualResourceBalance } from './seasonDps.js';
+import { manualResourceBalance, averageObservedChannelCost } from './seasonDps.js';
 import { ELIXIR_OVERLAP_KEY } from './seasonExtensions.js';
 
 // Legacy first-skill recommendation metric. Full-build uptime is evaluated
@@ -34,7 +34,7 @@ const damageFieldsFor = row => [...damageFields,...['permafrostDps','minionHitDp
 const weighted=(states,read)=>states.every(({value})=>Number.isFinite(read(value)))
   ? states.reduce((sum,{value,weight})=>sum+read(value)*weight,0) : null;
 
-function averageDamageByType(samples, field, total) {
+function averageDamageMap(samples, field, total) {
   if (!samples.every(({value}) => value?.[field] || value?.values[total] === 0)) return undefined;
   const types = new Set(samples.flatMap(({value}) => Object.keys(value[field] ?? {})));
   if (!types.size) return undefined;
@@ -54,20 +54,6 @@ function averageDotDefense(samples,key) {
   if(states.some(state=>!state))return undefined;
   const first=JSON.stringify(states[0]);
   return states.every(state=>JSON.stringify(state)===first)?states[0]:{states};
-}
-
-function averageChannelCost(samples) {
-  const channel=samples.find(({value})=>value?.channelCost)?.value.channelCost;
-  if (!channel || samples.length===1) return null;
-  const max=weighted(samples,value=>value?.channelCost?.max);
-  const {rate}=channel;
-  const {manaPerUse,lifePerUse}=samples[0].value??{};
-  const variable=!Number.isFinite(manaPerUse)||!Number.isFinite(lifePerUse)
-    || samples.some(({value})=>value?.manaPerUse!==manaPerUse||value?.lifePerUse!==lifePerUse);
-  const valid=Number.isFinite(rate)&&rate>=0&&(rate===0||Number.isFinite(max)&&rate<=max+1e-8&&!variable);
-  return {channelCost:{rate,max,valid,variable,observed:true},
-    manualManaPerSecond:valid?(rate===0?0:rate*manaPerUse):null,
-    manualLifePerSecond:valid?(rate===0?0:rate*lifePerUse):null};
 }
 
 function observedStates(varying) {
@@ -131,10 +117,11 @@ export function applyObservedElixirUptime(build,report,calculateState) {
     value.rows.some(r=>r.rowIndex===row.rowIndex&&r.id===row.id)));
   const supported=sameRows&&states.every(({value})=>value.supported);
   const varyingNames=varying.map(entry=>entry.name);
+  const observedSlots=varying.map(({elixirState:{index}})=>({index,skillId:build.skills.elixirs[index].skillId}));
   const rows=first.rows.map(row=>{
     const samples=states.map(({value,weight})=>({value:value.rows.find(r=>r.rowIndex===row.rowIndex&&r.id===row.id),weight}));
     const stable=(key)=>samples.every(({value})=>value?.[key]===row[key])?row[key]:null;
-    const channel=averageChannelCost(samples);
+    const channel=samples.length>1?averageObservedChannelCost(samples):null;
     const manaPerSecond=channel?channel.manualManaPerSecond:weighted(samples,r=>r?.manualManaPerSecond);
     const lifePerSecond=channel?channel.manualLifePerSecond:weighted(samples,r=>r?.manualLifePerSecond);
     const channelCostTotalOnly=Boolean(channel&&channel.channelCost.rate!==0);
@@ -158,7 +145,7 @@ export function applyObservedElixirUptime(build,report,calculateState) {
             : [{trace:skill?.trace?.filter(effect=>effect.stage==='added-damage')}];
           return {active,uptime:100*weight,groups,sources:skill?.addedDamageSources};
         })},
-        elixirDpsStates:{names:varyingNames,manaPerSecond,lifePerSecond,channelCostTotalOnly,states:states.map(({active,weight},index)=>{
+        elixirDpsStates:{names:varyingNames,observedSlots,manaPerSecond,lifePerSecond,channelCostTotalOnly,states:states.map(({active,weight},index)=>{
           const sample=samples[index].value;
           const dps=sample.values.dps;
           const mana=channelCostTotalOnly?null:sample.manualManaPerSecond;
@@ -170,8 +157,10 @@ export function applyObservedElixirUptime(build,report,calculateState) {
         })},
       }),
       dotBreakdown:supported?averageDotBreakdown(samples,'dotBreakdown'):undefined,
-      minionDamageByType:supported?averageDamageByType(samples,'minionDamageByType','minionDps'):undefined,
-      damageByType:supported?averageDamageByType(samples,'damageByType','dps'):undefined,
+      minionDamageByType:supported?averageDamageMap(samples,'minionDamageByType','minionDps'):undefined,
+      moduleDotDpsByAction:supported?averageDamageMap(samples,'moduleDotDpsByAction','minionDps'):undefined,
+      damageByType:supported?averageDamageMap(samples,'damageByType','dps'):undefined,
+      ...(Object.hasOwn(row,'executeDps')&&{executeDps:supported?weighted(samples,value=>value?.executeDps):null}),
       permafrostBreakdown:supported?averageDotBreakdown(samples,'permafrostBreakdown'):undefined,
       dotDefense:supported?averageDotDefense(samples,'dotDefense'):undefined,
       frostDefense:supported?averageDotDefense(samples,'frostDefense'):undefined,

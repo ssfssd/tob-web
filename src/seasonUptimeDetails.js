@@ -59,7 +59,7 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
     const active=row.dotWindows.reduce((total,[start,stop])=>total+Math.max(0,Math.min(stop,warmup+seconds)-Math.max(start,warmup)),0);
     return percent(100*active/seconds);
   };
-  const lines = skills.map(({name, rowIndex, actionIndex, field, saved, assumed, exclusive, duplicate}) => {
+  const lines = skills.map(({name, rowIndex, actionIndex, actionName, field, saved, assumed, exclusive, duplicate}) => {
     const row = estimate.fullDps.rows.find(r=>r.rowIndex===rowIndex);
     const original = report.fullDps.rows.find(r=>r.rowIndex===rowIndex);
     const dot = field==='dotUptime';
@@ -75,13 +75,12 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
         return Math.max(0,values.dotDps-(values.igniteDps??0)-(values.scorchDps??0));
       if (field==='minionUptime') return values.minionHitDps ?? null;
       if (field==='moduleIgniteUptime') return values.moduleIgniteDps ?? null;
-      if (scenario.fullDps.scope!=='ss14-fixed-scenario-full-dps') return null;
-      if (field==='moduleDotUptime') return entry.minionSkills?.[actionIndex]?.dps ?? null;
+      if (field==='moduleDotUptime') return entry.moduleDotDpsByAction?.[actionIndex] ?? null;
       return null;
     };
     return {
       key:`skill:${rowIndex}:${row?.id}:${field}:${actionIndex??''}`,
-      name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+details[0],
+      name:name+(duplicate?' · '+(rowIndex+1)+'번 칸':'')+' · '+(actionName?`${actionName} 유지율`:details[0]),
       setting:windowed?windowUptime(report.fullDps,original,saved):percent(saved),
       assumed:windowed?windowUptime(estimate.fullDps,row,assumed):percent(assumed),
       input:{edit:'dps-input',key:`${rowIndex}:${input}`},
@@ -144,19 +143,26 @@ export function describeUptime(build, report, estimate, skills, scenarioHeroComb
         method:method+' · 조건이 충족된 동안 이 옵션을 계산합니다.'});
     }
     if (row.elixirState) {
-      if(isThea(build)&&build.ss14Inputs.theaCycle?.mode==='automatic'){
+      const automatic=isThea(build)&&build.ss14Inputs.theaCycle?.mode==='automatic';
+      if(automatic&&theaCombatEnabled(build)){
         const timing=estimate.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
         const original=report.theaAverage?.elixirUptimes?.find(elixir=>elixir.i===row.elixirState.index);
-        const hasTimeline=theaCombatEnabled(build);
         lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name,setting:original?percent(original.uptime):'계산 보류',assumed:timing?percent(timing.uptime):'계산 보류',
-          input:{edit:'thea-event',key:hasTimeline?`elixir${row.elixirState.index}Interval`:'combatMode'},
+          input:{edit:'thea-event',key:`elixir${row.elixirState.index}Interval`},
           method:(original?`${count(original.start)}초에 처음 사용하고 ${count(original.interval)}초마다 갱신합니다. 한 번 사용하면 ${count(original.duration)}초 동안 유지되며, 준비 시간을 뺀 측정 구간에서 활성 ${count(original.activeSeconds)}초를 반영합니다.`
-            :hasTimeline?'영약의 사용 간격, 첫 사용 시점, 지속 시간을 확인하세요.':'자동 은총과 함께 계산하려면 복합 발동을 켜세요.')
+            :'영약의 사용 간격, 첫 사용 시점, 지속 시간을 확인하세요.')
             +(timing?' 방어 전 DPS에는 측정 구간 내내 영약을 적용합니다.':'')});
         continue;
       }
       const original=report.componentProjection.rows.find(r=>r.path===row.path);
       const saved=original?.elixirState, key=`elixir:${row.elixirState.index}:uptime`;
+      const fixedUptime=saved?.uptime===0||saved?.uptime===100;
+      if(automatic){
+        lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name,setting:percent(saved?.uptime),assumed:percent(row.elixirState.uptime),
+          input:{edit:'extension-input',key},method:fixedUptime?'측정 구간 전체에 같은 영약 상태를 적용합니다.'
+            :'측정 구간 중 일부에만 적용하려면 복합 발동에서 영약 시간표를 입력하세요.'});
+        continue;
+      }
       lines.push({key:`elixir:${row.elixirState.index}:${row.itemId}`,name:row.name, setting:Number.isFinite(saved?.uptime)?percent(saved.uptime):onOff(saved?.enabled), assumed:'활성 가정',
         ...(original?.extensionControls?.some(control=>control.key===key)&&{input:{edit:'extension-input',key}}),
         method:'영약 효과가 끝나기 전에 갱신하면 유지됩니다. 방어 전 계산은 활성 상태의 효과 배율을 사용합니다.'});

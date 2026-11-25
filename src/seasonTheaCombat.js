@@ -33,6 +33,7 @@ function finishCombatRows(combat, seconds) {
     if (row.minionDamageByType) {
       for (const type of Object.keys(row.minionDamageByType)) row.minionDamageByType[type] /= seconds;
     }
+    for (const action of Object.keys(row.moduleDotDpsByAction ?? {})) row.moduleDotDpsByAction[action] /= seconds;
   }
   return sum([...combat.rows.values()].map(row => row.dps));
 }
@@ -222,6 +223,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
     ...Object.fromEntries(recordedKeys.map(k => [k, 0])),
     damageByType:{},
     ...((r.minionSkills||r.minionDamageByType) && {minionDamageByType:{}}),
+    ...(r.moduleDotDpsByAction && {moduleDotDpsByAction:Object.fromEntries(Object.keys(r.moduleDotDpsByAction).map(action=>[action,0]))}),
   }]));
   const recordTypes=(rowIndex,amounts,weight)=>{
     const totals=rows.get(rowIndex).damageByType;
@@ -718,16 +720,19 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
           const dots = minionDots(row), direct = row.moduleTimeline ? (row.explosionDps ?? 0) + (row.executeDps ?? 0) : row.values.minionDps - dots;
           const dotTime = w + integral(lo,hi) / 100;
           const baseAffliction = 1 + (enemy.affliction ?? 0) / 100;
+          const dotWeight = dotTime / baseAffliction;
           const totals = rows.get(row.rowIndex);
-          accumulateDamage(row.rowIndex,'minionDps',direct*w+dots/baseAffliction*dotTime,phase);
-          const moduleIgnite = (row.values.moduleIgniteDps ?? 0) / baseAffliction * dotTime;
+          accumulateDamage(row.rowIndex,'minionDps',direct*w+dots*dotWeight,phase);
+          for (const [action,dps] of Object.entries(row.moduleDotDpsByAction ?? {}))
+            totals.moduleDotDpsByAction[action] += dps * dotWeight;
+          const moduleIgnite = (row.values.moduleIgniteDps ?? 0) * dotWeight;
           totals.moduleIgniteDps += moduleIgnite;
           if (!row.moduleTimeline) totals.minionHitDps += row.values.minionHitDps * w;
           if (row.moduleTimeline) {
             if (row.explosionDps > 0) accumulateMinionTypes(row.rowIndex, {true:row.explosionDps}, w);
             if (moduleIgnite > 0) accumulateMinionTypes(row.rowIndex, {fire:moduleIgnite}, 1);
             for (const action of row.minionSkills) {
-              if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotTime / baseAffliction, ailmentState.numbedEffect);
+              if (action.persistent) accumulateMinionTypes(row.rowIndex, action.damageByType, dotWeight, ailmentState.numbedEffect);
             }
           } else accumulateMinionTypes(row.rowIndex, row.minionDamageByType, w, ailmentState.numbedEffect);
         }
@@ -993,16 +998,17 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       ? { events:reapingEvents/results.length,
         applied:sum(results.map(run=>run.reapedNativeRows.get(r.rowIndex)??0))/results.length }
       : null;
-    const averageTypes=field=>{
+    const averageDamageMap=field=>{
       const samples=supported?results.map(run=>run.rows.get(r.rowIndex)[field]):[];
       const types=new Set(samples.flatMap(sample=>Object.keys(sample??{})));
       return Object.fromEntries([...types].map(type=>[type,sum(samples.map(sample=>sample?.[type]??0))/results.length]));
     };
-    const minionTypes=averageTypes('minionDamageByType');
-    const damageByType=averageTypes('damageByType');
+    const minionTypes=averageDamageMap('minionDamageByType');
+    const damageByType=averageDamageMap('damageByType');
+    const moduleDotDpsByAction=r.moduleDotDpsByAction&&supported?averageDamageMap('moduleDotDpsByAction'):undefined;
     for(const [type,damage] of Object.entries(minionTypes))damageByType[type]=(damageByType[type]??0)+damage;
     const minionDamageByType=Object.keys(minionTypes).length?minionTypes:undefined;
-    return { ...r, damageByType, minionDamageByType, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+    return { ...r, damageByType, minionDamageByType, moduleDotDpsByAction, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
       ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds}}),
       ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });

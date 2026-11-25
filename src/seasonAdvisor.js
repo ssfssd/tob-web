@@ -12,6 +12,7 @@ import { hasPeriodicBurstSupport, readPeriodicBurstUptime } from './seasonSkillI
 import { theaElixirTimingKeys } from './seasonTheaEvents.js';
 import { isThea } from './seasonTheaRevelation.js';
 import { observedSkillCostFields } from './seasonDps.js';
+import { usesExtensionInput } from './seasonExtensions.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -49,7 +50,7 @@ function extensionEncounterValues(build, report) {
   const entries = new Map();
   for (const row of report?.componentProjection?.rows ?? []) for (const control of row.extensionControls ?? []) {
     const {key, value} = control;
-    if (value === '' || !/^(?:module:|elixir:|ingredient:.*:(?:minion|rate)$)/u.test(key)) continue;
+    if (value === '' || !/^(?:module:|elixir:|ingredient:.*:(?:minion|rate)$)/u.test(key) || !usesExtensionInput(report,row,key)) continue;
     const presence = /^module:([0-4]):active$/u.exec(key);
     const owner = presence ? build.skills?.active?.[Number(presence[1])]?.skillId : `${row.path}:${row.itemId}`;
     entries.set(`${key}:${owner}:${control.sourcePageSha256}`, control);

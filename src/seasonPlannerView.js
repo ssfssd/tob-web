@@ -301,10 +301,13 @@ function itemPicker(s, category, index, supportIndex, current) {
     return '<p>양손 무기를 먼저 교체하거나 해제하세요.</p>'+ (current ? button('서브 무기 해제','clear-slot','data-kind="gear-selection" data-index="1"') : '');
   if(category==='gear' && s.picker?.candidate && s.picker.draft){
     const id=s.picker.candidate;
+    const removal=current===id?s.picker.removalPreview:null;
     return `<div class="gear-candidate-page" data-role="candidate-detail" tabindex="-1">
       <nav aria-label="장비 후보 탐색">${button('‹ 장비 목록','gear-candidate-list')}${current===id
-        ?button('장착 해제','clear-slot',`data-kind="gear-selection" data-index="${index}"`)
+        ?button('해제 전후 보기','preview-gear-removal',`data-role="gear-removal-toggle" aria-expanded="${!!removal}"`)
+          +button('장착 해제','clear-slot',`data-kind="gear-selection" data-index="${index}"`)
         :current?button('장착 장비','view-worn-gear'):''}</nav>
+      ${removal?`<div data-role="gear-removal-preview" tabindex="-1">${renderSlotPreview(removal,esc,{action:'해제',extraDetails:renderGearSkillChanges(removal)})}</div>`:''}
       <div class="gear-comparison-body" data-candidate="${esc(id)}">${workshopView(s,s.picker.draft,true)}</div></div>`;
   }
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";

@@ -6,7 +6,7 @@ import { createTheaEventRuntime, validTheaEvents } from "./seasonTheaEvents.js";
 import { SS14_CARDS_EN } from "./data/ss14Cards.en.generated.js";
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { calculateTheaCombatAverage } from "./seasonTheaCombat.js";
-import { manualResourceBalance, seasonDamageTypeParts } from "./seasonDps.js";
+import { manualResourceBalance, seasonDamageTypeParts, averageObservedChannelCost } from "./seasonDps.js";
 
 export function validTheaInputs(inputs) {
   if (inputs.theaCombatReceipt !== undefined && !/^[a-f0-9]{64}$/u.test(inputs.theaCombatReceipt)) return false;
@@ -124,8 +124,9 @@ export function calculateTheaAverage(build, calculateState) {
   if (Object.values(caps).some(n => !Number.isInteger(n) || n < 1 || n > 100) || Object.values(blessingDurations).some(n => n <= 0)) blockers.push("축복 상한·지속 시간이 계산 범위를 벗어났습니다.");
   if (combat) return calculateTheaCombatAverage(build, report, calculateState, simulateTheaCycle,
     { ...cycle, caps, cooldown, duration, blessingDurations, events, maxBoons: mechanics.some(m => m.kind === "thea-boon-extra-stack") ? 2 : 1 }, blockers);
-  // An observed elixir percentage is not its joint timeline with God's Boon.
-  if (report.componentProjection.rows.some(r => r.elixirState)) blockers.push("자동 은총과 영약의 동시 활성 시간표는 아직 지원하지 않습니다.");
+  // Constant states have no overlap ambiguity. Partial uptime alone cannot place the active state.
+  if (report.componentProjection.rows.some(({elixirState})=>elixirState&&elixirState.uptime!==0&&elixirState.uptime!==100))
+    blockers.push("자동 은총의 영약 가동률은 0% 또는 100%로 지정하거나 복합 발동에서 영약 시간표를 입력하세요.");
   let simulation = null; const cache = new Map(); const stateCache = new Map();
   const stateResult = state => {
     const key = JSON.stringify(state);
@@ -202,15 +203,26 @@ export function calculateTheaAverage(build, calculateState) {
   }, 0) : null;
   for (const row of rows) {
     const stateRow = state => state.rows.find(r => r.rowIndex === row.rowIndex && r.id === row.id);
+    for (const key of ['dotBreakdown','permafrostBreakdown']) {
+      const initial = row[key];
+      if (!initial) continue;
+      const active = timeAverage(state => {
+        const breakdown = stateRow(state)?.[key];
+        return breakdown?.uptime===initial.uptime && breakdown?.charge===initial.charge ? breakdown.active : null;
+      });
+      row[key] = Number.isFinite(active) ? {...initial,active} : undefined;
+    }
     row.damageByType=undefined;
     row.minionDamageByType=undefined;
+    if (Object.hasOwn(row,'executeDps')) row.executeDps=timeAverage(state=>stateRow(state)?.executeDps);
     if (supported&&projectileCast&&row.rowIndex===0) row.damageByType=projectileDamageByType??undefined;
     else if (supported) {
       const types={};
       const complete=simulation.segments.every(segment=>{
         const parts=seasonDamageTypeParts(stateRow(cache.get(segment)));
         if (!parts) return false;
-        for (const [type,damage] of parts) types[type]=(types[type]??0)+damage*segment.seconds/cycle.seconds;
+        // Execution removes HP and is reported separately from damage types.
+        for (const [type,damage] of parts) if (type!=='execute') types[type]=(types[type]??0)+damage*segment.seconds/cycle.seconds;
         return true;
       });
       if (complete) {
@@ -222,10 +234,16 @@ export function calculateTheaAverage(build, calculateState) {
       if (!Object.hasOwn(row.values,key)) continue;
       row.values[key] = timeAverage(state => stateRow(state)?.values[key]);
     }
-    row.manualManaPerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.mana
-      : timeAverage(state => stateRow(state)?.manualManaPerSecond);
-    row.manualLifePerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.life
-      : timeAverage(state => stateRow(state)?.manualLifePerSecond);
+    const channel = supported && !projectileCast ? averageObservedChannelCost(simulation.segments.map(segment=>({
+      value:stateRow(cache.get(segment)),weight:segment.seconds/cycle.seconds,
+    }))) : null;
+    if (channel) Object.assign(row,channel);
+    else {
+      row.manualManaPerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.mana
+        : timeAverage(state => stateRow(state)?.manualManaPerSecond);
+      row.manualLifePerSecond = projectileCast && row.rowIndex === 0 && supported ? projectileCosts.life
+        : timeAverage(state => stateRow(state)?.manualLifePerSecond);
+    }
   }
   if (supported && projectileCast) Object.assign(rows[0].values, {
     manualDps:projectileDps, dps:projectileDps, fixedNumbedHitDps:projectileNumbedDps,

@@ -16,6 +16,11 @@ const safeKo = (s) => typeof s === "string" && /[가-힣]/u.test(s) && !/\p{Scri
 const validPage = (p) => p?.season === "SS14" && /^[a-f0-9]{64}$/u.test(p.sourcePageSha256);
 const signature = (v) => JSON.stringify(v);
 export const ELIXIR_OVERLAP_KEY='elixir:overlap';
+export function usesExtensionInput(report,row,key) {
+  if (!row.elixirState) return true;
+  if (report.fullDps?.scope==='ss14-thea-joint-combat') return !/^elixir:(?:[01]:(?:active|uptime)|overlap)$/u.test(key);
+  return !key.endsWith(':active') || !Number.isFinite(row.elixirState.uptime);
+}
 export const validExtensionValue = (control, value) => value === "" || typeof value === "number" && Number.isFinite(value)
   && value >= control.min && value <= control.max && (!["boolean", "tier", "count"].includes(control.kind) || Number.isInteger(value));
 
@@ -75,7 +80,10 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
     if (row.blockers.length) continue;
     const fingerprint = signature({ slot, skillId: host.skillId, level: host.level });
     const selectedEnabled = control(row, `elixir:${index}:active`, `영약 ${index + 1} 현재 활성`, "boolean", fingerprint);
-    const enabled = theaCombatEnabled(build) ? (theaState(build)?.events?.[`elixir${index}`] ?? 0) : selectedEnabled;
+    const uptime = control(row, `elixir:${index}:uptime`, `영약 ${index + 1} 관측한 활성 시간 비율 (%)`, "percent", fingerprint, 100);
+    const constantCycleUptime = build.ss14Inputs?.theaCycle?.mode === 'automatic' && (uptime === 0 || uptime === 100);
+    const enabled = theaCombatEnabled(build) ? (theaState(build)?.events?.[`elixir${index}`] ?? 0)
+      : constantCycleUptime ? Number(uptime === 100) : selectedEnabled;
     let scale = control(row, `elixir:${index}:scale`, `영약 ${index + 1} 확인한 효과 배율`, "scale", fingerprint, 100);
     if(netherElixirBonus) {
       const included=control(row,`elixir:${index}:netherIncludes`,'최종 배율에 명왕 효과가 포함됨','boolean',fingerprint);
@@ -85,8 +93,7 @@ export function seasonExtensionRows(build, { parseLines, data = SS14_EXTENSIONS,
         row.elixirEffectCalculation={base:1,increased:increase,nether:netherElixirBonus,scale};
       } else if(included==='')row.blockers.push({reason:'영약 최종 배율에 명왕 보너스가 포함됐는지 선택하세요. 별도 증가율로 계산할 수 있습니다.'});
     }
-    row.elixirState = { index, enabled, scale,
-      uptime: control(row, `elixir:${index}:uptime`, `영약 ${index + 1} 관측한 활성 시간 비율 (%)`, "percent", fingerprint, 100) };
+    row.elixirState = { index, enabled, scale, uptime };
     if (enabled === "" || enabled === 1 && scale === "") row.blockers.push({ reason: "영약 현재 활성 여부와 게임에서 확인한 최종 효과 배율을 입력하세요. 1은 기본 효과이며 자동 계산한 배율이 아닙니다." });
     addSeasonIngredients(build, slot, index, row.elixirState, data, { make, control, apply });
     const extraKeys = { "putrid-toad-distillate": ["blurRating", "ominousCurse"], "saltpeter-mushroom-distillate": ["minionPresent"], "iridescent-butterfly-distillate": ["coldInfiltration", "fireInfiltration", "lightningInfiltration"] }[slot.skillId] ?? [];

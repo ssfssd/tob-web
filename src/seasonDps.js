@@ -17,7 +17,7 @@ import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
 import { theaState } from "./seasonTheaState.js";
 import { WEAPON_FIELDS, ADDED_FIELDS, manualAddedLightningRange, seasonDamageContext } from "./seasonWeaponInputs.js";
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
-import { MODULE_FIELDS, seasonModuleProfile, seasonModuleFieldKeys, calculateSeasonModule, isPersistentModuleAction } from "./seasonModules.js";
+import { MODULE_FIELDS, seasonModuleProfile, seasonModuleFieldKeys, calculateSeasonModule, isPersistentModuleAction, seasonModuleActionName } from "./seasonModules.js";
 import { checkSeasonSupportHost, validLunarEclipseLink, ICE_PERMAFROST_ID, MOON_LUNAR_RING_ID, MOON_WAX_AND_WANE_ID, VOLTAGE_TURMOIL_ID, VOLTAGE_AFTERWAVE_ID } from "./seasonSupport.js";
 import { MOON_STRIKE_ID, voltageAverageFields, VOLTAGE_AFTERWAVE_CHARGES } from "./seasonSkillMechanics.js";
 import { NETHER_CONSUMED_STATS, SEASON_SKILL_AILMENT_TAGS, netherMore, netherAfflictionEffect, netherSum } from './seasonNetherRemaining.js';
@@ -204,9 +204,15 @@ export function clearSeasonDpsConditionOverrides(dps) {
 export function seasonDpsSkillFieldDefinition(id,key,terraChargeMaximum=1) {
   const definition=SEASON_DPS_SKILL_FIELDS[key];
   if(key==='terraCharges')return {...definition,max:terraChargeMaximum};
-  const rate=/^moduleRate([01])$/u.exec(key);
-  if (rate && isPersistentModuleAction(seasonModuleProfile(id)?.actions[Number(rate[1])]))
-    return {...definition,label:'대상에게 모듈 지속 대미지가 적용되는 비율 (0~1)',max:1};
+  const moduleField=/^module(Rate|Hits)([01])$/u.exec(key);
+  if (moduleField) {
+    const action=seasonModuleProfile(id)?.actions[Number(moduleField[2])];
+    const name=seasonModuleActionName(action);
+    if (moduleField[1]==='Rate' && isPersistentModuleAction(action))
+      return {...definition,label:name?`${name} · 지속 대미지 유지율 (0~1)`:'지속 대미지 유지율 (0~1)',
+        hint:'0.25는 25%, 1은 100%입니다.',max:1};
+    if (name) return {...definition,label:`${name} · ${moduleField[1]==='Rate'?'최종 시전 횟수 (회/초)':'시전당 적중 수'}`};
+  }
   return definition;
 }
 function dotWindowRanges(value) {
@@ -389,8 +395,7 @@ export function seasonDpsSkillFieldKeys(entry, id, build) {
     if (timedFissure(build)) keys.splice(rateIndex,1,"reapingTimes");
     else keys.splice(rateIndex, continuous ? 1 : 0, "reapingMode");
   }
-  if ((build?.ss14Inputs?.theaCycle?.mode !== "automatic" || theaCombatEnabled(build))
-    && build?.ss14Inputs?.dps?.skills?.[index]?.useShare !== 0
+  if (build?.ss14Inputs?.dps?.skills?.[index]?.useShare !== 0
     && SS14_CARDS_EN.records[id]?.tags?.some(tag=>tag==='Channeled'||tag==='Channel')) {
     keys.push("channelCostRate");
     if (timedFissure(build)) keys.push("channelCostTimes");
@@ -499,6 +504,21 @@ export function manualResourceBalance(rows, scenarios, skills) {
     ...(channels.length ? {channels} : {}),
     recovery,manaStatus,
   };
+}
+
+export function averageObservedChannelCost(samples) {
+  const channel=samples.find(({value})=>value?.channelCost)?.value.channelCost;
+  if (!channel) return null;
+  const max=samples.every(({value})=>finite(value?.channelCost?.max))
+    ? samples.reduce((sum,{value,weight})=>sum+value.channelCost.max*weight,0) : null;
+  const {rate}=channel;
+  const {manaPerUse,lifePerUse}=samples[0].value??{};
+  const variable=!finite(manaPerUse)||!finite(lifePerUse)
+    || samples.some(({value})=>value?.manaPerUse!==manaPerUse||value?.lifePerUse!==lifePerUse);
+  const valid=finite(rate)&&rate>=0&&(rate===0||finite(max)&&rate<=max+1e-8&&!variable);
+  return {channelCost:{rate,max,valid,variable,observed:true},
+    manualManaPerSecond:valid?(rate===0?0:rate*manaPerUse):null,
+    manualLifePerSecond:valid?(rate===0?0:rate*lifePerUse):null};
 }
 
 function additionalSkillCostFactor(effect) {
@@ -957,10 +977,14 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     else if (direct.voltageJolt && !report.componentProjection.fixedNumbed)
       reasons.push(`혼비백산의 마취: ${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
     const dotUptime = dotWindows ? (dotWindows.length ? 100 : 0) : b?.dotUptime;
+    const dotDisabled = dotUptime === 0;
     for (const key of observedReaping && !hasHit ? ["useShare"] : ["useShare", "hitChance"])
       if (!validValue(SEASON_DPS_SKILL_FIELDS[key], b?.[key])) reasons.push(`${SEASON_DPS_SKILL_FIELDS[key].label} 미입력`);
     if (!offense?.supported) reasons.push(...(offense?.blockers ?? ["속성·크리티컬 계산 미지원"]));
-    const numbedOnHit = direct.numbedSupport && Boolean(basis?.pools?.some(p => p.type === "lightning" && p.max > 0));
+    const iceRing = entry?.mechanics?.find(m => m.kind === "ice-ring-on-kill");
+    // Observed kills specify landed repeat hits independently of the ordinary hit chance.
+    const mayLandHit = b?.hitChance !== 0 || Boolean(iceRing && b?.repeatHits > 0);
+    const numbedOnHit = direct.numbedSupport && mayLandHit && Boolean(basis?.pools?.some(p => p.type === "lightning" && p.max > 0));
     if (numbedOnHit && !combat && !report.componentProjection.fixedNumbed)
       reasons.push(`고압전기의 마취: ${FIXED_NUMBED_FIELD.label}을 입력하세요. 마취가 없으면 0을 입력하세요.`);
     else if (numbedOnHit && combat && build.ss14Inputs?.theaCycle?.mode !== "automatic")
@@ -983,10 +1007,9 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     if (direct.rowIndex >= 5) reasons.push("패시브 스킬의 전체 효과 연결 미완료");
     const hitPools = (basis?.pools ?? []).filter(p=>p.max>0);
     const dotPools = (basis?.dotPools ?? []).filter(p=>p.max>0);
-    const types = new Set([...hitPools,...dotPools,...(frostActive?frost.dotPools??[]:[])].map(p=>p.type));
+    const types = new Set([...hitPools,...(dotDisabled?[]:dotPools),...(frostActive?frost.dotPools??[]:[])].map(p=>p.type));
     for (const key of [...(hasHit ? ["armor"] : []), ...[...types].filter(t => t !== "physical" && (t!=='erosion'||!finite(fixedErosion)))])
       if (!validValue(SEASON_DPS_ENEMY_FIELDS[key], input?.enemy?.[key])) reasons.push(`${SEASON_DPS_ENEMY_FIELDS[key]?.label ?? key} 미입력`);
-    const iceRing = entry?.mechanics?.find(m => m.kind === "ice-ring-on-kill");
     if (iceRing && !validValue(SEASON_DPS_SKILL_FIELDS.repeatHits, b?.repeatHits)) reasons.push("아이스링 처치 재발동의 대상 적중 횟수를 확인하세요. 단일 보스에서 재발동이 없으면 0입니다.");
     if (!iceRing && (b?.repeatHits ?? 0) !== 0) reasons.push("처치 재발동 입력은 아이스링에만 적용할 수 있습니다.");
     const reaping = basis?.reaping;
@@ -1192,7 +1215,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     let reapingDps = 0, appliedReapingOverlap;
     if ((hasDot || entry?.damageCapabilities?.dot) && !validValue(SEASON_DPS_SKILL_FIELDS.dotUptime, dotUptime))
       reasons.push(`${SEASON_DPS_SKILL_FIELDS.dotUptime.label} 미입력`);
-    if (hasDot || entry?.damageCapabilities?.dot || frostActive) {
+    if ((!dotDisabled && (hasDot || entry?.damageCapabilities?.dot)) || frostActive) {
       if (!validValue(SEASON_DPS_ENEMY_FIELDS.affliction, input?.enemy?.affliction)) reasons.push(`${SEASON_DPS_ENEMY_FIELDS.affliction.label} 미입력`);
     }
     if (hasDot || frostActive) {
@@ -1212,7 +1235,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       const mitigatePools=pools=>pools.map(pool=>({type:pool.type,active:mitigateDot(pool)}));
       const total=pools=>pools.reduce((sum,pool)=>sum+pool.active,0);
       const activeFrostDamage=frostActive?mitigatePools(frost.dotPools??[]):[];
-      const activeDotDamage=mitigatePools(dotPools);
+      const activeDotDamage=dotDisabled?[]:mitigatePools(dotPools);
       if (frostActive) {
         frostActiveDps=total(activeFrostDamage);
         frostDps=frostActiveDps*frostUptime/100;
@@ -1224,7 +1247,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
         dotDps = activeDotDps * dotUptime / 100;
         lightningDotDps = activeLightningDotDps * dotUptime / 100;
         for(const {type,active} of activeDotDamage)addPersistentDamage(type,active*dotUptime/100);
-        dotBreakdown = { active: round(activeDotDps), uptime: dotUptime };
+        dotBreakdown = { active: dotDisabled?null:round(activeDotDps), uptime: dotUptime };
       }
       const reapedUptime = frostActive ? frostUptime : b?.dotUptime;
       if ((hasDot || frostActive) && reapRate > 0 && finite(reapDuration) && reapedUptime > 0) {
@@ -1292,8 +1315,8 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const measuredChargeRate = chargeTimes ? chargeTimes.filter(time=>time>=cycle.warmup).length / cycle.seconds : null;
     if (chargeTimes?.some(time=>time>=cycle.warmup+cycle.seconds-1e-8))
       reasons.push(`${SEASON_DPS_SKILL_FIELDS.channelCostTimes.label}은 측정 종료 전이어야 합니다.`);
-    const channelCost=channeled && (combat || build.ss14Inputs?.theaCycle?.mode !== "automatic")
-      && cost && !cost.reason && (chargeTimes || (timed || cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0)
+    const channelCost=channeled && cost && !cost.reason
+      && (chargeTimes || (timed || cost.mana>0 || cost.life>0) && finite(possibleManualRate) && possibleManualRate>0)
       ? {rate:measuredChargeRate??b?.channelCostRate??null,max:possibleManualRate,
         ...(chargeTimes && {times:chargeTimes}),
         valid:!!chargeTimes || validValue(SEASON_DPS_SKILL_FIELDS.channelCostRate,b?.channelCostRate) && b.channelCostRate<=possibleManualRate+1e-8}
@@ -1364,7 +1387,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       ...(finite(permafrostHitDps) && {permafrostHitDps}),
       ...(!reasons.length && frostActive && {permafrostBreakdown:{active:round(frostActiveDps),uptime:frostUptime,charge:frost.charge}}),
       ...(dotBreakdown && !reasons.length && {dotBreakdown}),
-      ...(!reasons.length&&dotBreakdown&&{dotDefense:dotDefense(dotPools)}),
+      ...(!reasons.length&&dotBreakdown&&!dotDisabled&&{dotDefense:dotDefense(dotPools)}),
       ...(!reasons.length&&frostActive&&{frostDefense:dotDefense(frost.dotPools??[])}),
       ...(!reasons.length && appliedReapingOverlap !== undefined && {reapingOverlap:appliedReapingOverlap}),
       ...(dotWindows && {dotWindows}),

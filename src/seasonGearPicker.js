@@ -254,8 +254,11 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
   const elixirPhaseChanges=after[metric].rows.flatMap(row=>{
     const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
     const from=old?.elixirDpsStates, to=row.elixirDpsStates;
-    if(!row.supported||!old?.supported||!from?.timeline||!to?.timeline
-      ||JSON.stringify(from.timeline)!==JSON.stringify(to.timeline))return [];
+    if(!row.supported||!old?.supported||!from||!to)return [];
+    const observed=Boolean(from.observedSlots?.length&&to.observedSlots?.length);
+    const sameElixirs=observed ? JSON.stringify(from.observedSlots)===JSON.stringify(to.observedSlots)
+      : from.timeline&&to.timeline&&JSON.stringify(from.timeline)===JSON.stringify(to.timeline);
+    if(!sameElixirs)return [];
     const matched=to.states.map(phase=>from.states.find(earlier=>earlier.active.join()===phase.active.join()&&Math.abs(earlier.uptime-phase.uptime)<1e-6));
     if(from.states.length!==to.states.length||matched.some(phase=>!phase))return [];
     const display=value=>Number.isFinite(value)?value.toFixed(2):null;
@@ -266,7 +269,7 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
           ? [{label,from:earlier[key],to:phase[key]}]:[]);
       if(!changes.length)return [];
       const name=to.names.map((elixir,i)=>elixir+' '+(phase.active[i]?'활성':'비활성')).join(' · ');
-      return [{index:row.rowIndex,id:row.id,name,uptime:phase.uptime,changes}];
+      return [{index:row.rowIndex,id:row.id,name,uptime:phase.uptime,changes,...(observed&&{observed})}];
     });
   });
   return {

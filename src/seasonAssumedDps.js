@@ -5,7 +5,7 @@ import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
 import { seasonEquippedPredicateValue } from './seasonGearConditions.js';
 import { exclusiveResourceStates, nearbyEnemyConditionValue, nearbyEnemyGroups, nearbyEnemyState } from './seasonEffectConditions.js';
 import { describeUptime, uptimeFields } from './seasonUptimeDetails.js';
-import { isPersistentModuleAction, seasonModuleProfile } from './seasonModules.js';
+import { isPersistentModuleAction, seasonModuleProfile, seasonModuleActionName } from './seasonModules.js';
 import { seasonSkillCalculationLevel } from './seasonSkillLevels.js';
 import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
 import { hasPeriodicBurstSupport, writePeriodicBurstUptime } from './seasonSkillInputs.js';
@@ -80,7 +80,8 @@ export function buildUptimeScenario(build, report) {
     for (const [index,action] of (seasonModuleProfile(id)?.actions ?? []).entries()) {
       if (!isPersistentModuleAction(action)) continue;
       const field = `moduleRate${index}`;
-      skillUptimes.push({name,rowIndex,actionIndex:index,field:'moduleDotUptime',saved:binding[field] === undefined ? undefined : binding[field]*100,assumed:100});
+      skillUptimes.push({name,rowIndex,actionIndex:index,actionName:seasonModuleActionName(action),field:'moduleDotUptime',
+        saved:binding[field] === undefined ? undefined : binding[field]*100,assumed:100});
       binding[field] = 1;
     }
   }
@@ -205,7 +206,7 @@ export function calculateEditorSeasonBuild(build, options = {}) {
           addedDamageSources:direct?.addedDamageSources,
           excludedHitRoutes:excludedSeasonHitRoutes(direct)},
         manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,measuredManualUses,...(castCostObservation&&{castCostObservation}),...(reaping&&{reaping}),...(fissure&&{fissure}),
-        ...(dotBreakdown&&(!scenario.theaAverage||estimate.scope==='ss14-thea-joint-combat')&&{dotBreakdown})};
+        ...(dotBreakdown&&{dotBreakdown})};
     }),
     uptimeDetails:describeUptime(build,report,scenario,skillUptimes,next.ss14Inputs.heroCombat)};
   return report;

@@ -768,16 +768,18 @@ export function renderSkillCalculation(s) {
     ? calcRows([['얼음 송곳 적중 DPS',number(row.permafrostHitDps)],['동토의 지속 대미지','계산 보류']]) : '';
   const elapsed=assumed?report.assumedDps.elixirUptime:report.elixirUptime;
   const averagedElixir=elapsed?.supported&&elapsed.rows.some(r=>r.uptime>0&&r.uptime<100);
+  const scope=(assumed?report.assumedDps:report.fullDps).scope;
+  const cycleAverage=scope==='ss14-thea-cycle-full-dps';
   const frost=displayRow?.permafrostBreakdown;
   const frostDetails=frost?calcGroup('동토 지속 대미지 계산',number(v.permafrostDps)+' DPS',calcRows([
-    [averagedElixir?'활성 중 평균 DPS':'활성 중 DPS',number(frost.active)],['적용 가동률',number(frost.uptime)+'%'],
+    [averagedElixir||cycleAverage?'활성 중 평균 DPS':'활성 중 DPS',number(frost.active)],['적용 가동률',number(frost.uptime)+'%'],
     ['소모한 지면 에너지 축적',number(frost.charge)+'회'],
   ])+(!averaged?renderDotDefense(displayRow.frostDefense,elapsed):''),'permafrost-dps-breakdown'):'';
   const dot=displayRow?.supported ? displayRow.dotBreakdown : null;
   const measuredDot=Number.isFinite(dot?.applied);
   const dotDps=measuredDot?dot.applied:v.dotDps;
-  const dotDetails=dot&&(!averaged||averagedElixir||measuredDot)?calcGroup('지속 대미지 적용',number(dotDps)+' DPS',calcRows([
-    ...(Number.isFinite(dot.active)?[[averagedElixir||measuredDot?'활성 중 평균 DPS':'활성 중 DPS',number(dot.active)]]:[]),
+  const dotDetails=dot&&(!averaged||cycleAverage||averagedElixir||measuredDot)?calcGroup('지속 대미지 적용',number(dotDps)+' DPS',calcRows([
+    ...(Number.isFinite(dot.active)?[[averagedElixir||cycleAverage||measuredDot?'활성 중 평균 DPS':'활성 중 DPS',number(dot.active)]]:[]),
     [measuredDot?'측정 구간의 가동률':'적용 가동률',number(dot.uptime)+'%'],['가동률 반영 DPS',number(dotDps)],
   ])+(!averaged?renderDotDefense(displayRow.dotDefense,elapsed):''),'skill-dot-breakdown'):'';
   const scenario = s.document.targetBuild.ss14Inputs;
@@ -787,7 +789,7 @@ export function renderSkillCalculation(s) {
     .filter(([type, dps]) => damageTypes[type] && Number.isFinite(dps) && dps > 0);
   const execution = typedParts?.find(([type]) => type === 'execute')?.[1];
   if (execution > 0) minionTypes.push(['execute', execution]);
-  const measuredMinionDamage = (assumed ? report.assumedDps : report.fullDps).scope === 'ss14-thea-joint-combat';
+  const measuredMinionDamage = ['ss14-thea-joint-combat','ss14-thea-cycle-full-dps'].includes(scope);
   let minionDamage = '';
   if (displayRow?.supported && (!averaged || measuredMinionDamage) && minionTypes.length) {
     const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
@@ -873,7 +875,7 @@ export function renderSkillCalculation(s) {
     ['대상 적중률',number(hit.hitChance)+'%'],
     ['적중률 반영 기대값',number(v.averageHit)],
   ]),'selected-skill-expected-hit');
-  steps+=dotDetails;
+  if(!averaged)steps+=dotDetails;
   if(Number.isFinite(useRate)&&useRate>0){
     const rates=[['초당 사용 가능 횟수',number(useRate)]];
     if(displayRow?.supported&&Number.isFinite(v.manualRate))rates.push(['초당 일반 시전',number(v.manualRate)]);
@@ -882,7 +884,7 @@ export function renderSkillCalculation(s) {
       : calcGroup('사용 속도',number(useRate)+'/초',calcRows(rates));
   }
   if(steps)steps=calcGroup(averaged?'전투 시작 상태의 계산 단계':assumed?'방어 전 계산 단계':'대미지 계산 단계','',steps);
-  const details = conversion + minionDamage + excluded + steps;
+  const details = conversion + minionDamage + (averaged?dotDetails:'') + excluded + steps;
   return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${hitOnly}${summary.length?`<div data-role="skill-combat-summary">${calcRows(summary)}</div>`:''}${levelDetails}${moonStrike}${frostDetails}${numbed}${costs}${actions}${!row?.supported&&issues.length?calcGroup('계산 보류 이유','',renderReasons(s,issues)):''}${details?calcGroup('세부 계산','',details,'selected-skill-details'):''}</section>`;
 }
 

@@ -1,4 +1,5 @@
 import { matchingTrainingDummy } from "./seasonTrainingDummy.js";
+import { usesExtensionInput } from './seasonExtensions.js';
 import { downloadJson } from "./downloadJson.js";
 import { isOfflineEdition, setPlannerHtml } from "./offlinePresentation.js";
 import { createSeasonWorkspace, resetSeasonWorkspace, editSeasonWorkspace, loadSeasonWorkspaces, saveSeasonWorkspace, saveSeasonWorkspaces, exportSeasonWorkspace, importSeasonWorkspace } from "./seasonWorkspace.js";
@@ -142,7 +143,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
   function selectGearCandidate(index,id){
     const draft=itemGearKind(id)?openGearWorkshop(index,state.document.targetBuild,id):null;
     const edit={kind:'gear-selection',slotIndex:index,value:id};
-    state.picker={...state.picker,candidate:id,draft,previewDocument:null,edit,preview:draft?null:previewSlotEdit(state.document,state.report,edit)};
+    state.picker={...state.picker,candidate:id,draft,previewDocument:null,removalPreview:null,edit,preview:draft?null:previewSlotEdit(state.document,state.report,edit)};
     syncCandidate();
   }
   function selectSkillCandidate(id,level=state.picker?.levels?.[id],auraActive=state.picker?.auraStates?.[id]){
@@ -1251,6 +1252,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         if(!state.error && root?.querySelectorAll){
           const committed=readSeasonPlannerEdit(event.target);
+          if(committed.kind==='extension-input'&&/^elixir:[01]:uptime$/u.test(committed.key)) {
+            for(const label of root.querySelectorAll('[data-elixir-input]')) {
+              const key=label.dataset.elixirInput;
+              const row=state.report.componentProjection.rows.find(row=>row.elixirState&&row.extensionControls.some(control=>control.key===key));
+              if(row)label.hidden=!usesExtensionInput(state.report,row,key);
+            }
+          }
           for(const field of root.querySelectorAll('input[data-season-edit]')){
             if(field!==event.target&&editKey(readSeasonPlannerEdit(field))===editKey(committed))field.value=event.target.value;
             if (field.dataset.seasonEdit==='character-input' && field.dataset.key==='observedManaRecovery') {
@@ -1763,6 +1771,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.focusRole='gear-option-'+candidate;
         }
         else if (action === "cancel-picker") state.picker = null;
+        else if(action==='preview-gear-removal'){
+          const index=state.gearIndex, worn=state.document.targetBuild.gear?.slots?.[index]?.itemId;
+          if(state.overlay?.type!=='gear'||!worn||state.picker?.candidate!==worn)return;
+          state.picker.removalPreview=state.picker.removalPreview?null
+            :previewSlotEdit(state.document,state.report,{kind:'gear-selection',slotIndex:index,value:''});
+          state.focusRole=state.picker.removalPreview?'gear-removal-preview':'gear-removal-toggle';
+        }
         else if(action==='view-worn-gear'){
           const index=state.gearIndex,id=state.document.targetBuild.gear?.slots?.[index]?.itemId;
           if(id){

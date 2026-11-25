@@ -29,6 +29,7 @@ import { isThea, hasRevelation, revelationBoardOptions, revelationNodeOptions } 
 import { THEA_EVENT_FIELDS } from "./seasonTheaEvents.js";
 import { hasNumbedSupport, theaCombatInputValues, theaCombatKeys } from "./seasonTheaCombatInputs.js";
 import { logReviewRows } from "./seasonLogReview.js";
+import { usesExtensionInput } from './seasonExtensions.js';
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/gu,
   (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -217,15 +218,16 @@ function destinyControls(report, formValues) {
 }
 
 function extensionControls(report, formValues) {
-  const controls = report.componentProjection.rows.flatMap((r) => r.extensionControls ?? [])
-    .filter((c, i, all) => all.findIndex((x) => x.key === c.key) === i);
+  const controls = report.componentProjection.rows.flatMap(row=>(row.extensionControls??[]).map(control=>({row,control})))
+    .filter(({control}, i, all) => all.findIndex(entry => entry.control.key === control.key) === i);
   if (!controls.length) return "";
-  return `<fieldset><legend>영약·모듈·제작 조건</legend><details><summary>영약 계산 기준</summary><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 관측 유지율을 입력하면 활성·비활성 상태를 시간 비율로 평균냅니다. 자동 은총은 전투 시간표의 영약 사용 간격·지속 시간을 사용합니다.</p></details>${controls.map((c) => {
+  return `<fieldset><legend>영약·모듈·제작 조건</legend><details><summary>영약 계산 기준</summary><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 관측 유지율을 입력하면 해당 비율을 사용합니다. 자동 은총에서 중간 가동률을 적용하려면 복합 발동의 영약 시간표를 입력하세요.</p></details>${controls.map(({row,control:c}) => {
     const value = formValues[`extension-input:${c.key}`] ?? c.value;
     const label = `SS14 ${c.label}`;
     const range=c.observedRange??c;
-    return c.kind === "boolean" ? `<label>${escape(c.label)}<select data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope">${[["", "확인 필요"], [0, "아니요"], [1, "예"]].map(([v, t]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
-      : `<label>${escape(c.label)} (${number(range.min)}~${number(range.max)})<input type="number" min="${range.min}" max="${range.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope" value="${escape(value)}" /></label>`;
+    const modeField = row.elixirState ? ` data-elixir-input="${escape(c.key)}"${usesExtensionInput(report,row,c.key)?'':' hidden'}` : '';
+    return c.kind === "boolean" ? `<label${modeField}>${escape(c.label)}<select data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope">${[["", "확인 필요"], [0, "아니요"], [1, "예"]].map(([v, t]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
+      : `<label${modeField}>${escape(c.label)} (${number(range.min)}~${number(range.max)})<input type="number" min="${range.min}" max="${range.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope" value="${escape(value)}" /></label>`;
   }).join("")}</fieldset>`;
 }
 

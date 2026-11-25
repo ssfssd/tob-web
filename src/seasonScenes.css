@@ -69,6 +69,7 @@ html:has(.season-native),body:has(.season-native) { min-width: 0; }
 .season-native .native-assumed-line.is-primary[hidden] {display:none}
 .native-assumed-line.is-primary strong {font-size:clamp(19px,1.75vw,27px);line-height:1.25;color:#f2d18f}
 .season-native .native-result-summary > [hidden] { display: none; }
+label[data-elixir-input][hidden] { display: none !important; }
 .season-native .native-result-actions button,.season-native .native-result-tabs button { padding-inline: 5px; }
 .season-native .native-result-tabs button[aria-pressed="true"] { color: #fff1cc; border-bottom-color: var(--scene-gold); }
 .season-native :is(.hunter-gallery [hidden], .hunter-gallery + [hidden]) { display: none; }

@@ -63,6 +63,11 @@ export function inspectSeasonModuleLevel(profile, level) {
   return {slotCap,receipt:{level,season:card.season,sourceUrl:card.sourceUrl,sourcePageSha256:card.sourcePageSha256}};
 }
 export const isPersistentModuleAction = action => /Deals Persistent \w+ Damage/u.test(action?.detail ?? '');
+export function seasonModuleActionName(action) {
+  const record = DATA.koActions.records[action?.itemId];
+  return record?.koreanTextVerified && /[가-힣]/u.test(record.name) && !/\p{Script=Han}/u.test(record.name)
+    ? record.name : undefined;
+}
 export function seasonModuleFieldKeys(profile, options = [], build, binding) {
   return ["useShare", "hitChance", "minionCount", "minionUptime", "minionBaseMin", "minionBaseMax", "minionCriticalRating",
     ...profile.actions.flatMap((action, i) => isPersistentModuleAction(action)
@@ -238,6 +243,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const match = lines.shift()?.match(/^Deals (Attack|Spell|Persistent) (Physical|Fire|Cold|Lightning|Erosion) Damage equal to ([\d.]+)% of Base Damage$/u);
     if (!match) { reasons.push(`소환체 스킬 계수 미확인: ${action.name}`); return { slug: action.itemId, dps: null }; }
     const type = match[2].toLowerCase();
+    const coefficient = Number(match[3]);
     const persistent = match[1] === "Persistent";
     let hitCount = persistent ? 1 : b?.[`moduleHits${n}`];
     const shotgun = detail.match(/This skill's Shotgun Effect falloff coefficient is (\d+)%/u);
@@ -251,10 +257,16 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const paths = { [type]: [{ min: 1, max: 1, types: [type] }] };
     const addPool = (target, portion, types, randomElement) => (paths[target] ??= []).push({ min: portion, max: portion, types, randomElement });
     const actionName = DATA.koActions.records[action.itemId].name;
+    const baseDamageRange = (minPortion, maxPortion) =>
+      Number.isFinite(b?.minionBaseMin) && Number.isFinite(b?.minionBaseMax)
+        ? { min: b.minionBaseMin * coefficient / 100 * minPortion,
+            max: b.minionBaseMax * coefficient / 100 * maxPortion }
+        : undefined;
     const addGain=(target,value,types,effectSource)=>{
       if (!(value>0)) return;
       addPool(target,value/100,types);
-      row.conversionTrace.push({stage:'gained-as-extra',sourceType:type,targetType:target,resolvedValue:value,actionName,effectSource});
+      row.conversionTrace.push({stage:'gained-as-extra',sourceType:type,targetType:target,resolvedValue:value,
+        gainedBaseDamage:baseDamageRange(value/100,value/100),actionName,effectSource});
     };
     const groups = new Map();
     const addConversion = (sourceType, targetType, value, effectSource) => {
@@ -296,16 +308,22 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     // Added-as uses the original cold pool before conversion.
     if (!persistent && type === "cold" && profile.actions.some(a => a.itemId === "Firebird"))
       addGain('fire',10*b?.moduleFirebird,['cold','fire'],{itemId:'Firebird',name:DATA.koActions.records.Firebird.name});
-    routeSeasonDamagePaths(paths, groups, ({ sourceType, targetType, value, effectSource }, ratio) => {
-      if (ratio > 0) row.conversionTrace.push({ stage: 'conversion', sourceType, targetType, resolvedValue: value,
-        effectivePercent: ratio * 100, actionName, effectSource: { ...effectSource,
+    routeSeasonDamagePaths(paths, groups, ({ sourceType, targetType, value, effectSource }, ratio, moved) => {
+      if (ratio <= 0) return;
+      // Random elemental portions are weighted by their chance, so they have no fixed per-hit range.
+      const movedBaseDamage = moved.some(path => path.randomElement) ? undefined : baseDamageRange(
+        moved.reduce((sum, path) => sum + path.min, 0), moved.reduce((sum, path) => sum + path.max, 0));
+      row.conversionTrace.push({ stage: 'conversion', sourceType, targetType, resolvedValue: value,
+        effectivePercent: ratio * 100, movedBaseDamage, actionName, effectSource: { ...effectSource,
           name: effectSource.name ?? report.componentProjection.rows.find(r => r.path === effectSource.path)?.name } });
     });
     const pools = Object.entries(paths).flatMap(([type, rows]) => rows.map(path => ({ ...path, type, portion: path.min })));
     const frequency = b?.[`moduleRate${n}`];
     const contributors = persistent && b?.minionCount > 1 ? b.moduleDotCount : b?.minionCount;
+    const scale = persistent ? frequency === 0 ? 0 : frequency * contributors
+      : hitCount * frequency * b?.minionCount * b?.minionUptime / 100 * b?.hitChance / 100;
     if (persistent && frequency > 1) reasons.push("지속 대미지의 활성 비율은 0~1로 입력하세요.");
-    if (persistent && !valid(enemyFields.affliction, input?.enemy?.affliction)) reasons.push("소환체 지속 대미지의 대상 심화 수치를 입력하세요.");
+    if (persistent && scale !== 0 && !valid(enemyFields.affliction, input?.enemy?.affliction)) reasons.push("소환체 지속 대미지의 대상 심화 수치를 입력하세요.");
     if (persistent && frequency > 0 && b?.minionCount > 1 && !valid({...MODULE_FIELDS.moduleDotCount,max:b.minionCount},contributors))
       reasons.push(`${MODULE_FIELDS.moduleDotCount.label}를 확인하세요. 대상에게 겹쳐도 한 효과만 적용되면 1을 입력하세요.`);
     const randomHit = { fire: 0, cold: 0, lightning: 0 };
@@ -313,7 +331,7 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
     const erosionHit = { fixed: 0, fire: 0, cold: 0, lightning: 0 };
     const lightningRolls = [];
     const damagePerHitByType = {};
-    const perHit = pools.reduce((total, pool) => {
+    const perHit = scale === 0 ? 0 : pools.reduce((total, pool) => {
       const stats = new Set(["damage", ...action.tags.map(t => t.toLowerCase()).filter(t => !typedDamage.includes(t) && t !== 'elemental').map(t => `${t}_damage`),
         ...pool.types.map(t => `${t}_damage`)]);
       if (persistent) stats.add('damage_over_time');
@@ -323,16 +341,16 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       const more = relevant.filter(e => e.operation === "more").reduce((n, e) => n * (1 + e.value / 100), 1);
       const armorPen = minionEffects.filter(e => ["armor_penetration", "armor_damage_mitigation_penetration"].includes(e.stat)).reduce((n, e) => n + e.value, 0);
       const resPen = minionEffects.filter(e => e.stat === `${pool.type}_penetration`).reduce((n, e) => n + e.value, 0);
-      if (!valid(enemyFields.armor, input?.enemy?.armor)) reasons.push("모듈 대상 적 아머 미입력");
+      if (!report.beforeDefense && !persistent && !valid(enemyFields.armor, input?.enemy?.armor)) reasons.push("모듈 대상 적 아머 미입력");
       const resistance = pool.type==='erosion' ? fixedErosion??input?.enemy?.erosion : input?.enemy?.[pool.type];
-      if (pool.type !== "physical" && !valid(enemyFields[pool.type], resistance)) reasons.push(`모듈 대상 ${pool.type} 저항 미입력`);
-      const armor = report.beforeDefense || match[1] === "Persistent" ? 1 : 1 - Math.min(.8, input?.enemy?.armor / (.9 * input?.enemy?.armor + 30000)) * (pool.type === "physical" ? 1 : .6) + armorPen / 100;
+      if (!report.beforeDefense && pool.type !== "physical" && !valid(enemyFields[pool.type], resistance)) reasons.push(`모듈 대상 ${enemyFields[pool.type].label} 미입력`);
+      const armor = report.beforeDefense || persistent ? 1 : 1 - Math.min(.8, input?.enemy?.armor / (.9 * input?.enemy?.armor + 30000)) * (pool.type === "physical" ? 1 : .6) + armorPen / 100;
       const res = report.beforeDefense || pool.type === "physical" ? 1 : 1 - (resistance - scorch - resPen) / 100;
       const targetEffects = effects.filter(e => isSeasonTargetDamageTaken(e.stat, pool.type) || e.stat === "spell_damage_taken" && match[1] === "Spell");
       if (targetEffects.some(e => e.operation !== "more" || !Number.isFinite(e.value))) reasons.push("소환체 대상의 받는 대미지 연산을 확인하세요.");
       const taken = targetEffects.reduce((n, e) => n * (1 + e.value / 100), 1) * (pool.type === "lightning" ? 1 + (combatState.numbedEffect ?? 0) / 100 : 1)
         *netherMore(effects,'enemy_all_damage_taken')*netherMore(effects,match[1]==='Persistent'?'enemy_dot_damage_taken':'enemy_hit_damage_taken');
-      const damage = average * Number(match[3]) / 100 * pool.portion * (1 + inc / 100) * more * armor * res * taken * (match[1] === "Persistent" ? 1 + input.enemy.affliction / 100 : crit);
+      const damage = average * coefficient / 100 * pool.portion * (1 + inc / 100) * more * armor * res * taken * (match[1] === "Persistent" ? 1 + input.enemy.affliction / 100 : crit);
       damagePerHitByType[pool.type] = (damagePerHitByType[pool.type] ?? 0) + damage;
       if (pool.randomElement) {
         randomHit[pool.randomElement] += damage;
@@ -346,14 +364,12 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
       return total + damage;
     }, 0);
     const perCast = perHit * hitCount;
-    const scale = persistent ? frequency === 0 ? 0 : frequency * contributors
-      : hitCount * frequency * b?.minionCount * b?.minionUptime / 100 * b?.hitChance / 100;
     const dps = perHit * scale;
     const randomDamageTypes = Object.fromEntries(elementalDamage.map(element => [element, pools.filter(p => p.portion > 0 && p.randomElement === element).map(p => p.type)]));
     const canDeteriorate = deteriorationChance > 0 && deterioration && Object.values(erosionHit).some(v => v > 0);
     if (canDeteriorate && action.itemId === 'Gravelshot' && b?.moduleSplitHits > 0)
       reasons.push('분열 전후 적중 순서를 확인해야 악화 대미지를 계산할 수 있습니다.');
-    return { slug: action.itemId, name: actionName, coefficient: Number(match[3]), dps,
+    return { slug: action.itemId, name: actionName, coefficient, dps,
       damageByType: Object.fromEntries(Object.entries(damagePerHitByType).map(([type, damage]) => [type, damage * scale])),
       damagePerHitByType, randomHitByType, weightedHits: hitCount,
       perCast, hitCount: persistent ? 0 : b?.[`moduleHits${n}`], persistent, damageTypes: [...new Set(pools.filter(p => p.portion > 0 && !p.randomElement).map(p => p.type))],
@@ -411,6 +427,8 @@ export function calculateSeasonModule(build, report, entry, profile, effects, va
   row.blockers = [...new Set(reasons)]; row.supported = !reasons.length;
   if (row.supported) {
     row.values.dps = row.values.minionDps = dps;
+    if (row.minionSkills.some(action=>action.persistent))
+      row.moduleDotDpsByAction = Object.fromEntries(row.minionSkills.flatMap((action,index)=>action.persistent?[[index,action.dps]]:[]));
     row.minionDamageByType = {};
     for (const action of row.minionSkills) for (const [type, value] of Object.entries(action.damageByType))
       row.minionDamageByType[type] = (row.minionDamageByType[type] ?? 0) + value;
