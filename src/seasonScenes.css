@@ -392,6 +392,8 @@ label[data-elixir-input][hidden] { display: none !important; }
 .board-dps-actions button {white-space:nowrap}
 .season-native .skill-workspace {width:min(1440px,100%);background:#111214}
 .skill-selection-pane,.skill-link-board {min-width:0}
+.skill-header-actions {display:flex;flex-wrap:wrap;gap:4px}
+.season-native .show-skill-links {display:none}
 .skill-overview .equipped-list {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px}
 .skill-overview .equipped-list > :is(h2,p,.skill-chain:first-of-type) {grid-column:1/-1}
 .skill-overview .skill-chain {display:flex;flex-wrap:wrap;gap:6px;padding:5px 8px;background:#1b1c1f}
@@ -435,6 +437,9 @@ label[data-elixir-input][hidden] { display: none !important; }
 .season-native .skill-selection-pane :is(input[type=number],select) {background:#202124;border-color:#414145}
 .season-native .skill-tag-list label {display:flex;flex-direction:row;align-items:center;gap:4px;margin:0;padding:4px 6px;cursor:pointer}
 .skill-tag-list input {width:16px;height:16px;min-height:0;margin:0}
+.skill-tag-list label small,.skill-catalog [data-picker-count] {color:#c7c4bc;font-variant-numeric:tabular-nums}
+.skill-catalog [data-picker-count] {font-size:12px;white-space:nowrap}
+.equipment-catalog > div[data-picker-empty]:not([hidden]) {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .skill-catalog .native-picker-list small {display:block;color:#c6c3be;font-size:11px}
 .skill-catalog .native-picker-list button {min-height:46px}
 .skill-candidate-row {border-radius:5px;background:#232428}
@@ -468,6 +473,7 @@ label[data-elixir-input][hidden] { display: none !important; }
   .skill-workspace .skill-catalog .native-picker-card {flex:1;align-self:stretch;min-height:0;overflow:auto}
 }
 @media(max-width:899px),(max-height:500px) {
+  .season-native .show-skill-links {display:inline-flex;white-space:nowrap}
   .skill-workspace .skill-tag-list {max-height:105px;overflow:auto}
   .skill-link-board {margin-top:12px;padding:4px}
   .skill-board-socket {width:min(100%,32px)}

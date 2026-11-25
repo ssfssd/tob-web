@@ -157,6 +157,10 @@ export function renderSeasonNumericStats(report) {
     ['최대 HP', c.values.life, 'life'], ['최대 보호막', c.values.shield, 'shield'],
     ['사용 가능 MP', mana.unreservedMana, 'available-mana'],
   ].filter(([,value]) => Number.isFinite(value));
+  const resourceRows = resources.map(([label,value,key])=>key==='available-mana'
+    ? cell(`<button type="button" class="native-stat-detail-link" data-ss14-action="result-tab" data-tab="stats"
+      data-focus-role="numeric-mana-summary" aria-label="사용 가능 MP ${number(value)} · 봉인 내역 보기">${label}<span aria-hidden="true">›</span></button>`,value,key)
+    : cell(label,value,key)).join('');
   const defense = [['아머', c.values.armor, 'armor'], ['회피', c.values.evasion, 'evasion']]
     .filter(([,value]) => Number.isFinite(value));
   const resistances = Object.entries({ fire: "화염", cold: "냉기", lightning: "번개", erosion: "부식" });
@@ -170,7 +174,7 @@ export function renderSeasonNumericStats(report) {
   return `<section class="native-numeric-stats" data-role="native-numeric-stats" aria-label="SS14 수치 계산">
     ${summarySkill ? `<button type="button" class="native-stat-link" data-ss14-action="result-tab" data-tab="calculation" data-index="${summarySkill.rowIndex}" aria-label="${summaryLabel} ${esc(safeName(summarySkill.name))} 계산 보기"><strong>${esc(safeName(summarySkill.name))}</strong><span aria-hidden="true">›</span></button>
       <dl class="native-stat-list" aria-label="${averaged?'전투 시작 시 ':''}${summaryLabel} 수치">${Number.isFinite(summaryRate) ? cell(observedUseRate?'영약 유지율 반영 사용 횟수':summarySkill.rateLabel, summaryRate, "primary-rate", "회/초") : ''}${Number.isFinite(summaryCritical)&&!observedUseRate ? cell("크리티컬 확률", summaryCritical, "primary-critical-chance", "%") : ''}</dl>` : '<button type="button" data-ss14-action="section" data-section="skills">주력 스킬 선택</button>'}
-    ${resources.length ? `<dl class="native-stat-list" aria-label="캐릭터 자원">${resources.map(([label,value,key]) => cell(label,value,key)).join('')}</dl>` : ''}
+    ${resourceRows ? `<dl class="native-stat-list" aria-label="캐릭터 자원">${resourceRows}</dl>` : ''}
     ${defenseRows ? `<details class="native-numeric-detail" data-role="numeric-defense-overview"><summary>방어·저항</summary><dl class="native-stat-list native-defense-overview" aria-label="캐릭터 방어">${defenseRows}</dl>
       ${hasRawResistance ? '<small class="native-stat-note">* 상한 적용 전</small>' : ''}</details>` : ''}
     <details class="native-numeric-detail"><summary>상세 수치</summary>

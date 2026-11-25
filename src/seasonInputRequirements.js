@@ -8,6 +8,7 @@ import { THEA_SS14_ID } from './seasonHeroSelection.js';
 import { iceCorrosionConditionMissing, iceCorrosionCountMissing, isRecentDamageCondition, recentDamageConflict, recentDamageMissing, SEAL_CONVERSION_UNRESOLVED } from './seasonSupport.js';
 import { matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { ADDED_LIGHTNING_RANGE_ISSUE } from './seasonWeaponInputs.js';
+import { WEAPON_PHYSICAL_BASE_UNVERIFIED } from './seasonWeaponProfile.js';
 import { MISSING_DESTINY_ROLL } from './seasonDestiny.js';
 import { MISSING_MEMORY_ROLL } from './seasonMemoryRolls.js';
 import { NUMBED_DOT_WINDOW_REQUIRED, VARIABLE_DOT_WINDOW_REQUIRED, BLESSING_DOT_WINDOW_REQUIRED, REVELATION_NUMBED_REQUIRED } from './seasonTheaCombatInputs.js';
@@ -26,6 +27,8 @@ const routes = [
 ];
 export function inputDestinations(report,reason,dps=report?.fullDps) {
   const links=[];
+  if (reason===WEAPON_PHYSICAL_BASE_UNVERIFIED)
+    return [{section:'gear',index:0,role:'gear-drawer-heading',label:'메인 무기 확인'}];
   const slateInputs=(report?.componentProjection?.slateOptionInputs??[]).filter(input=>input.reason===reason);
   if(slateInputs.length)return slateInputs.map(({key,label})=>({section:'divinity',type:'slate-option',role:'slate-option-search',key,label}));
   if(reason.endsWith(MISSING_MEMORY_ROLL)){

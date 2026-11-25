@@ -343,6 +343,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       const resultScroll = globalThis.document.querySelector?.('.native-dps-dock')?.scrollTop ?? 0;
       const modalScroll = globalThis.document.querySelector?.(".season-native-modal-body")?.scrollTop ?? 0;
       const cardScroll = root.querySelector?.('.pact-cards')?.scrollTop ?? 0;
+      const skillBoardScroll = root.querySelector?.('.skill-link-board')?.scrollTop ?? 0;
       const talentMap=root.querySelector?.('.talent-drawer [data-talent-panel]');
       const talentScroll=talentMap?.scrollLeft??0;
       const previousList=root.querySelector?.('.gear-drawer .native-picker-list');
@@ -366,6 +367,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
       }
       const cards=root.querySelector?.('.pact-cards');
       if(cards)cards.scrollTop=cardScroll;
+      const skillBoard=root.querySelector?.('.skill-link-board');
+      if(skillBoard)skillBoard.scrollTop=skillBoardScroll;
       const gearList=root.querySelector?.('.gear-drawer .native-picker-list');
       if(gearList && state.picker?.candidate){
         gearList.scrollTop=listScroll;
@@ -424,7 +427,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const focusTarget=detail.matches?.('button,input,select,textarea,summary,[tabindex]') ? detail
             : detail.querySelector?.(detail.tagName==='DETAILS'?'summary':'input,select,textarea');
           focusTarget?.focus({preventScroll:true});
-          (focusTarget??detail).scrollIntoView?.({ block: "nearest" });
+          (focusTarget??detail).scrollIntoView?.({ block: state.focusRole==='skill-selection-pane'?'start':'nearest' });
         }
         state.focusRole = null;
       }
@@ -616,8 +619,13 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     },
     compareSupportImpact(rowIndex) {
       const skill = [...state.document.targetBuild.skills.active, ...state.document.targetBuild.skills.passive][rowIndex];
-      if (!skill?.skillId) return;
-      const metric=preferredSeasonDpsMetric(state.report);
+      if (!skill?.skillId||state.pending.size) return;
+      const review=seasonPartialDpsReview(state.document,state.report);
+      const partial=review&&review.confirmation===state.partialDpsConfirmation?review:null;
+      const metric=partial?'fullDps':preferredSeasonDpsMetric(state.report);
+      const linkedDps=report=>report[metric]?.rows?.find(row=>row.rowIndex===rowIndex&&row.id===skill.skillId&&row.supported)?.values.dps;
+      const linkedBefore=linkedDps(state.report);
+      if(partial&&!Number.isFinite(linkedBefore))return;
       const rows = [];
       for (const [supportIndex, support] of skill.supports.entries()) {
         if (!support?.supportId) continue;
@@ -625,6 +633,15 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const preview = previewSlotEdit(state.document, state.report, {
             kind:'support-selection', rowIndex, supportIndex, value:'',
           }, {metric,includeSnapshot:true});
+          if(partial){
+            const compared=preview.partialComparison;
+            const comparison=compared?.confirmation===partial.confirmation?{...compared,supported:true}
+              :{supported:false,reasons:['보조 해제 후 같은 제외 범위와 전투 조건으로 비교할 수 없습니다.']};
+            const linkedAfter=linkedDps(preview.candidate.report);
+            const linkedSkillDps=comparison.supported&&Number.isFinite(linkedAfter)?{value:linkedAfter,delta:linkedAfter-linkedBefore}:null;
+            rows.push({supportIndex,id:support.supportId,comparison,linkedSkillDps});
+            continue;
+          }
           const resources=preview.dpsBasis===metric?preview:
             compareSeasonResourceCosts(state.report,preview.candidate.report,metric,{rowIndex});
           const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale,elixirManaBalanceChanges}=resources;
@@ -634,13 +651,16 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
             skillSpeedChanges,manualUsageChanges,elixirPhaseChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges,
           } : null;
-          rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,
+          const linkedAfter=linkedDps(preview.candidate.report);
+          const linkedSkillDps=preview.comparison.supported&&Number.isFinite(linkedBefore)&&Number.isFinite(linkedAfter)
+            ? {value:linkedAfter,delta:linkedAfter-linkedBefore} : null;
+          rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,linkedSkillDps,
             breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale,elixirManaBalanceChanges}});
         } catch (error) {
           rows.push({supportIndex, id:support.supportId, comparison:{supported:false,reasons:[error.message]}});
         }
       }
-      state.supportImpact = {rowIndex, rows};
+      state.supportImpact = {rowIndex, rows, partial:!!partial};
     },
     async rank(){
       if(state.pending.size||state.upgrades?.busy)return;
@@ -1090,7 +1110,8 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         state.picker ??= { candidate: "", query: "" };
         state.picker.query = input.value;
         const matches = pickerSearchMatcher(input.value,state.section==='gear');
-        const options = [...input.closest('.native-item-picker').querySelectorAll('[data-picker-option]')];
+        const picker=input.closest('.native-item-picker');
+        const options = [...picker.querySelectorAll('[data-picker-option]')];
         let hiddenSelection = false;
         for (const option of options) {
           option.hidden = !matches(option.dataset.search);
@@ -1108,7 +1129,9 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           const tabStop = options.find(option => !option.hidden && option.getAttribute('aria-pressed') === 'true')
             ?? options.find(option => !option.hidden);
           for (const option of options) option.tabIndex = option === tabStop ? 0 : -1;
-          const empty=input.closest('.native-item-picker').querySelector('[data-picker-empty]');
+          const count=picker.querySelector('[data-picker-count]');
+          if(count)count.textContent=`${options.filter(option=>!option.hidden).length}개`;
+          const empty=picker.querySelector('[data-picker-empty]');
           if (empty) empty.hidden=Boolean(tabStop);
           for (const group of root?.querySelectorAll?.('[data-gear-result-group]') ?? []) {
             group.hidden = !group.querySelector('[data-picker-option]:not([hidden])');
@@ -1530,6 +1553,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.focusRole='skill-catalog-toggle';
           return;
         }
+        if(action==='show-skill-links'&&state.overlay?.type==='skills'){
+          state.focusRole=`skill-board-row-${state.overlay.index}`;
+          return;
+        }
         if(action==='memory-option-pick' && workshop()?.kind==='memory'){
           api.chooseMemoryOption(d.value,d.previous,Number(d.position));
           state.focusRole=d.focus;
@@ -1789,10 +1816,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           });
           return;
         }
-        if (action === 'clear-combat-conditions') {
+        if (action === 'clear-combat-conditions' || action === 'clear-effect-conditions') {
           api.flush();
           api.edit({kind:action});
-          state.notice = '수동 전투 조건을 초기화했습니다.';
+          state.notice = action==='clear-effect-conditions'?'효과 조건을 자동으로 복원했습니다.':'수동 전투 조건을 초기화했습니다.';
           state.focusRole = 'training-dummy-picker';
           return;
         }
@@ -1838,6 +1865,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             try { storage.setItem(partialDpsKey(state.document.id),state.partialDpsConfirmation??''); }
             catch { state.notice='제외 설정을 이 브라우저에 저장하지 못했습니다.'; }
             if (state.analysis?.metric==='partialDps') state.analysis=null;
+            state.supportImpact=null;
             state.focusRole='partial-dps-toggle';
           }
           return;
@@ -1997,7 +2025,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         }
         else if (action === "inspect-skill") api.openSkill(Number(d.index),null,d.role?.startsWith('skill-slot-'));
         else if (action === "inspect-gear") api.openGear(Number(d.index));
-        else if (action === "inspect-socket") { const i = Number(d.index); api.openSkill(Number(d.row??state.skillIndex),Number.isInteger(i) && i >= 0 && i < 5 ? i : null,d.role?.startsWith('skill-socket-')); }
+        else if (action === "inspect-socket") {
+          const i=Number(d.index);
+          api.openSkill(Number(d.row??state.skillIndex),Number.isInteger(i)&&i>=0&&i<5?i:null,d.role?.startsWith('skill-socket-'));
+          if(d.boardSocket!==undefined&&globalThis.matchMedia?.('(max-width:899px),(max-height:500px)').matches)
+            state.focusRole='skill-selection-pane';
+        }
         else if (action === "edit-slot") {
           if (d.type === "gear") api.openGear(Number(d.index));
           else if (d.type === "skills") api.openSkill(Number(d.index));
@@ -2017,7 +2050,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         else if (action === "close") api.closeOverlay();
         else if (action === "picker-gear-kind") {
           resetGearCandidate({gearKind:d.category,filter:''});
-          state.focusRole=d.role;
+          state.focusRole=d.focusRole??d.role;
         }
         else if (action === "picker-group") {
           resetGearCandidate({filter:d.filter});

@@ -447,7 +447,7 @@ function itemPicker(s, category, index, supportIndex, current) {
   const counts=new Map();
   if(!gear)for(const o of pool)for(const tag of new Set(labelsFor(o.id)))counts.set(tag,(counts.get(tag)??0)+1);
   const tagBar=gear||!filters.length?'':`<details class="skill-tag-filter"${selectedTags.length&&!s.picker?.candidate?' open':''}><summary>태그${selectedTags.length?' · '+esc(selectedTags.join(', ')):''}</summary><div class="skill-tag-list" role="group" aria-label="스킬 태그">${['',...filters.sort((a,b)=>counts.get(b)-counts.get(a))].map(tag=>
-    `<label><input type="checkbox" data-skill-tag="${esc(tag)}"${(tag?selectedTags.includes(tag):!selectedTags.length)?' checked':''}>${esc(tag||'전체')}</label>`).join('')}</div></details>`;
+    `<label><input type="checkbox" data-skill-tag="${esc(tag)}"${(tag?selectedTags.includes(tag):!selectedTags.length)?' checked':''}>${esc(tag||'전체')} <small>(${tag?counts.get(tag):pool.length})</small></label>`).join('')}</div></details>`;
   // Keep each weapon family under its handedness in both versions of the picker.
   const groups = [];
   if (gear && index < 2) {
@@ -476,10 +476,14 @@ function itemPicker(s, category, index, supportIndex, current) {
   const resultGroups = gearGroups ? gearGroups.map(({kind,label,items}) => {
     return items.length ? `<div class="gear-result-group" data-gear-result-group="${kind}" role="group" aria-label="${label}"${items.some(match) ? '' : ' hidden'}><span aria-hidden="true">${label}</span>${items.map(optionButton).join('')}</div>` : '';
   }).join('') : options.map(o => gear ? optionButton(o) : `<div class="skill-candidate-row">${optionButton(o)}</div>`).join('');
+  const emptyHidden=visibleOptions.length?' hidden':'';
+  const emptyResults=gear&&(family||s.picker?.filter)
+    ? `<div data-picker-empty${emptyHidden}><span role="status">검색 결과 없음</span>${button('모든 분류 검색','picker-gear-kind','data-category="" data-focus-role="gear-picker-search"')}</div>`
+    : `<p data-picker-empty role="status"${emptyHidden}>검색 결과 없음</p>`;
   return `<div class="native-item-picker ${gear?'equipment-catalog'+(filters.length?'':' category-only'):'skill-catalog'}${editGearCandidate?' has-candidate-editor':''}" aria-label="슬롯 아이템 선택">
     ${gear?`<nav class="catalog-rail" aria-label="장비 종류"><div>${gearKinds.map(([id,label])=>button(id?label:'전체','picker-gear-kind',`data-category="${id}" data-role="gear-kind-${id}" aria-pressed="${family===id}"`)).join('')}</div>
     ${filters.length?`<div class="catalog-groups" aria-label="장비 분류">${filterButton('')}${groups.map(([label,names])=>`<div class="catalog-family"${label?' role="group" aria-label="'+esc(label)+'"':''}>${names.map(filterButton).join('')}</div>`).join('')}</div><div class="catalog-mobile-filter">${filterSelect}</div>`:''}</nav>`:''}
-    <header><input type="search" data-picker-filter value="${esc(query)}" aria-label="이름·효과 검색" placeholder="이름·효과 검색" />${editGearCandidate?'':wornAction}</header>${tagBar}<p data-picker-empty role="status"${visibleOptions.length ? " hidden" : ""}>검색 결과 없음</p>
+    <header><input type="search" data-picker-filter${gear?' data-role="gear-picker-search"':''} value="${esc(query)}" aria-label="이름·효과 검색" placeholder="이름·효과 검색" />${gear?'':`<output data-picker-count aria-label="검색 결과 수">${visibleOptions.length}개</output>`}${editGearCandidate?'':wornAction}</header>${tagBar}${emptyResults}
     <div class="native-picker-columns"><div class="native-picker-list" aria-label="아이템 후보">${resultGroups}</div>
     ${editGearCandidate?gearCandidateEditor(s,index,current):card ? `<article class="native-picker-card" aria-label="아이템 미리보기" data-role="candidate-detail" tabindex="-1">${gear
       ? `<h3>${esc(title(selected))}</h3><div class="gear-comparison-body" data-candidate="${esc(selected)}" tabindex="0" aria-label="옵션 및 수치 비교">${preview}${detail}${oldOptions}</div>`
@@ -557,6 +561,13 @@ function exclusiveSupportLinks(s, row) {
       'open-exclusive-support',`data-row="${index}" data-index="${socket}"`)).join('')}</nav>`:'';
 }
 
+function supportCountExceedsEnergy(skills,rowIndex,count) {
+  const group=rowIndex<5?'active':'passive';
+  const index=rowIndex<5?rowIndex:rowIndex-5;
+  const rows=skills[group].map((row,i)=>i===index?{...row,unlockedSupportCount:count}:row);
+  return getSkillEnergyUsage({...skills,[group]:rows}).over>0;
+}
+
 function equipmentPanel(s, category) {
   const b = normalizeBuild(s.document.targetBuild), gear = category === "gear";
   const rows = [...b.skills.active, ...b.skills.passive];
@@ -570,9 +581,10 @@ function equipmentPanel(s, category) {
       const next=n===r.unlockedSupportCount;
       const linked=r.supports[n]?.supportId;
       const energy=(i<5?SUPPORT_SLOT_ENERGY_COSTS:PASSIVE_SUPPORT_SLOT_ENERGY_COSTS)[n];
+      const lowEnergy=next&&supportCountExceedsEnergy(b.skills,i,n+1);
       const level=r.supports[n]?.level;
-      const name=`${label(i)} ${title(r.skillId)} · 보조 ${n+1} · ${next?`칸 열기 · 에너지 +${energy}`:linked?`${title(linked)} · 기본 레벨 ${level}`:'미장착'}`;
-      return button(linked?`${icon(linked)}<span class="skill-board-level" aria-hidden="true">${level}</span>`:next?'+'+energy:'＋','inspect-socket',`data-row="${i}" data-index="${n}" data-role="skill-socket-${i}-${n}"${next?' class="chain-open-next"':''} aria-label="${esc(name)}" title="${esc(name)}" aria-haspopup="dialog"`);
+      const name=`${label(i)} ${title(r.skillId)} · 보조 ${n+1} · ${next?`${lowEnergy?'에너지 부족':'칸 열기'} · 에너지 +${energy}`:linked?`${title(linked)} · 기본 레벨 ${level}`:'미장착'}`;
+      return button(linked?`${icon(linked)}<span class="skill-board-level" aria-hidden="true">${level}</span>`:next?'+'+energy:'＋','inspect-socket',`data-row="${i}" data-index="${n}" data-role="skill-socket-${i}-${n}"${next?' class="chain-open-next"':''} aria-label="${esc(name)}" title="${esc(name)}" aria-haspopup="dialog"${lowEnergy?' disabled':''}`);
     }).join('')}</div>`:''}</section>`).join('')}</nav>${button("영약·모듈화", "edit-slot", 'data-type="extensions"')}</div>`;
   const shelf=button('보관함','shelf-open',`data-kind="gear" data-scope="all" data-index="${selected}" data-role="home-shelf"`);
   const swap=b.gear.slots[7]?.itemId||b.gear.slots[8]?.itemId
@@ -594,10 +606,11 @@ function skillLinkBoard(s,skills) {
       const index=start+i, name=index===0?'주력 스킬':(start?'패시브 ':'액티브 ')+(i+1);
       const slots=[row.skillId,...costs.map((_,n)=>row.supports[n]?.supportId)];
       const count=row.unlockedSupportCount;
+      const lowEnergy=!!row.skillId&&count<costs.length&&supportCountExceedsEnergy(skills,index,count+1);
       const cells=slots.map((id,n)=>{
         const locked=n>count,label=n?'보조 '+n:name;
         const next=locked&&n===count+1&&Boolean(row.skillId);
-        const desc=(n?name+' · ':'')+label+' · '+(next?`칸 열기 · 에너지 +${costs[n-1]}`:locked?'잠김':id?title(id):'미장착');
+        const desc=(n?name+' · ':'')+label+' · '+(next?`${lowEnergy?'에너지 부족':'칸 열기'} · 에너지 +${costs[n-1]}`:locked?'잠김':id?title(id):'미장착');
         const active=s.overlay.index===index && (s.supportIndex??-1)===n-1;
         const art=id?icon(id):'';
         const symbol=locked&&!next?'–':art.startsWith('<img')?art:id?esc(title(id).slice(0,2)):'＋';
@@ -608,12 +621,12 @@ function skillLinkBoard(s,skills) {
         const level=id?`<span class="skill-board-level" aria-hidden="true">${effective??base}${needsCheck?'?':''}</span>`:'';
         const levelHelp=bonus?`레벨 ${base} → ${effective}${needsCheck?' · 확인 필요':''}`:needsCheck?`레벨 ${base} · 확인 필요`:'';
         const tip=levelHelp?`${desc} · ${levelHelp}`:desc;
-        const select=button(symbol+level+(n?'':'<small>'+name+'</small>'), 'inspect-socket', `data-row="${index}" data-index="${n-1}"${next?' class="chain-open-next"':''} aria-pressed="${active}" aria-label="${esc(desc)}" title="${esc(tip)}"${levelHelp?` aria-description="${esc(levelHelp)}"`:''}${locked&&!next||n&&!row.skillId?' disabled':''}`);
+        const select=button(symbol+level+(n?'':'<small>'+name+'</small>'), 'inspect-socket', `data-row="${index}" data-index="${n-1}" data-board-socket${next?' class="chain-open-next"':''} aria-pressed="${active}" aria-label="${esc(desc)}" title="${esc(tip)}"${levelHelp?` aria-description="${esc(levelHelp)}"`:''}${locked&&(!next||lowEnergy)||n&&!row.skillId?' disabled':''}`);
         const remove=id?button('×','remove-socket',`class="skill-socket-remove" data-row="${index}" data-index="${n-1}" aria-label="${esc(desc)} 해제" title="해제"`):'';
         return `<div class="skill-board-socket">${select}${remove}</div>`;
       }).join('');
-      const step=(dir,disabled)=>button(dir>0?'+':'−','skill-board-count',`data-row="${index}" data-step="${dir}" aria-label="${name} 보조 칸 ${dir>0?'추가':'줄이기'}"${disabled?' disabled':''}`);
-      return `<div class="skill-board-row" aria-label="${name}">${cells}<div class="skill-board-steps">${step(-1,!row.skillId||!count||!!row.supports[count-1]?.supportId)}<span>${energy.rows[index].used}</span>${step(1,!row.skillId||count>=5)}</div></div>`;
+      const step=(dir,disabled)=>button(dir>0?'+':'−','skill-board-count',`data-row="${index}" data-step="${dir}" aria-label="${name} 보조 칸 ${dir>0?'추가':'줄이기'}${dir>0&&lowEnergy?' · 에너지 부족':''}"${disabled?' disabled':''}`);
+      return `<div class="skill-board-row" role="group" aria-label="${name}" data-role="skill-board-row-${index}" tabindex="-1">${cells}<div class="skill-board-steps">${step(-1,!row.skillId||!count||!!row.supports[count-1]?.supportId)}<span>${energy.rows[index].used}</span>${step(1,!row.skillId||count>=5||lowEnergy)}</div></div>`;
     }).join('');
   }).join('');
   const mana=s.report.character.values;
@@ -1157,8 +1170,8 @@ function overlay(s) {
     const supportTier=Number.isInteger(s.supportIndex)?s.report.components.find(c=>c.category==='supports'&&c.id===id)
       ?.calculations?.find(c=>c.rowIndex===index&&c.supportIndex===s.supportIndex)?.tier:undefined;
     return `<div class="season-native-backdrop gear-drawer-backdrop"><button class="gear-drawer-scrim" type="button" data-ss14-action="close" tabindex="-1" aria-label="편집창 닫기"></button>
-      <section role="dialog" aria-modal="true" aria-label="SS14 ${esc(name)}" class="season-native-modal gear-drawer slot-side-editor${skill?' skill-workspace':' workshop-workspace'}"><header><h2 data-role="${skill?'slot-detail-heading':'memory-drawer-heading'}" tabindex="-1">${esc(name)}${skill&&Number.isInteger(s.supportIndex)?' · 보조 '+(s.supportIndex+1):''}</h2>${button('닫기','close','aria-label="편집 닫기"')}</header>
-      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?`<div id="skill-selection-pane" class="skill-selection-pane"${s.overlay.boardOnly?' hidden':''}>${s.overlay.boardOnly?'':exclusiveSupportLinks(s,row)+slotEditor(s)+(id&&!s.picker?`<details class="editor-details"><summary>스킬 상세</summary>${itemSource(id,undefined,supportTier)}${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:'')}</div>${skillLinkBoard(s,b.skills)}`:workshopView(s)}</div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
+      <section role="dialog" aria-modal="true" aria-label="SS14 ${esc(name)}" class="season-native-modal gear-drawer slot-side-editor${skill?' skill-workspace':' workshop-workspace'}"><header><h2 data-role="${skill?'slot-detail-heading':'memory-drawer-heading'}" tabindex="-1">${esc(name)}${skill&&Number.isInteger(s.supportIndex)?' · 보조 '+(s.supportIndex+1):''}</h2>${skill?`<div class="skill-header-actions">${button('연결판','show-skill-links','class="show-skill-links" aria-label="선택한 스킬의 연결판 보기"')}${button('닫기','close','aria-label="편집 닫기"')}</div>`:button('닫기','close','aria-label="편집 닫기"')}</header>
+      ${s.error?`<p role="alert">${esc(s.error)}</p>`:''}<div class="season-native-modal-body">${skill?`<div id="skill-selection-pane" class="skill-selection-pane" data-role="skill-selection-pane" tabindex="-1"${s.overlay.boardOnly?' hidden':''}>${s.overlay.boardOnly?'':exclusiveSupportLinks(s,row)+slotEditor(s)+(id&&!s.picker?`<details class="editor-details"><summary>스킬 상세</summary>${itemSource(id,undefined,supportTier)}${renderEffectSources(s,'skills.rows.'+index+(s.supportIndex==null?'':'.supports.'+s.supportIndex))}</details>`:'')}</div>${skillLinkBoard(s,b.skills)}`:workshopView(s)}</div>${s.drawer.bar??renderDrawerBar(s)}</section></div>`;
   }
   if (type === "gear") {
     const index=s.overlay.index, id=normalizeBuild(s.document.targetBuild).gear.slots[index]?.itemId;
@@ -1303,9 +1316,9 @@ export function renderNativeDps(s) {
           excludedByReason.get(reason).push(label);
         }
       }
-      const excluded=review?`<details data-role="partial-dps-review"${partial?' open':''}><summary>${partial?'DPS에서 제외한 항목':'미지원 항목 확인'}</summary>
+      const excluded=review?`<details data-role="partial-dps-review"${partial?' open':''}><summary>${partial?'DPS에서 제외한 항목':'TOB 미지원 항목'}</summary>
         <ul>${[...excludedByReason].map(([reason,labels])=>`<li>${esc(labels.join(', '))}<div>${esc(reason)}</div></li>`).join('')}</ul>
-        ${button(partial?'제외 취소':'91TOB 미지원 확인 · 제외','confirm-partial-dps',`data-role="partial-dps-toggle" aria-pressed="${!!partial}"`)}</details>`:'';
+        ${button(partial?'제외 취소':'91TOB에서도 미지원일 때 제외','confirm-partial-dps',`data-role="partial-dps-toggle" aria-pressed="${!!partial}"`)}</details>`:'';
       return `<div data-role="native-calculation-detail"${s.pending.size ? ' hidden' : ''}>${excluded}${s.showDpsNotes ? requirements+skill : skill+requirements}${breakdown}${renderCalculationNotes(s)}</div>`;
     },
     conditions: () => renderResultConditions(s),

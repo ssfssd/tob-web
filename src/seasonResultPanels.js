@@ -12,7 +12,7 @@ import { seasonSupportKoreanCard } from './seasonSupport.js';
 import { normalizeBuild } from './engine.js';
 import { effectSourceLabel, excludedSeasonHitRoutes } from './seasonEffectSources.js';
 import { seasonSkillCalculationLevel, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
-import { seasonWeaponProfile } from './seasonWeaponProfile.js';
+import { seasonWeaponProfile, WEAPON_PHYSICAL_BASE_UNVERIFIED } from './seasonWeaponProfile.js';
 import { DUAL_WIELD_ATTACK_SOURCE } from './seasonWeaponInputs.js';
 import { seasonWeaponRestrictionIssue } from './seasonWeaponRestrictions.js';
 import { SS14_CARDS_EN } from './data/ss14Cards.en.generated.js';
@@ -20,6 +20,7 @@ import { SEASON_STAT_LABELS } from './seasonNumericStats.js';
 import { renderDamageBreakdown, renderResourceChanges, renderSkillLevelChanges, plannerSearchKey } from './seasonEditorTools.js';
 import { compactSeasonEditDelta } from './seasonEditComparison.js';
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
+import { auraActivationControl } from './seasonNetherModifiers.js';
 
 const esc = v => String(v ?? '').replace(/[&<>"']/gu, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const number = v => Number.isFinite(v) ? v.toLocaleString('ko-KR', { maximumFractionDigits:2 }) : '미지원';
@@ -49,7 +50,7 @@ export function renderReasons(s,reasons,dps=s.report.fullDps,skillIndex) {
     if(links.some(link=>Number.isInteger(link.supportIndex))&&[...unique].some(([other,scope])=>
       other.endsWith(': '+reason)&&scope.size===sides.size&&[...scope].every(side=>sides.has(side))))continue;
     const side=sides.size===1&&!sides.has('')?[...sides][0]+' · ':'';
-    let message=reason;
+    let message=reason===WEAPON_PHYSICAL_BASE_UNVERIFIED?'무기 기본 물리 대미지 원문 미확인':reason;
     const rollLink=links.find(link=>link.edit==='gear-roll');
     if(rollLink&&reason.startsWith('장비 옵션 수치를 입력하세요: ')){
       for(const component of s.report.components.filter(row=>row.category==='gear')){
@@ -128,7 +129,7 @@ function renderEncounterChanges(rows,role,{editable=false}={}){
         `${tab?'data-tab="conditions"':'data-section="combat"'} data-field="${esc(edit)}" data-field-key="${esc(key)}"${rowIndex===undefined?'':` data-row="${rowIndex}" data-support="${supportIndex}"`} aria-label="${esc(label)} 수정"`):''}</li>`).join('')}</ul>`;
 }
 
-function effectConditionFields(s) {
+function effectConditionFields(s, hasEffectOverrides) {
   const fields = [];
   const automaticFields = [];
   const nearby = [];
@@ -182,7 +183,9 @@ function effectConditionFields(s) {
       }
     }
   }
-  return fields.length || automaticFields.length ? `<section class="dock-effect-conditions">${fields.length?'<h2>효과 조건</h2>':''}${fields.join('')}
+  return fields.length || automaticFields.length || hasEffectOverrides ? `<section class="dock-effect-conditions">
+    ${fields.length || hasEffectOverrides ? '<h2>효과 조건</h2>' : ''}
+    ${hasEffectOverrides ? button('효과 조건 자동 복원','clear-effect-conditions') : ''}${fields.join('')}
     ${automaticFields.length ? `<details data-role="automatic-effect-conditions"><summary>자동 적용 효과</summary>${automaticFields.join('')}</details>` : ''}</section>` : '';
 }
 
@@ -196,9 +199,9 @@ function skillConditionKeys(s, index, id) {
 export function renderResultConditions(s) {
   const inputs = s.document.targetBuild.ss14Inputs;
   const build = s.document.targetBuild;
-  const hasManualConditions = hasSeasonDpsConditionOverrides(inputs.dps)
-    || Object.keys(inputs.componentConditions ?? {}).length > 0
+  const hasEffectOverrides = Object.keys(inputs.componentConditions ?? {}).length > 0
     || Object.values(inputs.supports ?? {}).some(binding => Object.keys(binding.conditions ?? {}).length > 0);
+  const hasManualConditions = hasSeasonDpsConditionOverrides(inputs.dps) || hasEffectOverrides;
   const shareOverflow=s.report.fullDps.manualResources?.shareOverflow??s.report.assumedDps?.manualResources?.shareOverflow;
   const shareSlots=s.report.coupledSkills.rows.filter(row=>skillConditionKeys(s,row.rowIndex,row.id).includes('useShare'))
     .map(({rowIndex,id})=>({rowIndex,id,value:inputs.dps?.skills?.[rowIndex]?.useShare}));
@@ -289,7 +292,6 @@ export function renderResultConditions(s) {
       ${button('스킬 계산 보기','result-tab',`data-tab="calculation" data-index="${row.rowIndex}" data-focus-role="calculation-skill"`)}</details>`;
   }).join('');
   return `<section class="native-result-conditions" aria-label="적용 중인 전투 조건">
-    ${hasManualConditions ? button('대상·스킬·효과 조건 초기화','clear-combat-conditions') : ''}
     ${renderTrainingDummyPicker(inputs.dps?.enemy)}
     ${Number.isFinite(s.report.fullDps.fixedErosionResistance)?`<p>대상 부식 저항 ${number(s.report.fullDps.fixedErosionResistance)}% 고정 적용 중</p>`:''}
     <details data-role="dock-enemy-defense"><summary>아머·저항·심화 직접 입력</summary><dl class="native-condition-values">${Object.keys(SEASON_DPS_ENEMY_FIELDS).filter(key=>key!=='numbedStacks').map(key => {
@@ -303,13 +305,14 @@ export function renderResultConditions(s) {
     ${allocations}
     ${reapingAllocations}
     ${castShares}
-    ${skillFields ? `<details data-role="dock-skill-conditions"><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s)}
+    ${skillFields ? `<details data-role="dock-skill-conditions"><summary>스킬 조건</summary>${skillFields}</details>` : ''}${effectConditionFields(s,hasEffectOverrides)}
     <details data-role="dock-more-conditions"><summary>추가 전투 조건</summary>
     ${edit('대상·스킬 조건 전체', 'season-dps-input')}${edit('기본 속성', 'season-character-input')}${edit('기본 크리티컬', 'native-critical-input')}${edit('축복 중첩', 'native-blessing-input')}
     ${inputs.theaCycle || s.report.theaAverage ? `<h2>티아1 은총</h2><p>${inputs.theaCycle?.mode === 'automatic' ? `자동 주기 평균 · ${number(inputs.theaCycle.seconds)}초` : '현재 상태 직접 설정'}</p>
       ${s.report.theaAverage ? `<p>은총 유지율: ${s.report.theaAverage.supported ? `${number(s.report.theaAverage.uptime)}%` : '미지원'}</p>` : ''}
       ${edit('은총·추가 발동 조건 편집', 'season-thea-controls')}` : ''}
-    ${edit('영약·특수 효과', 'native-extension-input')}</details>
+    ${edit('영약·특수 효과', 'native-extension-input')}
+    ${hasManualConditions ? button('대상·스킬·효과 조건 초기화','clear-combat-conditions') : ''}</details>
   </section>`;
 }
 
@@ -747,23 +750,57 @@ export function selectedSkillInputIssues(dps,row) {
   return issues.length>1?issues.filter(reason=>reason!=='이 스킬의 SS14 전투 입력을 다시 확인하세요.'):issues;
 }
 
+function renderUtilitySkillCalculation(report,{index,entry,utility,buff}) {
+  const stats=entry?.values??{};
+  const values=[];
+  const level=buff?.level??entry?.level;
+  if(Number.isInteger(level)) values.push(['적용 레벨',`Lv.${level}`]);
+  if(utility?.utility==='restoration') values.push(
+    ['기본 HP 회복',`최대 HP의 ${number(utility.lifePercent)}% · ${number(utility.lifeDuration)}초`],
+    ['기본 MP 회복',`${number(utility.mana)} · ${number(utility.manaDuration)}초`]);
+  for(const [label,value,unit] of [['기본 MP 소모',stats.manaCost,''],['기본 시전 시간',stats.castTime,'초'],
+    ['기본 쿨타임',stats.cooldown,'초']]) {
+    if(Number.isFinite(value)) values.push([label,number(value)+unit]);
+  }
+  const reservations=report.character.manaReservations?.filter(reservation=>reservation.rowIndex===index)??[];
+  if(reservations.length) {
+    const known=reservations.every(r=>!r.blocked&&(r.active===false||Number.isFinite(r.applied)));
+    const total=known?reservations.reduce((sum,r)=>sum+(r.active===false?0:r.applied),0):null;
+    values.push(['봉인 MP',known?number(total)+'%':'확인 필요']);
+  }
+  return `<div data-role="utility-skill-calculation">${calcRows(values)}</div>`;
+}
+
 export function renderSkillCalculation(s,{partial=false,showIssues=true}={}) {
   const report=s.report,rows=report.fullDps.rows;
   const assumed=!partial&&preferredSeasonDpsMetric(report)==='assumedDps';
   const skills=normalizeBuild(s.document.targetBuild).skills;
   const slots=[...skills.active,...skills.passive].flatMap((skill,index)=>{
     const row=rows.find(entry=>entry.rowIndex===index);
-    if(!row && (index>=skills.active.length || seasonSkillSlotCalculation(report,index)?.mechanics?.some(m=>m.kind==='utility-skill')))return [];
     const id=row?.id??skill.skillId;
     if(!id)return [];
+    const entry=seasonSkillSlotCalculation(report,index);
+    const utility=entry?.mechanics?.find(m=>m.kind==='utility-skill');
+    const buff=report.componentProjection.rows.find(projected=>projected.buffSkill===index&&projected.itemId===id);
+    if(!row && index>=skills.active.length && !buff && !utility)return [];
     const card=SS14_CARDS.records[id];
     const name=card?.koreanTextVerified&&card.season==='SS14'?card.name:'한국어 이름 미제공';
     const slotName=index===0?'주력':index<skills.active.length?'액티브 '+(index+1):'패시브 '+(index-skills.active.length+1);
-    return [{index,id,row,name,slotName}];
+    return [{index,id,row,name,slotName,entry,utility,buff}];
   });
   if(!slots.length)return button('주력 스킬 선택','inspect-calculation-skill','data-index="0" data-role="edit-calculation-skill"');
   const selected=slots.find(slot=>slot.index===s.calculationIndex)??slots[0];
   const {id,index,row}=selected;
+  const slotTitle=slot=>`${slot.slotName} · ${esc(slot.name)}${Number.isInteger(slot.row?.minionLevel)?' · Lv.'+slot.row.minionLevel:''}`;
+  const selector=slots.length===1 ? `<h2 data-role="calculation-skill" tabindex="-1">${slotTitle(selected)}</h2>`
+    : `<select aria-label="계산할 스킬" data-calculation-skill data-role="calculation-skill">${slots.map(slot=>`<option value="${slot.index}"${slot.index===index?' selected':''}>${slotTitle(slot)}</option>`).join('')}</select>`;
+  const activation=selected.buff?.isAura?auraActivationControl(report.componentProjection,index):null;
+  const actions=`<div class="skill-calc-actions">${button('스킬 편집','inspect-calculation-skill',`data-index="${index}" data-role="edit-calculation-skill"`)}
+    ${skillConditionKeys(s,index,id).length?button('스킬 조건','result-tab',`data-tab="conditions" data-focus-role="dock-skill-conditions-${index}"`):''}
+    ${activation&&!activation.automatic?button('효과 조건','result-tab',`data-tab="conditions" data-field="component-condition" data-field-key="${esc(activation.key)}"`):''}</div>`;
+  if(!row&&(selected.utility||selected.buff)) {
+    return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${renderUtilitySkillCalculation(report,selected)}${actions}</section>`;
+  }
   const displayRow=assumed?report.assumedDps.rows.find(entry=>entry.rowIndex===index):row;
   const numbed=renderSkillNumbedContribution(assumed?report.assumedDps:report.fullDps,displayRow);
   const moonStrike=renderMoonStrikeForms(s.document.targetBuild,seasonSkillSlotCalculation(report,index),displayRow);
@@ -779,17 +816,12 @@ export function renderSkillCalculation(s,{partial=false,showIssues=true}={}) {
   const skillLevel=detail?.skillLevel??seasonSkillCalculationLevel(report,index);
   const v=displayRow?.values??{};
   const averaged=assumed?report.assumedDps.measuredResources:!!report.theaAverage;
-  const slotTitle=slot=>`${slot.slotName} · ${esc(slot.name)}${Number.isInteger(slot.row?.minionLevel)?' · Lv.'+slot.row.minionLevel:''}`;
-  const selector=slots.length===1 ? `<h2 data-role="calculation-skill" tabindex="-1">${slotTitle(selected)}</h2>`
-    : `<select aria-label="계산할 스킬" data-calculation-skill data-role="calculation-skill">${slots.map(slot=>`<option value="${slot.index}"${slot.index===index?' selected':''}>${slotTitle(slot)}</option>`).join('')}</select>`;
   const levelDetails=Number.isInteger(skillLevel?.level)&&(skillLevel.bonus||skillLevel.growthMultiplier||skillLevel.unavailable) ? calcGroup(
     skillLevel.confirmed?'적용 스킬 레벨':'스킬 레벨 확인 필요',`Lv.${skillLevel.level}`,calcRows([
       ['기본 레벨',String(skillLevel.base)],
       ...(skillLevel.bonus?[['레벨 보너스',(skillLevel.bonus>0?'+':'')+skillLevel.bonus]]:[]),
       ...(skillLevel.growthMultiplier?[['20레벨 이후 누적 대미지 배율','×'+number(skillLevel.growthMultiplier)]]:[]),
     ]),'selected-skill-level') : '';
-  const actions=`<div class="skill-calc-actions">${button('스킬 편집','inspect-calculation-skill',`data-index="${index}" data-role="edit-calculation-skill"`)}
-    ${skillConditionKeys(s,index,id).length?button('스킬 조건','result-tab',`data-tab="conditions" data-focus-role="dock-skill-conditions-${index}"`):''}</div>`;
   const minionDeterioration = v.minionDeteriorationDps ?? 0;
   const amounts=SEASON_DPS_PARTS.flatMap(([key,label])=>{
     if (!Number.isFinite(v[key]) || v[key]===0) return [];
@@ -1023,7 +1055,7 @@ export function renderNumbedCalculation(s) {
 function skillContributions(s,partial) {
   const metric=partial?'fullDps':preferredSeasonDpsMetric(s.report);
   const dps=s.report[metric];
-  const metricLabel=metric==='assumedDps'?'방어 전 DPS':'전체 DPS';
+  const metricLabel=partial?'부분 DPS · 미지원 제외':metric==='assumedDps'?'방어 전 DPS':'전체 DPS';
   const rows=dps?.rows??[];
   const {active,passive}=s.document.targetBuild.skills;
   const bySlot=new Map(rows.map(row=>[row.rowIndex,row]));
@@ -1062,16 +1094,19 @@ function skillContributions(s,partial) {
   return `<section class="skill-contributions" aria-label="${heading}"><h2>${heading}</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${slots.map(({index,id,row,hasSupport})=>{
     const label=nameFor(SS14_CARDS.records[id]);
     const slotName=index===0?'주력':index<active.length?'액티브 '+(index+1):'패시브 '+(index-active.length+1);
-    const compareSupport=hasSupport&&!partial;
-    const expanded=compareSupport&&s.supportImpact?.rowIndex===index;
+    const compareSupport=hasSupport&&(!partial||row?.supported);
+    const expanded=compareSupport&&s.supportImpact?.rowIndex===index&&!!s.supportImpact.partial===!!partial;
     const group=bySkill.get(id);
     const combined=group?.count>1&&group.first===index
       ? `<tr class="contribution-skill-total" data-role="analysis-skill-total"><th scope="row">${label} 합계 <small>· ${group.count}칸</small></th><td>${number(group.dps)}</td>${shareCell(group.dps)}</tr>` : '';
     const actions=button(`${label} <small>· ${slotName}</small>`,row?'inspect-contribution-skill':'inspect-skill',`data-index="${index}" class="contribution-skill"`);
     const compare=compareSupport?button('보조 비교','compare-support-impact',`data-index="${index}" data-role="support-impact-${index}" aria-label="${label} ${slotName} 보조 비교" aria-expanded="${expanded}"`):'';
-    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,resources,breakdown})=>{
+    const linkRows=expanded?s.supportImpact.rows.map(({supportIndex,id,comparison,linkedSkillDps,resources,breakdown})=>{
       const {supported,value,delta,reasons}=comparison;
-      const result=supported?`<strong>${number(value)}</strong><small>${delta>0?'+':''}${number(delta)} DPS</small>`
+      const signed=n=>(n>0?'+':'')+number(n);
+      const linked=linkedSkillDps&&Math.abs(linkedSkillDps.delta-delta)>=.005
+        ? `<small data-role="support-impact-linked-dps">연결 스킬 ${number(linkedSkillDps.value)} DPS (${signed(linkedSkillDps.delta)})</small>`:'';
+      const result=supported?`<strong>${number(value)}</strong><small>${signed(delta)} DPS</small>${linked}`
         :`<details><summary>비교 보류</summary>${renderReasons(s,reasons)}</details>`;
       const edit=button(`${supportIndex+1} · ${nameFor(seasonSupportKoreanCard(id))}`,'inspect-support-impact',
         `data-row="${index}" data-index="${supportIndex}" data-role="support-impact-edit-${index}-${supportIndex}" class="contribution-skill"`);

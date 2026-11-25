@@ -14,6 +14,8 @@
 .native-stat-list .native-stat-cell {display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;padding:4px 12px;box-sizing:border-box}
 .native-stat-list .native-stat-cell dt {font-size:12px;color:#b4b4be;opacity:1}
 .native-stat-list .native-stat-cell dd {margin:0;color:#eeeef2;font-size:13px;text-align:right}
+.native-stat-list .native-stat-detail-link {display:inline-flex;align-items:center;gap:6px;border:0;padding:0;background:none;color:#e5dcc8;font:inherit;cursor:pointer;min-height:24px}
+.native-stat-list .native-stat-detail-link:hover {text-decoration:underline}
 .season-native .native-numeric-stats>.native-stat-link {display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;margin-bottom:4px;padding:6px 12px;text-align:left}
 .native-numeric-stats>.native-stat-link strong {min-width:0;overflow-wrap:anywhere}
 .native-defense-overview {display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}

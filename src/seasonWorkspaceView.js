@@ -18,7 +18,7 @@ import { SEASON_CHARACTER_INPUTS } from "./seasonCharacter.js";
 import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, SEASON_DPS_PARTS } from "./seasonDps.js";
 import { hasPeriodicBurstSupport, PERIODIC_BURST_INPUT, readPeriodicBurstUptime } from './seasonSkillInputs.js';
 import { theaCombatEnabled } from "./seasonTheaCombatInputs.js";
-import { seasonWeaponProfile } from './seasonWeaponProfile.js';
+import { seasonWeaponProfile, WEAPON_PHYSICAL_BASE_UNVERIFIED } from './seasonWeaponProfile.js';
 import { SEASON_HERO_COMBAT_FIELDS } from "./seasonMechanicInputs.js";
 import { seasonSlateOptions } from "./seasonDivinity.js";
 import { seasonGameCritical, validGameCriticalBinding } from "./seasonGameData.js";
@@ -356,9 +356,13 @@ export function weaponSummary(build, slotIndex = 0) {
   const v = weapon.values, value = n => Number.isFinite(n) ? number(n) : '미확인';
   return `<section class="season-weapon-summary" aria-label="무기 자동 수치"><h5>무기 수치</h5>
     <p>${Object.entries({physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식'}).filter(([type]) => type === 'physical' || v[`weapon${type}Max`] > 0)
-      .map(([type,label]) => `${label} 대미지 <strong>${value(v[`weapon${type}Min`])}–${value(v[`weapon${type}Max`])}</strong>`).join(' · ')} · 초당 공격 <strong>${value(v.weaponSpeed)}</strong> · 크리티컬 <strong>${value(v.baseCriticalRating)}</strong></p>
+      .map(([type,label]) => {
+        const min=v[`weapon${type}Min`],max=v[`weapon${type}Max`];
+        const range=Number.isFinite(min)&&Number.isFinite(max)?`${number(min)}–${number(max)}`:'미확인';
+        return `${label} 대미지 <strong>${range}</strong>`;
+      }).join(' · ')} · 초당 공격 <strong>${value(v.weaponSpeed)}</strong> · 크리티컬 <strong>${value(v.baseCriticalRating)}</strong></p>
     <details><summary>${weapon.blockers.length ? '미확정 사유 · 수치 출처' : '수치 출처'}</summary>
-      ${weapon.blockers.map(reason => `<p>${escape(reason)}</p>`).join('')}
+      ${[...new Set(weapon.blockers)].map(reason => `<p>${escape(reason===WEAPON_PHYSICAL_BASE_UNVERIFIED?'기본 물리 대미지 원문 미확인':reason)}</p>`).join('')}
       ${weapon.receipts.map(sourceLink).join(' · ')}</details></section>`;
 }
 
