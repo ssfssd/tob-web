@@ -496,7 +496,7 @@ function dpsControls(document, report, formValues, showDummy = false) {
           {minionMaximum,sharedCommand,fixedValue:key==='reapingOverlap'&&dpsRow?.reapingOverlapFixed?'100% 자동':undefined})] : []; }).join("")}
         ${entry?.mechanics?.some(m => m.limitation) ? `<details><summary>효과 상세·입력 기준</summary>${entry.mechanics.filter(m => m.limitation).map(m => `<p>${escape(m.limitation)}${m.kind === "ice-ring-on-kill" ? " 단일 보스에게 재발동 적중이 없으면 0을 입력하세요." : ""} ${sourceLink(m)}</p>`).join("")}</details>` : ""}</fieldset>`;
     }).join("")}
-    <details data-role="combat-input-help"><summary>전투 입력 기준</summary><p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후, 관통 적용 전의 유효 저항입니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
+    <details data-role="combat-input-help"><summary>전투 입력 기준</summary><p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후의 값을 입력하면 관통과 저항 감소가 계산에 반영됩니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
     <p>적중률과 시전 시간 배분은 자원 소모·이동을 고려한 입력입니다. 복합 계산은 첫 매직 버스트 충전도 포함합니다. ${seasonWeaponProfile(build).enabled ? '무기 수치는 선택한 장비에서 자동 반영합니다.' : '무기 대미지는 무기 자체 수치로 입력하세요.'} 추가 번개는 스킬 계수 적용 전 수치입니다. 점화와 기본 마취 확률은 주력 스킬에 적용하며, 마취된 대상의 추가 중첩은 각 번개 적중에서 계산합니다.</p></details>
   </details>`;
 }

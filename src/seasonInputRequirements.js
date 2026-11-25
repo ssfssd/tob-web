@@ -23,7 +23,7 @@ const routes = [
   { id: "attributes", label: "캐릭터 기본 수치", section: "combat", role: "season-character-input", pattern: /주 속성 수치|기본 힘|기본 민첩|기본 지혜/u },
   { id: "elixirs", label: "영약 조건", section: "skills", type: "extensions", role: "native-extension-conditions", pattern: /영약|재료|방황|불길 저주|오멘/u },
   { id: "modules", label: "모듈·소환체 조건", section: "skills", type: "extensions", role: "native-extension-conditions", pattern: /모듈|소환체|오라 범위|처형 대상/u },
-  { id: "combat", label: "스킬·대상 전투 조건", section: "combat", role: "season-dps-input", pattern: /전투 입력|시전 시간 배분|대상 적중률|적 아머|유효.*저항|지속 대미지 유지율|적 심화 수치|DPS 공식|전체 DPS(?:를)? 산출/u },
+  { id: "combat", label: "스킬·대상 전투 조건", section: "combat", role: "season-dps-input", pattern: /전투 입력|시전 시간 배분|대상 적중률|적 아머|적 (?:유효 )?(?:화염|냉기|번개|부식) 저항|지속 대미지 유지율|적 심화 수치|DPS 공식|전체 DPS(?:를)? 산출/u },
 ];
 export function inputDestinations(report,reason,dps=report?.fullDps) {
   const links=[];

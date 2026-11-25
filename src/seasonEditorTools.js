@@ -222,5 +222,5 @@ export function mobileDpsBar(s,blockedStatus='확인 필요',{partial,review}={}
     return `<button type="button" class="mobile-dps-bar" aria-label="${partial?'부분 DPS 제외 항목 보기':'미지원 항목 보기'}" data-ss14-action="result-tab" data-tab="calculation" data-focus-role="partial-dps-review">${body}</button>`;
   if (!s.pending.size&&!d.supported&&hasBlockers)
     return `<button type="button" class="mobile-dps-bar" aria-label="${blockedStatus==='입력 필요'?'전체 DPS 입력 항목 보기':'전체 DPS 보류 이유 보기'}" data-ss14-action="result-tab" data-tab="calculation" data-show-dps="true" data-focus-role="calculation-requirements">${body}</button>`;
-  return `<a href="#native-dps-summary" class="mobile-dps-bar" aria-label="DPS 상세 보기">${body}</a>`;
+  return `<button type="button" class="mobile-dps-bar" aria-label="DPS 상세 보기" data-ss14-action="show-mobile-results">${body}</button>`;
 }

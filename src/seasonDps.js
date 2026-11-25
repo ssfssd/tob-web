@@ -104,10 +104,10 @@ const voltageAverageKey = (build,index) => build?.skills?.active?.[index]?.suppo
   ? 'voltageTurmoilAverage' : 'voltageAverage';
 export const SEASON_DPS_ENEMY_FIELDS = {
   armor: { label: "적 아머", min: 0, max: 10000000 },
-  fire: { label: "적 유효 화염 저항 (%)", min: -200, max: 90 },
-  cold: { label: "적 유효 냉기 저항 (%)", min: -200, max: 90 },
-  lightning: { label: "적 유효 번개 저항 (%)", min: -200, max: 90 },
-  erosion: { label: "적 유효 부식 저항 (%)", min: -200, max: 90 },
+  fire: { label: "적 화염 저항 (%)", min: -200, max: 90 },
+  cold: { label: "적 냉기 저항 (%)", min: -200, max: 90 },
+  lightning: { label: "적 번개 저항 (%)", min: -200, max: 90 },
+  erosion: { label: "적 부식 저항 (%)", min: -200, max: 90 },
   affliction: { label: "적 심화 수치", min: 0, max: 100 },
   numbedStacks: FIXED_NUMBED_FIELD,
 };
