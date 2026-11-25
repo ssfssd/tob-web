@@ -424,7 +424,8 @@ function theaControls(document, report, formValues) {
     </details>`;
 }
 
-export function renderSeasonDpsField(key, definition, selected = "", prefix = "SS14 DPS", {minionMaximum,sharedCommand} = {}) {
+export function renderSeasonDpsField(key, definition, selected = "", prefix = "SS14 DPS", {minionMaximum,sharedCommand,fixedValue} = {}) {
+    if (fixedValue !== undefined) return `<dl class="native-stat-list"><dt>${escape(definition.label)}</dt><dd>${escape(fixedValue)}</dd></dl>`;
     if (selected === "" && definition.defaultValue !== undefined) selected = definition.defaultValue;
     if (key.endsWith(":minionCount") && Number.isInteger(minionMaximum)) {
       definition = {...definition,max:minionMaximum,label:`현재 소환체 수 (최대 ${minionMaximum}기)`};
@@ -483,10 +484,12 @@ function dpsControls(document, report, formValues, showDummy = false) {
     ${report.coupledSkills.rows.some(r => getSeasonSelectionRecord('skills', r.id)?.tags?.includes('Attack')) ? weaponSummary(build) : ''}
     ${report.coupledSkills.rows.map(r => {
       const entry = report.components.filter(c => c.category === "skills").flatMap(c => c.calculations ?? []).find(c => c.rowIndex === r.rowIndex);
-      const minionMaximum = report.fullDps.rows.find(row => row.rowIndex === r.rowIndex)?.minionMaximum;
+      const dpsRow = report.fullDps.rows.find(row => row.rowIndex === r.rowIndex);
+      const minionMaximum = dpsRow?.minionMaximum;
       const sharedCommand = report.fullDps.observedCommandRow === r.rowIndex;
       return `<fieldset><legend>${escape(name(r.id))} · 스킬 칸 ${r.rowIndex + 1}</legend>${seasonDpsSkillFieldKeys(entry, r.id, build)
-        .flatMap(key => { const def = seasonDpsSkillFieldDefinition(r.id,key,r.terraChargeMaximum); return def ? [field(`${r.rowIndex}:${key}`, def, input?.skills?.[r.rowIndex]?.[key], {minionMaximum,sharedCommand})] : []; }).join("")}
+        .flatMap(key => { const def = seasonDpsSkillFieldDefinition(r.id,key,r.terraChargeMaximum); return def ? [field(`${r.rowIndex}:${key}`, def, input?.skills?.[r.rowIndex]?.[key],
+          {minionMaximum,sharedCommand,fixedValue:key==='reapingOverlap'&&dpsRow?.reapingOverlapFixed?'100% 자동':undefined})] : []; }).join("")}
         ${entry?.mechanics?.some(m => m.limitation) ? `<details><summary>효과 상세·입력 기준</summary>${entry.mechanics.filter(m => m.limitation).map(m => `<p>${escape(m.limitation)}${m.kind === "ice-ring-on-kill" ? " 단일 보스에게 재발동 적중이 없으면 0을 입력하세요." : ""} ${sourceLink(m)}</p>`).join("")}</details>` : ""}</fieldset>`;
     }).join("")}
     <details data-role="combat-input-help"><summary>전투 입력 기준</summary><p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후, 관통 적용 전의 유효 저항입니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>

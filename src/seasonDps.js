@@ -1212,7 +1212,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     const dotDefense = parts => ({affliction,afflictionMultiplier,resistances:[...new Set(parts.map(p=>p.type))]
       .flatMap(type=>{const resistance=resistanceBreakdown(type);return resistance?[{type,...resistance}]:[];})});
     let dotBreakdown;
-    let reapingDps = 0, appliedReapingOverlap;
+    let reapingDps = 0, appliedReapingOverlap, reapingOverlapFixed=false;
     if ((hasDot || entry?.damageCapabilities?.dot) && !validValue(SEASON_DPS_SKILL_FIELDS.dotUptime, dotUptime))
       reasons.push(`${SEASON_DPS_SKILL_FIELDS.dotUptime.label} 미입력`);
     if ((!dotDisabled && (hasDot || entry?.damageCapabilities?.dot)) || frostActive) {
@@ -1251,19 +1251,18 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       }
       const reapedUptime = frostActive ? frostUptime : b?.dotUptime;
       if ((hasDot || frostActive) && reapRate > 0 && finite(reapDuration) && reapedUptime > 0) {
-        const overlap = observedReaping ? 100 : b.reapingOverlap ?? (reapedUptime === 100 ? 100 : undefined);
+        reapingOverlapFixed=observedReaping||reapedUptime===100;
+        const overlap = reapingOverlapFixed ? 100 : b.reapingOverlap;
         const field = SEASON_DPS_SKILL_FIELDS.reapingOverlap;
-        const issue=!validValue(field,overlap)?'missing':reapedUptime===100&&overlap!==100?'requires-full-uptime':null;
+        const issue=!validValue(field,overlap)?'missing':null;
         if(validBinding){
           // The triggered and manual ground share the reapable damage state.
           const id=frostActive?FROST_TERRA_ID:direct.id;
           const slots=reapAllocations.get(id)??[];
-          slots.push({rowIndex:direct.rowIndex,itemId:direct.id,overlap,issue});
+          slots.push({rowIndex:direct.rowIndex,itemId:direct.id,overlap,issue,...(reapingOverlapFixed&&{fixed:true})});
           reapAllocations.set(id,slots);
         }
         if (issue==='missing') reasons.push(`${field.label} 미입력`);
-        else if (issue==='requires-full-uptime')
-          reasons.push(`${field.label} 입력값은 유지율 100%일 때 100%여야 합니다.`);
         else {
           appliedReapingOverlap = overlap;
           const reapWeight = reapDuration * reapRate * overlap / 100;
@@ -1390,6 +1389,7 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       ...(!reasons.length&&dotBreakdown&&!dotDisabled&&{dotDefense:dotDefense(dotPools)}),
       ...(!reasons.length&&frostActive&&{frostDefense:dotDefense(frost.dotPools??[])}),
       ...(!reasons.length && appliedReapingOverlap !== undefined && {reapingOverlap:appliedReapingOverlap}),
+      ...(reapingOverlapFixed&&{reapingOverlapFixed:true}),
       ...(dotWindows && {dotWindows}),
       ...(fissureResult && {fissure:fissureResult}),
       ...(!reasons.length && pools.length && !weaponHands && { hitBreakdown:{

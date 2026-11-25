@@ -27,7 +27,9 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
   const observe = '<button type="button" data-ss14-action="result-tab" data-tab="conditions" data-field="character-input" data-field-key="observedManaRecovery">관측 MP 회복 입력</button>';
   const staleObservation = survival?.manaObservationStale;
   const staleNote = staleObservation ? '<p data-role="stale-mana-observation">MP 회복 조건이 바뀌어 새 관측값이 필요합니다.</p>' : '';
-  if(!budget)return staleNote ? staleNote+observe : '';
+  const pendingNote = survival?.manaObservationPending
+    ? '<p data-role="pending-mana-observation">전투 조건을 채우면 저장한 MP 회복값의 적용 여부를 확인합니다.</p>' : '';
+  if(!budget)return staleNote ? staleNote+observe : pendingNote;
   const net=value=>!Number.isFinite(value)?'확인 필요':`${value<0?'부족':value>0?'여유':'균형'} ${number(Math.abs(value))}`;
   const channels=budget.channels??[];
   const hasChargeTimes=channels.some(row=>row.observed&&row.valid&&row.times);
@@ -63,7 +65,7 @@ function manaBalance(budget, measured, assumed, otherBudget, survival, costs, ex
     ${inputObserved?table([{...inputObserved,label:'입력 조건 · 관측 자연 회복'}],true):''}
     ${table(basisRows)}
     ${assumptions.length?`<details data-role="mana-formula-alternatives"><summary>공식별 회복값</summary>${table(assumptions)}</details>`:''}
-    ${staleNote}${observe}
+    ${staleNote}${pendingNote}${observe}
     <p class="native-stat-note">${budget.manaStatus==='deficit'?'표시 DPS를 유지하려면 부족한 MP를 보충해야 합니다. ':''}${budget.manaStatus==='mixed'?'회복 공식에 따라 소모 충당 여부가 달라집니다. ':''}${hasChargeTimes?'차감 시각을 입력한 채널링은 측정 구간에 포함된 차감만 집계합니다. ':''}${hasAverageCharges?(hasChargeTimes?'나머지 ':'')+'채널링 소모는 입력한 평균 차감 횟수로 계산합니다. ':''}자동 발동과 즉시 회복은 제외합니다.</p></section>`;
 }
 function manaReservationRows(rows) {

@@ -72,7 +72,7 @@ export function inspectSeasonBuildInputs(build) {
     if (nonempty(slot?.modularization)) block(`skills.rows.${index}.modularization`, "모듈화 설정", "확인한 소환체의 플레이어 부여 수치는 별도 내역에 반영하며 소환체 전용·발동 효과의 전체 계산은 미지원입니다.");
     if (slot?.sealedLife || slot?.sealedMana) block(`skills.rows.${index}.seals`, "스킬 자원 봉인", "SS14 자원 봉인 계산 미검증");
   });
-  if ((build?.skills?.elixirs ?? []).some(Boolean) || build?.skills?.elixir) block("skills.elixirs", "영약", "상세 원문과 직접 확인한 현재 활성·효과 배율을 반영하며 재료·자동 증폭·회복·전체 유지율은 미지원입니다.");
+  if (build?.skills?.elixir) block("skills.elixir", "영약", "이전 형식의 영약은 SS14 영약 슬롯에서 다시 선택하세요.");
   (build?.gear?.slots ?? []).forEach((slot, index) => add("gear", slot?.itemId, `gear.slots.${index}`));
   if ((build?.talents?.boards ?? []).some((board) => board.treeSlug || board.boardId || Object.values(board.nodePoints ?? {}).some(Boolean)
     || Object.values(board.reflectedNodePoints ?? {}).some(Boolean) || nonempty(board.selectedNodeIds) || nonempty(board.coreTalentIds)
@@ -189,13 +189,16 @@ export function seasonGearSlotRollEntry(build, slotIndex) {
 export function calculateSeasonBuild(build, options) {
   const report = projectSeasonBuild(build, options);
   const inputs = build.ss14Inputs;
-  if (Number.isFinite(inputs?.character?.observedManaRecovery) && inputs.observedManaRecoveryBasis
-    && JSON.stringify(inputs.observedManaRecoveryBasis)!==JSON.stringify(observedManaRecoveryBasis(build,report))) {
-    // A stale measurement is still part of the document, but must not drive
-    // the resource budget of the current loadout.
+  const recordedBasis=inputs?.observedManaRecoveryBasis;
+  if (Number.isFinite(inputs?.character?.observedManaRecovery) && recordedBasis) {
+    const basis=observedManaRecoveryBasis(build,report);
+    if (recordedBasis.every((value,index)=>value===basis[index])) return report;
+    // Unavailable combat results cannot establish that the recorded conditions changed.
     const survival = report.character.survival;
     const formulasOnly = rows => rows.filter(row=>row.id!=='observed');
-    survival.manaObservationStale = true;
+    const changed=recordedBasis.some((value,index)=>basis[index]!==null&&value!==basis[index]);
+    if(changed) survival.manaObservationStale=true;
+    else survival.manaObservationPending=true;
     survival.manaScenarios = formulasOnly(survival.manaScenarios);
     survival.values.manaRegeneration = null;
     report.character.values.manaRegeneration = null;

@@ -173,9 +173,10 @@ function addedDamageSourceStat(stat) {
 export function renderEffectSources(s, path = null) {
   const rows = seasonEffectSources(s.report).filter(r => !path || r.path === path);
   const status = { direct: "직접 대미지 반영", selected: "선택 수치", inactive: "조건 미충족", "not-applicable":"해당 없음", blocked: "확인 필요", mechanic: "특수 효과 규칙" };
+  const phasedRoutes=s.report.fullDps?.rows.some(row=>row.supported&&row.elixirDamageRoutes?.states.length);
   return `<section class="native-effect-sources" aria-label="선택 효과별 출처">
     ${!path ? `<label>효과·출처 검색<input type="search" data-effect-filter aria-label="효과·출처 검색" /></label><label>표시 상태<select data-effect-status><option value="">전체</option>${Object.entries(status).map(([k,v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>` : ""}
-    ${s.report.theaAverage ? "<p>아래 수치는 전투 시작 상태입니다. 전체 DPS는 선택한 시간 동안의 평균입니다.</p>" : ""}
+    ${s.report.theaAverage ? `<p>${phasedRoutes?'전환·추가 획득은 계산한 영약 구간을 반영합니다. 그 외 수치는 전투 시작 상태입니다.':'아래 수치는 전투 시작 상태입니다.'} 전체 DPS는 선택한 시간 동안의 평균입니다.</p>` : ""}
     <div class="native-effect-list">${rows.map((r, i) => {
       const stat = r.effect?.stat ?? "", label = sourceStats[stat] ?? sourceStats[stat.replace(/^skill-/u, "").replaceAll("-", "_")]
         ?? addedDamageSourceStat(stat)
@@ -248,9 +249,9 @@ export function renderSkillCandidateResult(s) {
         ||renderWeaponDamageRoutes(preview.skill?.weaponDamageRoutes,'candidate')
         ||renderSkillConversion(preview.skill?.conversion,'candidate'))}):'');
 }
-function renderGearSkillChanges(preview) {
-  return renderSkillLevelChanges(preview?.skillLevels,esc,{role:'gear-skill-level-changes'})
-    +renderDamageRouteChanges(preview?.damageRoutes,{role:'gear-damage-routes'});
+function renderGearSkillChanges(preview, labels) {
+  return renderSkillLevelChanges(preview?.skillLevels,esc,{...labels,role:'gear-skill-level-changes'})
+    +renderDamageRouteChanges(preview?.damageRoutes,{...labels,role:'gear-damage-routes'});
 }
 function gearEffectLines(card,id,index) {
   if (!card?.koreanTextVerified) return [];
@@ -305,9 +306,9 @@ function itemPicker(s, category, index, supportIndex, current) {
     return `<div class="gear-candidate-page" data-role="candidate-detail" tabindex="-1">
       <nav aria-label="장비 후보 탐색">${button('‹ 장비 목록','gear-candidate-list')}${current===id
         ?button('해제 전후 보기','preview-gear-removal',`data-role="gear-removal-toggle" aria-expanded="${!!removal}"`)
-          +button('장착 해제','clear-slot',`data-kind="gear-selection" data-index="${index}"`)
+          +(removal?'':removeGearButton(index))
         :current?button('장착 장비','view-worn-gear'):''}</nav>
-      ${removal?`<div data-role="gear-removal-preview" tabindex="-1">${renderSlotPreview(removal,esc,{action:'해제',extraDetails:renderGearSkillChanges(removal)})}</div>`:''}
+      ${removal?`<div data-role="gear-removal-preview" tabindex="-1">${renderSlotPreview(removal,esc,{action:'해제',extraDetails:renderGearSkillChanges(removal,{before:'해제 전',after:'해제 후'})})}</div>`:''}
       <div class="gear-comparison-body" data-candidate="${esc(id)}">${workshopView(s,s.picker.draft,true)}</div></div>`;
   }
   const support = Number.isInteger(supportIndex), kind = support ? "support-selection" : category === "gear" ? "gear-selection" : "skill-selection";
@@ -405,7 +406,8 @@ function renderSkillLevelStats(entry, growthMultiplier) {
   const showHit = Number.isFinite(values.averageHit) && (values.averageHit>0 || !entry.damageCapabilities?.dot);
   const stats = [
     ['20레벨 이후 대미지 배율',growthMultiplier,'', '×'],
-    showHit?['스킬 자체 평균 적중',values.averageHit]:['스킬 자체 DPS',values.baseDps],
+    ['스킬 자체 평균 적중',showHit?values.averageHit:null],
+    Number.isFinite(values.dotDps)?['스킬 자체 지속 DPS',values.dotDps]:['스킬 자체 DPS',showHit?null:values.baseDps],
     ['기본 MP 소모',values.manaCost], ['기본 시전 시간',values.castTime,'초'], ['기본 쿨타임',values.cooldown,'초'],
   ].filter(([, value])=>Number.isFinite(value));
   const number = value => value.toLocaleString('ko-KR',{maximumFractionDigits:3});
@@ -753,6 +755,10 @@ function legendaryRollInput(control,slot,label){
   const slider=Number.isFinite(value)&&min<max?`<input type="range" ${attrs} data-role="gear-slider-${esc(key)}" aria-label="${esc(label)} 조절" value="${value}" step="${step}">`:'';
   return `<div class="craft-roll-pair legendary-roll">${slider}<input type="number" ${attrs} aria-label="${esc(label)}" step="any" placeholder="${min}–${max}" value="${esc(value)}"></div>`;
 }
+function removeGearButton(index){
+  return button('장착 해제','clear-slot',`data-kind="gear-selection" data-index="${index}"`);
+}
+
 function workshopView(s,draft=s.overlay,embedded=false) {
   const {kind,index,document:doc}=draft, build=doc.targetBuild;
   const report=calculateSeasonBuild(build), gear=kind==='gear';
@@ -827,9 +833,10 @@ function workshopView(s,draft=s.overlay,embedded=false) {
   }
   const edit = embedded?s.picker.edit:item?.itemId ? {kind:'shelf-apply',slotIndex:index,value:finishedWorkshopItem(draft)} : null;
   const locked = index===1 && isTwoHandedWeapon(normalizeBuild(s.document.targetBuild).gear.slots[0]?.itemId);
-  const preview = edit && !locked && (embedded?s.picker.preview:previewSlotEdit(s.document,s.report,edit));
+  const removal = embedded && s.picker.removalPreview;
+  const preview = edit && !locked && !removal && (embedded?s.picker.preview:previewSlotEdit(s.document,s.report,edit));
   if (locked) form+='<p>서브 무기를 장착하려면 양손 무기를 먼저 교체하거나 해제하세요.</p>';
-  const equip = button('장착하고 보관','workshop-equip',edit&&!locked?'':'disabled');
+  const equip = removal?removeGearButton(index):button('장착하고 보관','workshop-equip',edit&&!locked?'':'disabled');
   s.drawer.bar=drawerDps(s,preview?.comparison,equip,'',preview?.assumedComparison);
   const stats=report.componentProjection.rows.filter(r=>r.path.startsWith(`gear.slots.${index}.crafts.`));
   const card=stats.length?`<section class="craft-item-card" aria-label="제작 옵션 미리보기"><strong>${esc(title(item.itemId))}</strong>${stats.map(r=>`<p>${esc(r.detail||'한국어 원문 미제공')}</p>`).join('')}</section>`:'';

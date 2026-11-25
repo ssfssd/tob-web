@@ -75,8 +75,6 @@ export function buildUptimeScenario(build, report) {
       skillUptimes.push({name, rowIndex, field, saved, assumed, exclusive, duplicate});
       if (assumed !== undefined) binding[field] = assumed;
     }
-    if (keys.includes('reapingOverlap') && keys.includes('dotUptime') && binding.dotUptime === 100)
-      binding.reapingOverlap = 100;
     for (const [index,action] of (seasonModuleProfile(id)?.actions ?? []).entries()) {
       if (!isPersistentModuleAction(action)) continue;
       const field = `moduleRate${index}`;

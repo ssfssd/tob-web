@@ -1,4 +1,5 @@
 import {inverseGeometry} from './seasonInverseImage.js';
+import {SS14_EXTENSIONS} from './data/ss14Extensions.generated.js';
 
 // A configuration is a user's input, not a season-value authority. Copy whole
 // owned sections, including future nested fields; never normalize them away.
@@ -75,10 +76,14 @@ export function compareSeasonConfigurations(before, after) {
 export function inspectNestedSeasonReferences(build, add) {
   const visit = (value, path, fields) => {
     if (!value || typeof value !== "object") return;
+    const elixirSlot=/^skills\.elixirs\.\d+$/u.test(path);
     for (const [key, child] of Object.entries(value)) {
       if (["inventory", "prismInventory", "inverseImageInventory", "slateInventory"].includes(key)) continue;
       const childPath = `${path}.${key}`;
-      if (fields[key]) {
+      if (elixirSlot && key === 'skillId' && typeof child === 'string') {
+        const elixir=SS14_EXTENSIONS.elixirs.find(entry=>entry.id===child);
+        add(elixir?'skills':'elixirs',elixir?.itemId??child,childPath);
+      } else if (fields[key] && !(elixirSlot && key==='bottleId' && (child==='base'||child==='special'))) {
         const category = fields[key];
         if (typeof child === "string") add(category, child, childPath);
         else if (Array.isArray(child)) child.forEach((id, index) => add(category, id, `${childPath}.${index}`));

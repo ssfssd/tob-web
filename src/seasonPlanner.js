@@ -138,6 +138,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     if(!picker?.candidate||!picker.draft||picker.previewDocument===picker.draft.document)return;
     picker.edit={kind:'shelf-apply',slotIndex:picker.draft.index,value:finishedWorkshopItem(picker.draft)};
     picker.preview=previewSlotEdit(state.document,state.report,picker.edit);
+    picker.removalPreview=null;
     picker.previewDocument=picker.draft.document;
   }
   function selectGearCandidate(index,id){
@@ -186,8 +187,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     state.analysis = null;
     state.supportImpact = null;
     state.report = state.document ? calculateEditorSeasonBuild(state.document.targetBuild, { sourceBuild: state.document.sourceBuild }) : null;
-    if(state.picker?.edit&&state.document)
+    if(state.picker?.edit&&state.document){
       state.picker.preview=previewSlotEdit(state.document,state.report,state.picker.edit);
+      state.picker.removalPreview=null;
+    }
     if (editComparison) state.editComparison = editComparison.update(state.document, state.report);
     persistDraft();
   };

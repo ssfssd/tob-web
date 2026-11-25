@@ -14,18 +14,17 @@ export const moduleElementalEnabled = build => (build.skills?.active ?? []).some
 export const hasNumbedSupport = report => Boolean(report?.fullDps?.rows?.some(row => row.numbedOnHit));
 export const combatNumbedEnabled = (build, report) => build.ss14Inputs?.theaEvents?.numbedEnabled === 1
   || moduleElementalEnabled(build) || hasNumbedSupport(report);
-export function theaCombatInputValues(build, report) {
+export function theaCombatInputValues(build, report, useNumbedDefaults=hasNumbedSupport(report)) {
   const input = build.ss14Inputs.theaEvents ?? {};
   const defaults = input.igniteEnabled !== 1 ? { afflictionRate: 0 } : {};
-  if (!hasNumbedSupport(report)) return { ...defaults, ...input };
+  if (!useNumbedDefaults) return { ...defaults, ...input };
   const { duration, maxStacks, thresholdPercent } = SS14_THEA_COMBAT.numbed;
   return { ...defaults, numbedDuration: duration, numbedLimit: maxStacks, numbedThreshold: thresholdPercent, numbedEffect: 0, ...input };
 }
 export const hasTheaNativeDot = report => report?.fullDps?.rows.some(row => row.combat?.dotWithoutAffliction > 0 || row.combat?.frostWithoutAffliction > 0) ?? false;
-export function usesTheaDotTrigger(build, mechanics, report) {
+export function usesTheaDotTrigger(build, mechanics, report, numbed=combatNumbedEnabled(build, report)) {
   const input = build.ss14Inputs.theaEvents;
   const ignite = input.igniteEnabled === 1;
-  const numbed = combatNumbedEnabled(build, report);
   return (ignite || hasTheaNativeDot(report))
     && mechanics.some(m => m.requiresIgnite && ignite || m.requiresNumbed && numbed);
 }

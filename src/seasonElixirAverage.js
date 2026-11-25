@@ -1,5 +1,6 @@
 import { manualResourceBalance, averageObservedChannelCost } from './seasonDps.js';
 import { ELIXIR_OVERLAP_KEY } from './seasonExtensions.js';
+import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
 
 // Legacy first-skill recommendation metric. Full-build uptime is evaluated
 // separately, with an observed overlap whenever both elixirs vary.
@@ -127,11 +128,12 @@ export function applyObservedElixirUptime(build,report,calculateState) {
     const channelCostTotalOnly=Boolean(channel&&channel.channelCost.rate!==0);
     const routes = supported ? states.map(({direct,weight,active},index)=>{
       const entry=samples[index].value;
-      const trace=entry.conversionTrace??direct.find(skill=>skill.rowIndex===row.rowIndex&&skill.id===row.id)?.trace;
+      const skill=direct.find(skill=>skill.rowIndex===row.rowIndex&&skill.id===row.id);
+      const trace=entry.conversionTrace??skill?.trace;
       const groups=entry.weaponHands?.length
         ? entry.weaponHands.map(hand=>({slotIndex:hand.slotIndex,trace:hand.conversionTrace}))
         : [{trace}];
-      return {active,uptime:100*weight,groups:groups.map(group=>({...group,trace:(group.trace??[])
+      return {active,uptime:100*weight,excluded:excludedSeasonHitRoutes(skill),groups:groups.map(group=>({...group,trace:(group.trace??[])
         .filter(effect=>effect.stage==='conversion'||effect.stage==='gained-as-extra')}))};
     }) : [];
     return {...row,supported,blockers:[...new Set(samples.flatMap(({value})=>value?.blockers??[]))],

@@ -24,17 +24,25 @@ export function excludedSeasonHitRoutes(skill) {
   return (skill?.offenseBasis?.excluded??[]).filter(effect=>absentHitRouteReasons.has(effect.reason)&&!effect.affectsCompletion);
 }
 
+const damageRoute = effect => effect.stage==='conversion'||effect.stage==='gained-as-extra';
+const positiveDamageRoute = effect => effect.stage==='conversion'?effect.effectivePercent>0:
+  effect.stage==='gained-as-extra'&&effect.resolvedValue>0;
+
 // These rows enumerate the selected calculation inputs, not all options on an
 // item card. Direct-damage status is joined to the evaluator's actual trace by
 // owner path AND source line. Equal-name rings and repeated supports stay apart.
 export function seasonEffectSources(report) {
   const rows = [];
   const skills=report.coupledSkills?.rows??[];
+  const dpsRows=report.fullDps?.rows??[];
+  const phased=new Map(dpsRows.filter(row=>row.supported&&row.elixirDamageRoutes?.states.length)
+    .map(row=>[row.rowIndex,row.elixirDamageRoutes.states]));
   const trace = skills.flatMap(skill => {
     const hands=skill.offenseBasis?.weaponHands??[];
     const handEffects=hands.flatMap(hand=>[...(hand.conversionTrace??[]),...(hand.addedDamageTrace??[])]);
     const uniqueHandEffects=new Map(handEffects.map(effect=>[effect.inputIndex,effect]));
     const applied=[...(skill.trace??[]),...uniqueHandEffects.values()]
+      .filter(effect=>!phased.has(skill.rowIndex)||!damageRoute(effect))
       .map(t=>({...t,rowIndex:skill.rowIndex}));
     const accepted=applied.some(t=>t.stage==='added-damage'&&t.stat==='added-damage-effectiveness'&&t.contribution?.max>0);
     if (accepted) for (const {source,effects,min,max} of skill.addedDamageSources??[]) {
@@ -43,15 +51,23 @@ export function seasonEffectSources(report) {
     }
     return applied;
   });
-  for (const row of report.fullDps?.rows??[]) {
-    if(!row.supported||!row.minionSkills)continue;
-    const routes=row.elixirDamageRoutes?.states.flatMap(state=>state.groups.flatMap(group=>group.trace))??row.conversionTrace??[];
-    trace.push(...routes.map(effect=>({...effect,rowIndex:row.rowIndex})));
+  const phaseEffects=[];
+  const phaseExclusions=[];
+  for (const [rowIndex,states] of phased) {
+    const applied=states.flatMap(state=>state.groups.flatMap(group=>group.trace)).filter(positiveDamageRoute);
+    trace.push(...applied.map(effect=>({...effect,rowIndex})));
+    const excluded=states.flatMap(state=>state.excluded??[]);
+    phaseEffects.push(...applied,...excluded);
+    if(states.every(state=>!state.variable))phaseExclusions.push(...excluded);
   }
-  const absent = skills.flatMap(skill=>[
-    ...excludedSeasonHitRoutes(skill),
+  for (const row of dpsRows) {
+    if(!row.supported||!row.minionSkills||phased.has(row.rowIndex))continue;
+    trace.push(...(row.conversionTrace??[]).map(effect=>({...effect,rowIndex:row.rowIndex})));
+  }
+  const absent = [...phaseExclusions,...skills.flatMap(skill=>[
+    ...(phased.has(skill.rowIndex)?[]:excludedSeasonHitRoutes(skill)),
     ...(skill.offenseBasis?.excluded??[]).filter(effect=>effect.reason==='no-hit-damage-not-applied'&&!effect.affectsCompletion),
-  ]);
+  ])];
   const add = (source, effects = [], blockers = [], inactive = [], mechanics = []) => {
     const origin = effectSourceLabel(source.path, source.group);
     for (const [i, effect] of effects.entries()) {
@@ -71,7 +87,28 @@ export function seasonEffectSources(report) {
       ...(blocker.sourceConflict&&{sourceConflict:blocker.sourceConflict}),
       reason: typeof blocker === "string" ? blocker : blocker.reason ?? "효과 또는 입력 확인 필요" });
   };
-  for (const row of report.componentProjection?.rows ?? []) add(row, row.effects, row.blockers, row.inactive, row.mechanics);
+  for (const row of report.componentProjection?.rows ?? []) {
+    const effects=row.effects??[];
+    if(!row.path.startsWith('skills.elixirs.')) {
+      add(row,effects,row.blockers,row.inactive,row.mechanics);
+      continue;
+    }
+    const optionKey=({stat,sourceText})=>JSON.stringify([stat,sourceText]);
+    const existing=new Set(effects.map(optionKey));
+    const fromPhases=new Map();
+    for(const {effectSource,value,resolvedValue} of phaseEffects) {
+      if(effectSource?.path!==row.path)continue;
+      const {stat,sourceText}=effectSource, number=resolvedValue??value;
+      if(!Number.isFinite(number)||!stat||!sourceText)continue;
+      const key=optionKey(effectSource);
+      const earlier=fromPhases.get(key);
+      if(earlier===null||earlier&&earlier.value!==number)fromPhases.set(key,null);
+      else fromPhases.set(key,{stat,sourceText,value:number,unit:'percent'});
+    }
+    const extra=[...fromPhases].filter(([key,effect])=>effect&&!existing.has(key)).map(([,effect])=>effect);
+    const inactive=fromPhases.size?row.inactive?.filter(effect=>effect.reason!=='입력한 영약 비활성 상태'):row.inactive;
+    add(row,[...effects,...extra],row.blockers,inactive,row.mechanics);
+  }
   for (const component of report.components ?? []) {
     if (!["gear", "skills", "supports"].includes(component.category)) continue;
     const card = SS14_CARDS.records[component.id] ?? seasonSupportKoreanCard(component.id);

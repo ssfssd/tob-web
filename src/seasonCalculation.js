@@ -77,6 +77,8 @@ export function calculateSeasonSkill(itemId, level, season, { preview = SS14_CAR
   if (evaluations.every(e=>e.complete && Number.isFinite(e.totalDps))) {
     result.values.baseDps = average(e=>e.totalDps);
     if (evaluations.every(e=>Number.isFinite(e.hit?.average))) result.values.averageHit = average(e=>e.hit.average);
+    if (season==='SS14' && result.damageCapabilities.dot && evaluations.every(e=>Number.isFinite(e.dot?.dps)))
+      result.values.dotDps = average(e=>e.dot.dps);
   } else {
     result.evidenceBlockers = evaluations.flatMap(e=>e.excluded.filter(entry=>entry.affectsCompletion));
     result.blockers.push(result.evidenceBlockers.some(e=>e.reason==='added-damage-effectiveness-unavailable')

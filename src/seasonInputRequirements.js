@@ -162,8 +162,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     return [{section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
   if(reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계')||reason.includes(SEASON_DPS_SKILL_FIELDS.reapingOverlap.label)){
     const overflow=reason.startsWith('같은 지속 스킬의 수확 겹침 비율 합계');
-    const issue=reason.includes('미입력')?'missing':'requires-full-uptime';
-    const groups=report?.fullDps?.reapingAllocationGroups?.filter(group=>overflow?group.overflow:group.slots.some(slot=>slot.issue===issue))??[];
+    const groups=report?.fullDps?.reapingAllocationGroups?.filter(group=>overflow?group.overflow:group.slots.some(slot=>slot.issue==='missing'))??[];
     if(groups.length){
       const destinations=groups.map(group=>({tab:'conditions',role:`reaping-allocation-${group.id}`,label:'슬롯별 수확 비율 배정'}));
       const separate=dps?.rows?.filter(row=>row.blockers.includes(reason)&&!groups.some(group=>group.slots.some(slot=>slot.rowIndex===row.rowIndex)))??[];

@@ -9,6 +9,7 @@ import { netherDeterioration } from './seasonNetherDps.js';
 import { manualResourceBalance } from './seasonDps.js';
 import { isSeasonTargetDamageTaken, validSeasonGearEffects } from './seasonGearEffects.js';
 import { isNumbedBaseOverride } from './seasonNetherModifiers.js';
+import { excludedSeasonHitRoutes } from './seasonEffectSources.js';
 
 const eps = 1e-8;
 const missingChannelManaTimes = row => row.channelCost && !row.channelCost.times && row.channelCost.rate !== 0 && row.manaPerUse > 0;
@@ -87,25 +88,27 @@ function measuredElixirRoutes(phases, elixirs, samples, initial, rowIndex) {
     ||edge.stage==='gained-as-extra'&&edge.resolvedValue>0)
     .map(({stage,sourceType,targetType,resolvedValue,effectivePercent,actionName,effectSource,movedBaseDamage,gainedBaseDamage})=>
       ({stage,sourceType,targetType,resolvedValue,effectivePercent,actionName,effectSource,movedBaseDamage,gainedBaseDamage}));
-  const groupsFor=report=>{
+  const routesFor=report=>{
     const row=report.fullDps.rows.find(row=>row.rowIndex===rowIndex);
+    const skill=report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
     const hands=row?.weaponHands;
-    return hands?.length?hands.map(({slotIndex,conversionTrace})=>({slotIndex,trace:routes(conversionTrace)}))
-      :[{trace:routes(row?.conversionTrace??report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex)?.trace)}];
+    const groups=hands?.length?hands.map(({slotIndex,conversionTrace})=>({slotIndex,trace:routes(conversionTrace)}))
+      :[{trace:routes(row?.conversionTrace??skill?.trace)}];
+    return {groups,excluded:excludedSeasonHitRoutes(skill)};
   };
-  const original=groupsFor(initial);
-  const originalKey=JSON.stringify(original);
+  const originalKey=JSON.stringify(routesFor(initial));
   let changed=false;
   const states=phases.states.map(({active,uptime})=>{
     const mask=elixirPhaseMask(elixirs,active);
     const variants=new Map();
     for (const report of samples.get(mask)??[]) {
-      const groups=groupsFor(report);
-      const key=JSON.stringify(groups);
-      if(key!==originalKey&&(original.some(group=>group.trace.length)||groups.some(group=>group.trace.length)))changed=true;
-      variants.set(key,groups);
+      const routes=routesFor(report);
+      const key=JSON.stringify(routes);
+      if(key!==originalKey)changed=true;
+      variants.set(key,routes);
     }
-    return {active,uptime,groups:variants.size===1?variants.values().next().value:[],variable:variants.size>1};
+    const detail=variants.size===1?variants.values().next().value:{groups:[],excluded:[]};
+    return {active,uptime,...detail,variable:variants.size>1};
   });
   if(!changed)return undefined;
   return {names:phases.rows.map(row=>row.name),states,measured:true};
@@ -150,9 +153,10 @@ export function createAilmentTimeline() {
 // The integration uses one clock for blessing consumption, actual casts and
 // ailment lifetimes. Damage rolls are sampled only where a nonlinear threshold
 // or highest-Ignite selection needs them; ordinary hit expectation stays exact.
-export function createTheaCombatTimeline(build, report, getReport, { seconds, warmup, seed = 1, newCastFirst = false, observeElixirPhase }) {
+export function createTheaCombatTimeline(build, report, getReport, { seconds, warmup, seed = 1, newCastFirst = false, observeElixirPhase, observeNumbedSupport }) {
   const random = timelineRandom(seed);
-  const input = theaCombatInputValues(build, report);
+  const linkedNumbedSupport=report.coupledSkills.rows.some(row=>row.numbedSupport);
+  const input = theaCombatInputValues(build, report, linkedNumbedSupport);
   const netherEffects=report.componentProjection.effects;
   const playerNumbedBase=netherEffects.find(isNumbedBaseOverride)?.value ?? rules.numbed.morePerStack;
   const bonus=stat=>netherSum(netherEffects,stat);
@@ -181,7 +185,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
         ? e.start + Math.floor((time - e.start + eps) / e.interval) * e.interval + e.duration : Infinity)));
   const enemy = build.ss14Inputs.dps.enemy;
   const config = build.ss14Inputs.dps.skills;
-  const numbedEnabled = combatNumbedEnabled(build, report);
+  let numbedEnabled = combatNumbedEnabled(build, report);
   const mechanics = report.componentProjection.rows.flatMap(r => r.mechanics ?? []);
   const has = kind => mechanics.some(m => m.kind === kind);
   const linked = mechanics.filter(m => m.kind === "thea-combat-event").map(e => ({ ...e }));
@@ -193,7 +197,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   let eventCasts = 0;
   let leastCastMana = Infinity;
   const nativeDot = hasTheaNativeDot(report);
-  const dotRate = usesTheaDotTrigger(build, linked, report) ? input.dotTriggerRate ?? 0 : 0;
+  const dotRate = usesTheaDotTrigger(build, linked, report,numbedEnabled||linkedNumbedSupport) ? input.dotTriggerRate ?? 0 : 0;
   const end = warmup + seconds;
   const dotWindows = new Map(report.fullDps.rows.filter(row=>row.dotWindows).map(row=>[row.rowIndex,row.dotWindows]));
   const dotBoundaries = [...new Set([...dotWindows.values()].flat(2))].sort((a,b)=>a-b);
@@ -469,12 +473,26 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       elixirInfiltrationReady = time + 1;
     }
     const lightning = row.pools.filter(p => p.type === "lightning");
-    if (numbedEnabled && inMeasurement(time) && hitMultiplier > 0 && lightning.some(p=>p.max>0)) {
-      playerLightningHits++;
-      const bonus = row.combat.numbedHitBonus * hitMultiplier;
-      if (bonus > 0) {
-        playerNumbedHits++;
-        recordDamage(event.row,'numbedHitDps',bonus,time);
+    if (hitMultiplier>0 && lightning.some(pool=>pool.max>0)) {
+      // A timed effect can create the first eligible lightning hit after combat starts.
+      if (!numbedEnabled && row.numbedOnHit) {
+        observeNumbedSupport?.(event.row);
+        const rows=report.fullDps.rows.map(initial=>initial.rowIndex===event.row?row:initial);
+        const phase={...report,fullDps:{...report.fullDps,rows}};
+        const required=theaCombatInputBlockers(build,mechanics,phase);
+        if(required.length){
+          for(const reason of required)blockers.add(reason);
+          return;
+        }
+        numbedEnabled=true;
+      }
+      if (inMeasurement(time)) {
+        playerLightningHits++;
+        const bonus = row.combat.numbedHitBonus * hitMultiplier;
+        if (bonus > 0) {
+          playerNumbedHits++;
+          recordDamage(event.row,'numbedHitDps',bonus,time);
+        }
       }
     }
     let actualLightning = 0, lightningCritical=false;
@@ -917,7 +935,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
       const channelCharges = (r.channelCost?.times?.length ?? 0) / (options.seconds + options.warmup);
       return n + modules + nether + (r.manualSummonRate ?? 0) + (b.castRate ?? 0) + casts * hits + (b.repeatHits ?? 0) + fissures + harvests + channelCharges;
     }, 0);
-    const dotRate = usesTheaDotTrigger(build, mechanics, report) ? build.ss14Inputs.theaEvents.dotTriggerRate ?? 0 : 0;
+    const mayApplyNumbed=combatNumbedEnabled(build,report)||report.coupledSkills.rows.some(row=>row.numbedSupport);
+    const dotRate = usesTheaDotTrigger(build, mechanics, report,mayApplyNumbed) ? build.ss14Inputs.theaEvents.dotTriggerRate ?? 0 : 0;
     if ((rates + options.events.reduce((n, e) => n + e.rate, 0) + dotRate) * (options.seconds + options.warmup) * 128 > 2000000) blockers.push("복합 계산량이 한도를 넘었습니다. 측정 시간을 줄여 주세요.");
   }
   const cache = new Map();
@@ -927,6 +946,8 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     return cache.get(key);
   };
   const results = [], simulations = [], alternateTotals = [];
+  const timedNumbedSlots=new Set();
+  const observeNumbedSupport=rowIndex=>timedNumbedSlots.add(rowIndex);
   const elixirRouteSamples=new Map();
   const observeElixirPhase=(mask,snapshot)=>{
     if(!elixirRouteSamples.has(mask))elixirRouteSamples.set(mask,new Set());
@@ -937,7 +958,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   let alternateAvailable = true;
   let missingDotWindows;
   if (!blockers.length) for (let i = 0; i < 128; i++) {
-    const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, observeElixirPhase });
+    const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, observeElixirPhase, observeNumbedSupport });
     const simulation = simulate({ ...options, seed: 127 + i * 104729, combat });
     if (combat.blockers.size) { blockers.push(...combat.blockers); break; }
     const missingWindows = combat.missingDotWindows;
@@ -951,7 +972,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     if (combat.hasProjectileTie || combat.hasFissureTie) {
       anyProjectileTie ||= combat.hasProjectileTie;
       anyFissureTie ||= combat.hasFissureTie;
-      const alternate = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, newCastFirst: true });
+      const alternate = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, newCastFirst: true, observeNumbedSupport });
       simulate({ ...options, seed: 127 + i * 104729, combat: alternate });
       if (alternate.blockers.size || Object.keys(alternate.missingDotWindows).length) alternateAvailable = false;
       alternateTotals.push(finishCombatRows(alternate, options.seconds));
@@ -1009,6 +1030,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     for(const [type,damage] of Object.entries(minionTypes))damageByType[type]=(damageByType[type]??0)+damage;
     const minionDamageByType=Object.keys(minionTypes).length?minionTypes:undefined;
     return { ...r, damageByType, minionDamageByType, moduleDotDpsByAction, manualManaPerSecond: perSecond('mana'), manualLifePerSecond: perSecond('life'),
+      ...(timedNumbedSlots.has(r.rowIndex)&&{numbedOnHit:true}),
       ...(manualUses!==null&&{measuredManualUses:{count:manualUses,seconds:options.seconds,rate:manualUses/options.seconds}}),
       ...channelUsage, supported, values, dotBreakdown, permafrostBreakdown, ...(timedReaping&&{timedReaping}) };
   });
@@ -1028,6 +1050,7 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const ailmentResults = supported ? results.map(r => r.result()) : [];
   const averageAilment = key => supported ? sum(ailmentResults.map(r => r[key])) / results.length : null;
   const lightningHits = averageAilment('playerLightningHits');
+  const numbedAvailable=combatNumbedEnabled(build, report)||timedNumbedSlots.size>0;
   const manualResources=manualResourceBalance(rows,recovery,build.ss14Inputs.dps?.skills);
   const elixirPhases=supported?summarizeTimedElixirs(build,report,options,results,dps,manualResources):null;
   if(elixirPhases){
@@ -1044,14 +1067,14 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     ...(anyFissureTie && {fissureTie:true}),
     doubleUptime: supported ? sum(simulations.map(s => s.doubleUptime)) / 128 : null,
     numbedAverage: averageAilment('numbedAverage'),
-    numbedEffectAverage: combatNumbedEnabled(build, report) ? averageAilment('numbedEffectAverage') : null,
-    playerNumbedDuration: supported && combatNumbedEnabled(build, report) ? results[0].playerNumbedDuration : null,
+    numbedEffectAverage: numbedAvailable ? averageAilment('numbedEffectAverage') : null,
+    playerNumbedDuration: supported && numbedAvailable ? results[0].playerNumbedDuration : null,
     scorchUptime: averageAilment('scorchUptime'),
     igniteUptime: averageAilment('igniteUptime'),
     numbedUptime: averageAilment('numbedUptime'),
     elixirUptimes:supported?timedElixirs(build,theaCombatInputValues(build,report)).map(elixir=>measureElixirUptime(elixir,options)):[],
     elixirPhases,
-    playerNumbedHits: lightningHits > 0 ? { lightningHits, boostedHits:averageAilment('playerNumbedHits'), bonusDps:sum(rows.map(row=>row.values.numbedHitDps)) } : null,
+    playerNumbedHits: numbedAvailable && lightningHits > 0 ? { lightningHits, boostedHits:averageAilment('playerNumbedHits'), bonusDps:sum(rows.map(row=>row.values.numbedHitDps)) } : null,
     counts: averageCounts('counts'), measuredCounts: averageCounts('measuredCounts'),
     extraBlessings: averageBlessings('eventTotals'), measuredBlessings: averageBlessings('measuredEventTotals'),
     blockers: [...new Set(blockers)], receipt: rules.receiptSha256 };
