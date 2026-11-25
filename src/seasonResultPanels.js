@@ -1,5 +1,5 @@
 import { SEASON_ADVISOR_METRICS, preferredSeasonDpsMetric } from './seasonAdvisor.js';
-import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDamageTypeComposition, seasonDamageTypeParts, SEASON_DAMAGE_TYPE_LABELS as damageTypes, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
+import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldKeys, seasonDpsSkillFieldDefinition, hasSeasonDpsConditionOverrides, seasonNumbedDamageRows, observedSkillCostFields, SEASON_DPS_PARTS, seasonDamageComposition, seasonDamageTypeComposition, seasonDamageTypeParts, SEASON_DAMAGE_TYPE_LABELS as damageTypes, SEASON_DAMAGE_BREAKDOWN_LABELS, seasonDotWindowRepairs, seasonDotWindowRole } from './seasonDps.js';
 import { labeledGearRolls, renderNearbyEnemyField, renderSeasonDpsField, renderFixedNumbedField, usesTargetNumbedInput, renderObservedManaInput } from './seasonWorkspaceView.js';
 import { nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { blessingConditionValue, boundBlessingStacks } from './seasonBlessings.js';
@@ -115,10 +115,10 @@ export function renderEditDpsComparison(s, compact = false) {
 function renderEncounterChanges(rows,role,{editable=false}={}){
   if(!rows?.length)return '';
   const value=(n,unit)=>Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:6})+unit:typeof n==='string'?esc(n)+(n==='없음'?'':unit):'미입력';
-  return `<ul aria-label="달라진 전투 조건" data-role="${role}">${rows.map(({label,a,b,edit,key,tab,unit})=>
+  return `<ul aria-label="달라진 전투 조건" data-role="${role}">${rows.map(({label,a,b,edit,key,tab,unit,rowIndex,supportIndex})=>
     `<li>${esc(label.replace(/ \(%\)$/u,''))} <strong>${value(a,unit)} → ${value(b,unit)}</strong>
       ${editable&&edit?button('조건 수정',tab?'result-tab':'requirement',
-        `${tab?'data-tab="conditions"':'data-section="combat"'} data-field="${esc(edit)}" data-field-key="${esc(key)}" aria-label="${esc(label)} 수정"`):''}</li>`).join('')}</ul>`;
+        `${tab?'data-tab="conditions"':'data-section="combat"'} data-field="${esc(edit)}" data-field-key="${esc(key)}"${rowIndex===undefined?'':` data-row="${rowIndex}" data-support="${supportIndex}"`} aria-label="${esc(label)} 수정"`):''}</li>`).join('')}</ul>`;
 }
 
 function effectConditionFields(s) {
@@ -361,7 +361,7 @@ function renderUpgradeRanking(s){
         `<div>${metricLabel} ${number(job.base)} → <b>${number(r.value)}</b></div><strong class="native-comparison-delta">+${number(r.delta)} DPS${r.percent==null?'':' (+'+number(r.percent)+'%)'}</strong>`}
       ${rankingDetails(r,{before:'변경 전',after:'변경 후'},`ranking-damage-routes-${index}`,'대미지 변화')}
       ${r.resources?renderResourceChanges({...r.resources,dpsBasis:job.metric},esc,{board:true}):''}
-      ${r.hypothetical?'':r.saved?(s.dirty?'사본 저장됨':button('저장된 사본 열기','open',`data-id="${esc(r.saved)}"`)):button('사본에 적용','rank-copy',`data-index="${index}" aria-label="${label} 사본에 적용"`)}`;
+      ${r.hypothetical?'':r.saved?button('저장된 사본 열기','rank-open-copy',`data-index="${index}"`):button('사본에 적용','rank-copy',`data-index="${index}" aria-label="${label} 사본에 적용"`)}`;
     };
     const rows=job.rows.map((r,i)=>`<li>${candidate(r,i,(i+1)+'위')}</li>`).join('');
     const blockedType=skillReplacement?'스킬':'장비';
@@ -477,13 +477,13 @@ function renderElixirAddedDamage(data) {
       renderEntry(data.states[index],`elixir-phase-${index}-`)||'<p>적용된 추가 적중 없음</p>',`elixir-added-hit-phase-${index}`)).join(''),
     'elixir-added-hit-sources');
 }
+const damageRouteAmount = ({min,max}={}) => Number.isFinite(min)&&Number.isFinite(max)
+  ? number(min)+(min===max?'':'–'+number(max)) : '';
 export function renderSkillConversion(trace,index) {
   const conversions=(trace??[]).filter(e=>e.stage==='conversion'&&e.effectivePercent>0&&damageTypes[e.sourceType]&&damageTypes[e.targetType]);
   const route=e=>`${damageTypes[e.sourceType]} → ${damageTypes[e.targetType]}`;
   const percent=e=>number(e.effectivePercent)+'%';
-  const amount=({min,max}={})=>Number.isFinite(min)&&Number.isFinite(max)
-    ? number(min)+(min===max?'':'–'+number(max)) : '';
-  const moved=e=>e.movedBaseDamage?' · 보정 전 전환량 '+amount(e.movedBaseDamage):'';
+  const moved=e=>e.movedBaseDamage?' · 보정 전 전환량 '+damageRouteAmount(e.movedBaseDamage):'';
   const converted=conversions.length?calcGroup('대미지 전환',conversions.length===1?`${route(conversions[0])} ${percent(conversions[0])}`:'',
     calcRows(conversions.map(e=>[[e.actionName,route(e)].filter(Boolean).join(' · '),percent(e)+(Math.abs(e.effectivePercent-e.resolvedValue)>1e-8?` (원래 ${number(e.resolvedValue)}%)`:'')+moved(e),conversionSource(e.effectSource??undefined)])),`skill-conversion-${index}`):'';
   const gains=(trace??[]).filter(e=>e.stage==='gained-as-extra'&&e.resolvedValue>0
@@ -491,7 +491,7 @@ export function renderSkillConversion(trace,index) {
   const gainedLabel=e=>`${damageTypes[e.sourceType]??'부식 이외'} → ${damageTypes[e.targetType]} +${number(e.resolvedValue)}%`;
   const extra=gains.length?calcGroup('대미지 추가 획득',gains.length===1?gainedLabel(gains[0]):'',
     calcRows(gains.map(e=>[[e.actionName,gainedLabel(e)].filter(Boolean).join(' · '),
-      e.gainedBaseDamage?'보정 전 획득량 '+amount(e.gainedBaseDamage):'',conversionSource(e.effectSource??undefined)])),`skill-gain-${index}`):'';
+      e.gainedBaseDamage?'보정 전 획득량 '+damageRouteAmount(e.gainedBaseDamage):'',conversionSource(e.effectSource??undefined)])),`skill-gain-${index}`):'';
   return converted+extra;
 }
 function renderExcludedHitRoutes(effects) {
@@ -515,10 +515,10 @@ export function renderElixirDamageRoutes(routes,index) {
   const empty='<p>적용된 전환·추가 획득 없음</p>';
   const bodies=routes.states.map((state,i)=>state.groups.map(({slotIndex,trace})=>
     ({slotIndex,body:renderSkillConversion(trace,`${index}-elixir-${i}-${slotIndex??'all'}`)})));
-  if (!bodies.some(state=>state.some(group=>group.body))) return '';
-  return calcGroup('영약 상태별 대미지 전환·추가 획득','',routes.states.map(({active,uptime},i)=>
+  if (!routes.measured&&!bodies.some((state,i)=>routes.states[i].variable||state.some(group=>group.body))) return '';
+  return calcGroup('영약 상태별 대미지 전환·추가 획득','',routes.states.map(({active,uptime,variable},i)=>
     calcGroup(routes.names.map((name,j)=>name+' '+(active[j]?'활성':'비활성')).join(' · '),
-      number(uptime)+'%',bodies[i].map(({slotIndex,body})=>slotIndex===undefined?body:
+      number(uptime)+'%',variable?'<p>이 구간의 다른 전투 효과에 따라 전환·추가 획득이 달라집니다.</p>':bodies[i].map(({slotIndex,body})=>slotIndex===undefined?body:
         `<h4>${slotIndex===0?'메인 무기':'서브 무기'}</h4>${body||empty}`).join('')||empty,
       `selected-skill-elixir-route-${index}-${i}`)).join(''),
     `selected-skill-elixir-damage-routes-${index}`);
@@ -529,6 +529,24 @@ export function renderWeaponDamageRoutes(hands,index) {
   return calcGroup('무기별 대미지 전환·추가 획득','',groups.map(({slotIndex,body})=>
     `<h4>${slotIndex===0?'메인 무기':'서브 무기'}</h4>${body||'<p>적용된 전환·추가 획득 없음</p>'}`).join(''),
     `weapon-damage-routes-${index}`);
+}
+function damageRouteAmountChanges(before,after) {
+  if(!before||!after||before.length!==after.length)return null;
+  const identity=({stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource})=>
+    JSON.stringify([stage,sourceType,targetType,effectivePercent,resolvedValue,actionName,effectSource]);
+  if(before.some((edge,i)=>identity(edge)!==identity(after[i])))return null;
+  return after.flatMap((edge,i)=>{
+    const converted=edge.stage==='conversion';
+    const value=row=>damageRouteAmount(converted?row.movedBaseDamage:row.gainedBaseDamage);
+    const a=value(before[i]), b=value(edge);
+    if(!a||!b||a===b)return [];
+    const from=damageTypes[edge.sourceType]??(edge.sourceType==='non-erosion'?'부식 이외':'');
+    const to=damageTypes[edge.targetType];
+    if(!from||!to)return [];
+    const percent=(converted?'':'+')+number(converted?edge.effectivePercent:edge.resolvedValue)+'%';
+    const label=[edge.actionName,`${from} → ${to} ${percent}`,converted?'전환':'추가 획득'].filter(Boolean).join(' · ');
+    return [{label,source:conversionSource(edge.effectSource??undefined),a,b}];
+  });
 }
 export function renderDamageRouteChanges(rows,{before='장착 전',after='장착 후',role='damage-route-changes'}={}) {
   if(!rows?.length)return '';
@@ -541,6 +559,11 @@ export function renderDamageRouteChanges(rows,{before='장착 전',after='장착
   };
   return calcGroup('대미지 전환·추가 획득','',rows.map(({index,id,beforeId,previous,current,previousStates,currentStates,previousHands,currentHands})=>{
     const skill=beforeId!==undefined?`${name(beforeId)} → ${name(id)}`:name(id);
+    const amounts=beforeId===undefined&&damageRouteAmountChanges(previous,current);
+    if(amounts?.length)return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
+      <table class="slot-dps-table" data-role="damage-route-amount-changes"><caption>보정 전 대미지</caption>
+        <thead><tr><th scope="col">전환·획득</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead>
+        <tbody>${amounts.map(({label,source,a,b})=>`<tr><th scope="row">${esc(label)}${source?`<small>${esc(source)}</small>`:''}</th><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table></section>`;
     const empty=' · 적용 없음';
     return `<section><h4>${esc(skill)} · ${index+1}번 칸</h4>
       <div><b>${esc(before)}</b>${route(previous,previousStates,previousHands,`${role}-before-${index}`)||empty}</div>
@@ -762,14 +785,16 @@ export function renderSkillCalculation(s) {
     scenario?.theaCycle?.mode==='automatic' && scenario.theaEvents?.combatMode===1);
   const minionTypes = Object.entries(displayRow?.minionDamageByType ?? {})
     .filter(([type, dps]) => damageTypes[type] && Number.isFinite(dps) && dps > 0);
+  const execution = typedParts?.find(([type]) => type === 'execute')?.[1];
+  if (execution > 0) minionTypes.push(['execute', execution]);
   const measuredMinionDamage = (assumed ? report.assumedDps : report.fullDps).scope === 'ss14-thea-joint-combat';
   let minionDamage = '';
   if (displayRow?.supported && (!averaged || measuredMinionDamage) && minionTypes.length) {
     const sum = minionTypes.reduce((total, [, dps]) => total + dps, 0);
     const metric = assumed ? '방어 전 DPS' : 'DPS';
-    const coverage = typedParts ? '유형별' : '확인된 속성의';
+    const coverage = execution > 0 ? '대미지·도태' : typedParts ? '유형별' : '확인된 속성의';
     minionDamage = calcGroup(`소환체 스킬의 ${coverage} ${averagedElixir || measuredMinionDamage ? '평균 ' : ''}${metric}`, number(sum),
-      calcRows(minionTypes.map(([type, dps]) => [damageTypes[type], number(dps)])), 'selected-skill-minion-damage');
+      calcRows(minionTypes.map(([type, dps]) => [SEASON_DAMAGE_BREAKDOWN_LABELS[type], number(dps)])), 'selected-skill-minion-damage');
   }
   if(averagedElixir)
     return `<section class="skill-calculation" aria-label="선택 스킬 계산">${selector}${total}${typedDamage}${levelDetails}${moonStrike}${frostDetails}${dotDetails}${numbed}${costs}${actions}${minionDamage}${renderSkillElixirDps(displayRow?.elixirDpsStates,index)}${renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)}${renderElixirAddedDamage(displayRow?.elixirAddedDamage)}</section>`;
@@ -789,7 +814,8 @@ export function renderSkillCalculation(s) {
       + renderAddedHitSources(hand.addedDamageTrace,addedDamageSources,hand.slotIndex);
   }).join('')+`<p><a href="${DUAL_WIELD_ATTACK_SOURCE}" target="_blank" rel="noopener noreferrer">쌍수 공격 도움말</a></p>`,'selected-skill-dual-wield');
   const trace=assumed?displayRow?.conversionTrace:row?.conversionTrace??direct?.trace;
-  const conversion=renderSkillConversion(trace,index);
+  const conversion=renderSkillElixirDps(displayRow?.elixirDpsStates,index)
+    +(renderElixirDamageRoutes(displayRow?.elixirDamageRoutes,index)||renderSkillConversion(trace,index));
   const excluded=renderExcludedHitRoutes(excludedHitRoutes);
   if(stages && hasHitPools) {
     const types=Object.entries(stages.byType??{}).filter(([,v])=>v.base||v.added||v.taken);
@@ -938,9 +964,10 @@ function skillContributions(s) {
   const renderParts=(parts,role,label,column)=>parts.length>1
     ? `<details data-role="${role}"><summary>${label} ${metric==='assumedDps'?'방어 전 ':''}DPS 비중</summary>
       <table aria-label="${label} DPS 비중"><thead><tr><th scope="col">${column}</th><th scope="col">DPS</th><th scope="col">비중</th></tr></thead>
-      <tbody>${parts.map(({label,type,value})=>`<tr><th scope="row">${label??damageTypes[type]}</th><td>${number(value)}</td>${shareCell(value)}</tr>`).join('')}</tbody></table></details>` : '';
+      <tbody>${parts.map(({label,type,value})=>`<tr><th scope="row">${label??SEASON_DAMAGE_BREAKDOWN_LABELS[type]}</th><td>${number(value)}</td>${shareCell(value)}</tr>`).join('')}</tbody></table></details>` : '';
+  const includesExecution = types.some(part=>part.type==='execute');
   const composition=renderParts(parts,'analysis-damage-composition','발동 유형별','유형')
-    +renderParts(types,'analysis-damage-types','속성별','속성');
+    +renderParts(types,'analysis-damage-types',includesExecution?'속성·도태':'속성별',includesExecution?'항목':'속성');
   return `<section class="skill-contributions" aria-label="스킬별 DPS"><h2>스킬별 DPS</h2><table><thead><tr><th scope="col">스킬</th><th scope="col">${metric==='assumedDps'?metricLabel:'DPS'}</th>${reconciled?'<th scope="col">비중</th>':''}</tr></thead><tbody>${slots.map(({index,id,row,hasSupport})=>{
     const label=nameFor(SS14_CARDS.records[id]);
     const slotName=index===0?'주력':index<active.length?'액티브 '+(index+1):'패시브 '+(index-active.length+1);

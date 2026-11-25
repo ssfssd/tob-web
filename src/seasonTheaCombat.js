@@ -34,6 +34,10 @@ function finishCombatRows(combat, seconds) {
   return sum([...combat.rows.values()].map(row => row.dps));
 }
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const elixirPhaseMask = (elixirs, active) => elixirs.reduce((mask,{i},index)=>mask|(active[index]?1<<i:0),0);
+// Resource totals are rounded to five decimal places by manualResourceBalance.
+const matchesResourceTotal = (measured,total) => Number.isFinite(total)
+  && Math.abs(measured-total) <= Math.max(0.0000051,Math.abs(total)*1e-12);
 function timedElixirs(build,input) {
   return (build.skills.elixirs??[]).flatMap((slot,i)=>slot?.skillId
     ? [{i,interval:input[`elixir${i}Interval`],start:input[`elixir${i}Start`],duration:input[`elixir${i}Duration`]}] : []);
@@ -57,10 +61,9 @@ function summarizeTimedElixirs(build,report,options,results,dps,resources) {
     uptime:measureElixirUptime(elixir,options).uptime}));
   const masks=[...new Set(results.flatMap(run=>[...run.elixirPhases.keys()]))].sort((a,b)=>a-b);
   const average=(mask,key)=>sum(results.map(run=>run.elixirPhases.get(mask)?.[key]??0))/results.length;
-  const knownMana=Number.isFinite(resources?.manaPerSecond);
   const combinedChannelCost=resources?.channels?.some(channel=>channel.rate!==0&&!channel.times);
   const measuredMana=sum(masks.map(mask=>average(mask,'mana')))/options.seconds;
-  const showMana=knownMana&&!combinedChannelCost&&Math.abs(measuredMana-resources.manaPerSecond)<1e-6;
+  const showMana=!combinedChannelCost&&matchesResourceTotal(measuredMana,resources?.manaPerSecond);
   const states=masks.flatMap(mask=>{
     const seconds=average(mask,'seconds');
     if (!(seconds>0)) return [];
@@ -72,6 +75,59 @@ function summarizeTimedElixirs(build,report,options,results,dps,resources) {
   if (Math.abs(sum(states.map(state=>state.uptime))-100)>1e-6
     || Math.abs(sum(states.map(state=>state.weightedDps))-dps)>Math.max(1e-6,Math.abs(dps)*1e-8)) return null;
   return {supported:true,rows,states,timed:true,combinedChannelCost:Boolean(combinedChannelCost)};
+}
+
+function measuredElixirRoutes(phases, elixirs, samples, initial, rowIndex) {
+  if(!phases)return undefined;
+  const routes=trace=>(trace??[]).filter(edge=>edge.stage==='conversion'&&edge.effectivePercent>0
+    ||edge.stage==='gained-as-extra'&&edge.resolvedValue>0)
+    .map(({stage,sourceType,targetType,resolvedValue,effectivePercent,actionName,effectSource,movedBaseDamage,gainedBaseDamage})=>
+      ({stage,sourceType,targetType,resolvedValue,effectivePercent,actionName,effectSource,movedBaseDamage,gainedBaseDamage}));
+  const groupsFor=report=>{
+    const row=report.fullDps.rows.find(row=>row.rowIndex===rowIndex);
+    const hands=row?.weaponHands;
+    return hands?.length?hands.map(({slotIndex,conversionTrace})=>({slotIndex,trace:routes(conversionTrace)}))
+      :[{trace:routes(row?.conversionTrace??report.coupledSkills.rows.find(row=>row.rowIndex===rowIndex)?.trace)}];
+  };
+  const original=groupsFor(initial);
+  const originalKey=JSON.stringify(original);
+  let changed=false;
+  const states=phases.states.map(({active,uptime})=>{
+    const mask=elixirPhaseMask(elixirs,active);
+    const variants=new Map();
+    for (const report of samples.get(mask)??[]) {
+      const groups=groupsFor(report);
+      const key=JSON.stringify(groups);
+      if(key!==originalKey&&(original.some(group=>group.trace.length)||groups.some(group=>group.trace.length)))changed=true;
+      variants.set(key,groups);
+    }
+    return {active,uptime,groups:variants.size===1?variants.values().next().value:[],variable:variants.size>1};
+  });
+  if(!changed)return undefined;
+  return {names:phases.rows.map(row=>row.name),states,measured:true};
+}
+
+function measuredSkillElixirDps(phases, elixirs, results, row, {seconds,warmup}, slots) {
+  if(phases.states.length<2)return undefined;
+  const average=(mask,key)=>sum(results.map(run=>run.elixirPhases.get(mask)?.skills.get(row.rowIndex)?.[key]??0))/results.length;
+  const states=phases.states.map(({active,uptime})=>{
+    const mask=elixirPhaseMask(elixirs,active);
+    const damage=average(mask,'damage'), mana=average(mask,'mana'), life=average(mask,'life');
+    return {active,uptime,damage,mana,life};
+  });
+  const total=key=>sum(states.map(state=>state[key]))/seconds;
+  if(Math.abs(total('damage')-row.values.dps)>Math.max(1e-6,Math.abs(row.values.dps)*1e-8))return undefined;
+  const channelCostTotalOnly=Boolean(row.channelCost?.valid&&row.channelCost.rate>0&&!row.channelCost.times);
+  const showMana=!channelCostTotalOnly&&matchesResourceTotal(total('mana'),row.manualManaPerSecond);
+  const showLife=!channelCostTotalOnly&&matchesResourceTotal(total('life'),row.manualLifePerSecond);
+  return {names:phases.rows.map(row=>row.name),timeline:{seconds,warmup,elixirs:elixirs.map(elixir=>({...elixir,skillId:slots[elixir.i]?.skillId}))},
+    manaPerSecond:row.manualManaPerSecond,lifePerSecond:row.manualLifePerSecond,
+    channelCostTotalOnly,states:states.map(({active,uptime,damage,mana,life})=>{
+      const phaseSeconds=seconds*uptime/100;
+      return {active,uptime,dps:damage/phaseSeconds,weightedDps:damage/seconds,
+        manaPerSecond:showMana?mana/phaseSeconds:null,weightedManaPerSecond:showMana?mana/seconds:null,
+        lifePerSecond:showLife?life/phaseSeconds:null,weightedLifePerSecond:showLife?life/seconds:null};
+    })};
 }
 
 export function createAilmentTimeline() {
@@ -90,7 +146,7 @@ export function createAilmentTimeline() {
 // The integration uses one clock for blessing consumption, actual casts and
 // ailment lifetimes. Damage rolls are sampled only where a nonlinear threshold
 // or highest-Ignite selection needs them; ordinary hit expectation stays exact.
-export function createTheaCombatTimeline(build, report, getReport, { seconds, warmup, seed = 1, newCastFirst = false }) {
+export function createTheaCombatTimeline(build, report, getReport, { seconds, warmup, seed = 1, newCastFirst = false, observeElixirPhase }) {
   const random = timelineRandom(seed);
   const input = theaCombatInputValues(build, report);
   const netherEffects=report.componentProjection.effects;
@@ -112,7 +168,7 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   const phaseAt=time=>{
     if (!elixirs.length) return null;
     const mask=elixirs.reduce((state,e)=>state|(elixirActive(e,time)?1<<e.i:0),0);
-    if (!elixirPhases.has(mask)) elixirPhases.set(mask,{seconds:0,damage:0,mana:0});
+    if (!elixirPhases.has(mask)) elixirPhases.set(mask,{mask,seconds:0,damage:0,mana:0,skills:new Map()});
     return elixirPhases.get(mask);
   };
   const nextElixir = time => Math.min(Infinity, ...elixirs.map(e => time + eps < e.start ? e.start : e.duration >= e.interval ? Infinity
@@ -248,8 +304,15 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
   };
   const accumulateDamage=(row,key,amount,phase)=>{
     rows.get(row)[key]+=amount;
-    if (phase&&primaryDamageKeys.has(key)) phase.damage+=amount;
+    if (phase&&primaryDamageKeys.has(key)&&amount!==0) {
+      phase.damage+=amount;
+      getPhaseSkill(phase,row).damage+=amount;
+    }
   };
+  function getPhaseSkill(phase,index) {
+    if(!phase.skills.has(index))phase.skills.set(index,{damage:0,mana:0,life:0});
+    return phase.skills.get(index);
+  }
   const recordDamage = (row, key, amount, time) => { if (inMeasurement(time)) accumulateDamage(row,key,amount,phaseAt(time)); };
   const recordCastCost = (index, row, time, ctx, channelCharge = false) => {
     const separatelyObserved = !channelCharge && row?.channelCost?.times;
@@ -273,7 +336,12 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       cost.mana += row.manaPerUse;
       cost.life += row.lifePerUse;
       const phase=phaseAt(time);
-      if (phase) phase.mana+=row.manaPerUse;
+      if (phase) {
+        phase.mana+=row.manaPerUse;
+        const slot=getPhaseSkill(phase,index);
+        slot.mana+=row.manaPerUse;
+        slot.life+=row.lifePerUse;
+      }
     } else costs.delete(index);
   };
   const omenDamage = (amount, time, currentReport, from = time, cumulative = null) => {
@@ -570,7 +638,10 @@ export function createTheaCombatTimeline(build, report, getReport, { seconds, wa
       const lo = Math.max(0, warmup - from), hi = Math.min(delta, warmup + seconds - from), w = Math.max(0, hi - lo);
       if (w) {
         const phase=phaseAt(from);
-        if (phase) phase.seconds+=w;
+        if (phase) {
+          phase.seconds+=w;
+          observeElixirPhase?.(phase.mask,r);
+        }
         for (const row of r.fullDps.rows) {
           const channel = channelCosts.get(row.rowIndex);
           if (!channel) continue;
@@ -810,11 +881,16 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
     return cache.get(key);
   };
   const results = [], simulations = [], alternateTotals = [];
+  const elixirRouteSamples=new Map();
+  const observeElixirPhase=(mask,snapshot)=>{
+    if(!elixirRouteSamples.has(mask))elixirRouteSamples.set(mask,new Set());
+    elixirRouteSamples.get(mask).add(snapshot);
+  };
   let anyProjectileTie = false;
   let anyFissureTie = false;
   let alternateAvailable = true;
   if (!blockers.length) for (let i = 0; i < 128; i++) {
-    const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729 });
+    const combat = createTheaCombatTimeline(build, report, getReport, { ...options, seed: 173 + i * 104729, observeElixirPhase });
     const simulation = simulate({ ...options, seed: 127 + i * 104729, combat });
     if (combat.blockers.size) { blockers.push(...combat.blockers); break; }
     const baselineTotal = finishCombatRows(combat, options.seconds);
@@ -896,6 +972,15 @@ export function calculateTheaCombatAverage(build, report, calculateState, simula
   const lightningHits = averageAilment('playerLightningHits');
   const manualResources=manualResourceBalance(rows,recovery,build.ss14Inputs.dps?.skills);
   const elixirPhases=supported?summarizeTimedElixirs(build,report,options,results,dps,manualResources):null;
+  if(elixirPhases){
+    const elixirs=timedElixirs(build,theaCombatInputValues(build,report));
+    for(const row of rows){
+      const routes=measuredElixirRoutes(elixirPhases,elixirs,elixirRouteSamples,report,row.rowIndex);
+      if(routes)row.elixirDamageRoutes=routes;
+      const details=measuredSkillElixirDps(elixirPhases,elixirs,results,row,options,build.skills.elixirs);
+      if(details)row.elixirDpsStates=details;
+    }
+  }
   report.theaAverage = { supported, ...options, samples: 128, estimated: true, combat: true, dps, standardError, uptime,
     projectileTie: supported && (anyProjectileTie || anyFissureTie) ? { arrivalsFirstDps: dps, newCastFirstDps: alternateAvailable ? sum(alternateTotals) / results.length : null } : null,
     ...(anyFissureTie && {fissureTie:true}),

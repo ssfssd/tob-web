@@ -169,7 +169,7 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     return (dps?.reapingOverlapOverflow??[]).map(i=>({
       section:'combat',label:`스킬 ${i+1} 수확 겹침 입력`,edit:'dps-input',key:`${i}:reapingOverlap`,
     }));
-  if(/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은/u.test(reason)) {
+  if(/동일 지속 스킬의 (?:중첩|적용 구간)|^지속 대미지 적용 구간은|^심화가 변하는 전투에서는 지속 대미지 적용 구간/u.test(reason)) {
     if(reason.includes('적용 구간')) {
       const affected=dps?.dotWindowIssues?.[reason]??[];
       const routed=new Set();

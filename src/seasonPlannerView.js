@@ -1103,7 +1103,7 @@ export function renderNativeDps(s) {
   return `<aside class="native-dps-dock" id="native-dps-summary" tabindex="-1" aria-label="SS14 계산 결과">
     ${mobileDpsBar(s,esc(blockedStatus))}
     <div class="native-result-summary">${showEstimate ? renderAssumedDps(s, true) : ''}<small${showEstimate ? ' hidden' : ''}>전체 DPS</small><strong data-role="native-dps"${showEstimate ? ' hidden' : ''}>${status}</strong>
-    ${s.rankTrialOrigin?button('기준 빌드 분석으로 돌아가기','return-rank-origin'):''}
+    ${s.rankTrialOrigin?button('기준 빌드 분석으로 돌아가기','return-rank-origin','data-role="return-rank-origin"'):''}
     ${renderEditDpsComparison(s, true)}
     ${dpsLink}
     ${s.pending.size ? `<div class="native-result-actions">${button('계산 적용', 'apply')}</div>` : ''}</div>

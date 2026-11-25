@@ -9,7 +9,7 @@ import { summarizeSeasonOptionSources } from './seasonNumericStats.js';
 import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { getSkillEnergyUsage } from './skillRuntimeModel.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
-import { SEASON_DAMAGE_TYPE_LABELS, seasonDamageComposition, seasonDamageTypeComposition, seasonNumbedDamageRows } from './seasonDps.js';
+import { SEASON_DAMAGE_BREAKDOWN_LABELS, seasonDamageComposition, seasonDamageTypeComposition, seasonNumbedDamageRows } from './seasonDps.js';
 import { compareSeasonUptimeChanges } from './seasonUptimeDetails.js';
 import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { findItemById } from './catalog.js';
@@ -102,7 +102,7 @@ function damageRouteChanges(before,after,beforeDps,afterDps) {
   const applies=trace=>trace?.some(edge=>edge.stage==='conversion'?edge.effectivePercent>0:
     edge.stage==='gained-as-extra'&&edge.resolvedValue>0);
   const hasRoute=({states,hands,trace})=>applies(trace) || hands?.some(group=>applies(group.trace))
-    || states?.states.some(phase=>phase.groups.some(group=>applies(group.trace)));
+    || states?.states.some(phase=>phase.variable||phase.groups.some(group=>applies(group.trace)));
   const routeGroups=groups=>groups.map(({slotIndex,trace})=>({slotIndex,trace:routeEdges(trace)}));
   const comparableRoutes=({states,hands,trace})=>states?{...states,states:states.states.map(phase=>({...phase,groups:routeGroups(phase.groups)}))}
     :hands?routeGroups(hands):trace;
@@ -239,7 +239,7 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
   const damageTypeChanges=beforeTypes&&afterTypes&&beforeTypes.filter(({value},index)=>value>0||afterTypes[index].value>0).length>1
     ? beforeTypes.flatMap(({type,value:from},index)=>{
       const to=afterTypes[index].value;
-      return from.toFixed(2)===to.toFixed(2)?[]:[{label:SEASON_DAMAGE_TYPE_LABELS[type],from,to}];
+      return from.toFixed(2)===to.toFixed(2)?[]:[{type,label:SEASON_DAMAGE_BREAKDOWN_LABELS[type],from,to}];
     }) : [];
   const manualUsageChanges=after[metric].rows.flatMap(row=>{
     const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex);
@@ -251,12 +251,30 @@ export function compareSeasonDamageBreakdown(before, after, metric) {
     return display(from.count)!==display(to.count)||display(fromMana)!==display(toMana)||display(fromLife)!==display(toLife)
       ? [{index:row.rowIndex,id:row.id,...(old.id!==row.id&&{beforeId:old.id}),from,to,fromMana,toMana,fromLife,toLife}] : [];
   });
+  const elixirPhaseChanges=after[metric].rows.flatMap(row=>{
+    const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
+    const from=old?.elixirDpsStates, to=row.elixirDpsStates;
+    if(!row.supported||!old?.supported||!from?.timeline||!to?.timeline
+      ||JSON.stringify(from.timeline)!==JSON.stringify(to.timeline))return [];
+    const matched=to.states.map(phase=>from.states.find(earlier=>earlier.active.join()===phase.active.join()&&Math.abs(earlier.uptime-phase.uptime)<1e-6));
+    if(from.states.length!==to.states.length||matched.some(phase=>!phase))return [];
+    const display=value=>Number.isFinite(value)?value.toFixed(2):null;
+    return to.states.flatMap((phase,index)=>{
+      const earlier=matched[index];
+      const changes=[['반영 DPS','weightedDps'],['MP/초','weightedManaPerSecond'],['HP/초','weightedLifePerSecond']]
+        .flatMap(([label,key])=>Number.isFinite(earlier[key])&&Number.isFinite(phase[key])&&display(earlier[key])!==display(phase[key])
+          ? [{label,from:earlier[key],to:phase[key]}]:[]);
+      if(!changes.length)return [];
+      const name=to.names.map((elixir,i)=>elixir+' '+(phase.active[i]?'활성':'비활성')).join(' · ');
+      return [{index:row.rowIndex,id:row.id,name,uptime:phase.uptime,changes}];
+    });
+  });
   return {
     skillDpsChanges:skillDpsChanges(before[metric],after[metric]),
     damageCompositionChanges,damageTypeChanges,
     damageRoutes:damageRouteChanges(before,after,before[metric],after[metric]),
     skillSpeedChanges:skillSpeedChanges(before,after,metric),
-    manualUsageChanges,
+    manualUsageChanges,elixirPhaseChanges,
     ...numbedDamageChanges(before[metric],after[metric]),
     numbedStateChanges:numbedStateChanges(before,after,metric),
     uptimeChanges:compareSeasonUptimeChanges(before,after,metric),
@@ -293,8 +311,13 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
   const afterRecovery = recovery(afterResources,after.character.survival?.manaScenarios);
   const recoveryRows = new Map(afterRecovery.map(row=>[row.id,row]));
   const formulas = beforeRecovery.filter(row=>row.id!=='observed');
-  const observedRecovery = report => recovery(report.fullDps.manualResources,report.character.survival?.manaScenarios)
-    .find(row=>row.id==='observed');
+  const observedRecovery = report => {
+    const survival = report.character.survival;
+    if (survival?.manaObservationStale) return null;
+    const measured = report.fullDps.manualResources?.recovery?.find(row=>row.id==='observed');
+    const recorded = survival?.manaScenarios?.find(row=>row.id==='observed');
+    return Number.isFinite(measured?.value) ? measured : recorded;
+  };
   const previousObserved = observedRecovery(report);
   const nextObserved = observedRecovery(after);
   const manaObservationStale = Boolean(after.character.survival?.manaObservationStale);
@@ -305,9 +328,13 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
       {label:'MP 수지 · '+row.label,a:row.balance,b:next?.balance,unit:'/초'},
     ];
   });
-  if (previousObserved || nextObserved)
-    resourceRecovery.unshift({label:basis==='assumedDps'?'입력 조건 · 관측 MP 수지':'관측 MP 수지',a:previousObserved?.balance,
-      b:manaObservationStale?null:nextObserved?.balance,unit:'/초'});
+  if (previousObserved || nextObserved) {
+    const prefix=basis==='assumedDps'?'입력 조건 · ':'';
+    resourceRecovery.unshift(
+      {label:prefix+'관측 MP 자연 회복',a:previousObserved?.value,b:nextObserved?.value,unit:'/초'},
+      {label:prefix+'관측 MP 수지',a:previousObserved?.balance,b:manaObservationStale?null:nextObserved?.balance,unit:'/초'},
+    );
+  }
   const resourceCosts=[
     {label:'수동 시전 MP/초',a:beforeResources?.manaPerSecond,b:afterResources?.manaPerSecond},
     {label:'수동 시전 HP/초',a:beforeResources?.lifePerSecond,b:afterResources?.lifePerSecond},

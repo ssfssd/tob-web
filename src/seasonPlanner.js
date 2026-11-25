@@ -88,6 +88,12 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
     } catch(e){state.draftSaved=false;state.draftError=e.message||'임시 저장에 실패했습니다. 저장 버튼으로 빌드를 보관하세요.';}
   }
   let root;
+  function captureAnalysisOrigin() {
+    if(!state.dirty&&savedDocument?.id===state.document.id)return null;
+    const origin=importSeasonWorkspace(exportSeasonWorkspace(state.document));
+    origin.targetBuild.name=origin.targetBuild.name.slice(0,148)+' · 분석 기준 사본';
+    return origin;
+  }
   try { state.shelfCount=readShelf(storage).length; } catch { /* Opening the shelf reports the storage error. */ }
   function storeEntry(entry) {
     return storeEntries([entry]);
@@ -350,6 +356,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
         const scope=f.inResults?root.querySelector?.('#native-result-panel'):
           root.querySelector?.('.season-native-modal-body')??root.querySelector?.('.season-native-scroll');
         const field=[...(scope?.querySelectorAll?.('[data-season-edit]')??[])].find(el=>el.dataset.seasonEdit===f.edit
+          && (f.row===undefined || el.dataset.row===f.row && el.dataset.support===f.support)
           && ((el.dataset.key??el.dataset.roll)===f.key || (el.dataset.fieldAliases && JSON.parse(el.dataset.fieldAliases).includes(f.key))));
         if(field){
           for(let p=field.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
@@ -516,10 +523,10 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
             compareSeasonResourceCosts(state.report,preview.candidate.report,metric,{rowIndex});
           const {resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}=resources;
           const {dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
-            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
+            skillSpeedChanges,manualUsageChanges,elixirPhaseChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges}=preview;
           const breakdown=preview.comparison.supported&&dpsBasis===metric ? {
             dpsBasis,skillLevels,skillDpsChanges,damageCompositionChanges,damageTypeChanges,damageRoutes,
-            skillSpeedChanges,manualUsageChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges,
+            skillSpeedChanges,manualUsageChanges,elixirPhaseChanges,numbedDamageChanges,skillNumbedDamageChanges,numbedStateChanges,uptimeChanges,
           } : null;
           rows.push({supportIndex,id:support.supportId,comparison:preview.comparison,
             breakdown,resources:{resourceChanges,resourceCosts,resourceRecovery,skillResourceChanges,manaReservationChanges,manaObservationStale}});
@@ -1609,7 +1616,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if (RESULT_TABS.some(([key]) => key === d.tab)) {
             state.resultTab = d.tab;
             state.focusRole = d.focusRole;
-            if(d.tab==='conditions'&&d.field)state.focusField={edit:d.field,key:d.fieldKey,inResults:true};
+            if(d.tab==='conditions'&&d.field)state.focusField={edit:d.field,key:d.fieldKey,inResults:true,row:d.row,support:d.support};
           }
           if(d.tab==='analysis'&&rankingRequested&&!state.upgrades&&!state.showComparisonReasons)void api.rank();
           return;
@@ -1651,9 +1658,24 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           state.overlay.returnRole='support-impact-edit-'+rowIndex+'-'+socket;
           return;
         }
-        if(action==='rank-copy'){
+        if(action==='rank-copy'||action==='rank-open-copy'){
           const row=d.index==='assembled'?state.upgrades?.assembled:state.upgrades?.rows?.[Number(d.index)];
-          if(!row||row.saved)return;
+          if(!row||state.pending.size)return;
+          if(action==='rank-open-copy'){
+            if(!row.saved)return;
+            const loaded=loadSeasonWorkspaces(storage);
+            if(loaded.error)throw Error(loaded.error);
+            if(!loaded.documents.some(document=>document.id===row.saved))throw Error('저장한 사본을 찾을 수 없습니다.');
+            const origin=captureAnalysisOrigin();
+            const originId=origin?.id??state.document.id;
+            if(origin)saveSeasonWorkspace(storage,origin);
+            api.open(row.saved,{preserveCurrent:true});
+            state.rankTrialOrigin=originId;
+            state.resultTab='analysis';
+            state.focusRole='return-rank-origin';
+            return;
+          }
+          if(row.saved)return;
           const copy=copySeasonUpgrade(state.document,state.report,row);
           const saved=saveSeasonWorkspace(storage,copy);
           row.saved=saved.id;
@@ -1666,9 +1688,7 @@ export function createSeasonPlanner(storage, sourceBuild, { sourceUnavailable = 
           if(!row||state.pending.size)return;
           const metric=state.upgrades.metric;
           const copy=skill?copySeasonSkillTrial(state.document,row):copySeasonGearTrial(state.document,row);
-          const origin=state.dirty||savedDocument?.id!==state.document.id
-            ? importSeasonWorkspace(exportSeasonWorkspace(state.document)) : null;
-          if(origin)origin.targetBuild.name=origin.targetBuild.name.slice(0,148)+' · 분석 기준 사본';
+          const origin=captureAnalysisOrigin();
           const originId=origin?.id??state.document.id;
           saveSeasonWorkspaces(storage,origin?[origin,copy]:[copy]);
           api.open(copy.id,{preserveCurrent:true});

@@ -62,7 +62,7 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const composition=p.damageCompositionChanges?.length?`<table class="slot-dps-table" data-role="damage-composition-preview"><caption>발동 유형별 ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
     <thead><tr><th scope="col">유형</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.damageCompositionChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
-  const types=p.damageTypeChanges?.length?`<table class="slot-dps-table" data-role="damage-type-preview"><caption>속성별 ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
+  const types=p.damageTypeChanges?.length?`<table class="slot-dps-table" data-role="damage-type-preview"><caption>${p.damageTypeChanges.some(row=>row.type==='execute')?'속성·도태':'속성별'} ${p.dpsBasis==='assumedDps'?'방어 전 ':''}DPS 변화</caption>
     <thead><tr><th scope="col">속성</th>${headers}<th scope="col">변화</th></tr></thead>
     <tbody>${p.damageTypeChanges.map(({label,from,to})=>dpsRow(esc(label),from,to,true)).join('')}</tbody></table>`:'';
   const speed=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:4});
@@ -97,7 +97,13 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const uptimes=p.uptimeChanges?.length?`<table class="slot-dps-table" data-role="uptime-change-preview"><caption>${uptimeLabel}${uptimeDpsLabel}</caption>
     <thead><tr><th scope="col">효과</th>${headers}</tr></thead>
     <tbody>${p.uptimeChanges.map(({name,from,to,fromDps,toDps})=>`<tr><th scope="row">${esc(name)}</th><td>${uptimeValue(from,fromDps)}</td><td>${uptimeValue(to,toDps)}</td></tr>`).join('')}</tbody></table>`:'';
-  return skill+composition+types+speeds+usage+uptimes+numbedState+numbed+skillNumbed;
+  const phases=p.elixirPhaseChanges?.length?`<details data-role="elixir-phase-change-preview"><summary>영약 구간별 스킬 기여 변화</summary>
+    <table class="slot-dps-table"><thead><tr><th scope="col">스킬 · 영약</th>${headers}</tr></thead>
+    <tbody>${p.elixirPhaseChanges.map(({index,id,name,uptime,changes})=>{
+      const values=key=>changes.map(change=>`<small>${esc(change.label)} ${fmt(change[key])}</small>`).join('');
+      return `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))}<small>${esc(name)} · ${fmt(uptime)}%</small></th><td>${values('from')}</td><td>${values('to')}</td></tr>`;
+    }).join('')}</tbody></table></details>`:'';
+  return skill+composition+types+speeds+usage+uptimes+phases+numbedState+numbed+skillNumbed;
 }
 
 export function renderResourceChanges(p,esc,{board=false,skill=false,action=board?'적용':'교체'}={}){
@@ -124,7 +130,7 @@ export function renderResourceChanges(p,esc,{board=false,skill=false,action=boar
       return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${esc(sealValue(a))}</td><td>${esc(sealValue(b))}</td></tr>`;
     }).join('')}</tbody></table></details>`:'';
   if(!first&&!castCosts.length)return manaNote+perSkill+reservations;
-  const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
+  const basisNote=board&&p.dpsBasis==='assumedDps'?'<p>관측 MP 회복·수지는 입력한 전투 조건 기준입니다. 나머지 수치는 방어 전 DPS와 같은 조건으로 계산합니다.</p>':'';
   const summary=castCosts.length?castCosts.map(resourceText).join(' · '):`${p.previous?'직전 변경 · ':''}${board?'MP·HP 변화 · ':''}${resourceText(first)}`;
   const detailRows=castCosts.length?[...(first?[first]:[]),...rest]:rest;
   return detailRows.length||manaNote||basisNote||perSkill||reservations

@@ -20,7 +20,7 @@ import { seasonWeaponProfile } from './seasonWeaponProfile.js';
 import { MODULE_FIELDS, seasonModuleProfile, seasonModuleFieldKeys, calculateSeasonModule, isPersistentModuleAction } from "./seasonModules.js";
 import { checkSeasonSupportHost, validLunarEclipseLink, ICE_PERMAFROST_ID, MOON_LUNAR_RING_ID, MOON_WAX_AND_WANE_ID, VOLTAGE_TURMOIL_ID, VOLTAGE_AFTERWAVE_ID } from "./seasonSupport.js";
 import { MOON_STRIKE_ID, voltageAverageFields, VOLTAGE_AFTERWAVE_CHARGES } from "./seasonSkillMechanics.js";
-import { NETHER_CONSUMED_STATS, SEASON_SKILL_AILMENT_TAGS, netherMore, netherAfflictionEffect } from './seasonNetherRemaining.js';
+import { NETHER_CONSUMED_STATS, SEASON_SKILL_AILMENT_TAGS, netherMore, netherAfflictionEffect, netherSum } from './seasonNetherRemaining.js';
 import { netherCorePlan } from './seasonNetherDps.js';
 import { FIXED_NUMBED_FIELD, isNumbedBaseOverride } from './seasonNetherModifiers.js';
 import { seasonSupportManaMultiplier } from './seasonSkillLevels.js';
@@ -64,18 +64,21 @@ export function seasonDamageComposition(report) {
 }
 
 export const SEASON_DAMAGE_TYPE_LABELS={physical:'물리',fire:'화염',cold:'냉기',lightning:'번개',erosion:'부식',true:'트루 대미지'};
+export const SEASON_DAMAGE_BREAKDOWN_LABELS={...SEASON_DAMAGE_TYPE_LABELS,execute:'도태로 제거한 HP'};
 export function seasonDamageTypeParts(row) {
   const dps=row?.values?.dps;
   if (!row?.supported || !finite(dps) || dps<0) return null;
   if (dps===0) return [];
   const parts=Object.entries(row.damageByType??row.minionDamageByType??{});
-  if (!parts.length||parts.some(([type,value])=>!Object.hasOwn(SEASON_DAMAGE_TYPE_LABELS,type)||!finite(value)||value<0)) return null;
+  if (parts.some(([type,value])=>!Object.hasOwn(SEASON_DAMAGE_TYPE_LABELS,type)||!finite(value)||value<0)) return null;
+  if (row.executeDps > 0) parts.push(['execute',row.executeDps]);
+  if (!parts.length) return null;
   return Math.abs(parts.reduce((sum,[,value])=>sum+value,0)-dps)<=Math.max(0.00005,dps*1e-12)?parts:null;
 }
 export function seasonDamageTypeComposition(report) {
   if (!report?.supported || !finite(report.dps)) return null;
   if (!['ss14-fixed-scenario-full-dps','ss14-observed-elixir-uptime','ss14-thea-joint-combat','ss14-thea-cycle-full-dps'].includes(report.scope)) return null;
-  const totals=new Map(Object.keys(SEASON_DAMAGE_TYPE_LABELS).map(type=>[type,0]));
+  const totals=new Map(Object.keys(SEASON_DAMAGE_BREAKDOWN_LABELS).map(type=>[type,0]));
   for (const row of report.rows) {
     const parts=seasonDamageTypeParts(row);
     if (!parts) return null;
@@ -1424,6 +1427,9 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
     dotWindowIssues.set(reason,[...new Set([...(dotWindowIssues.get(reason)??[]),...indices])].sort((a,b)=>a-b));
   };
   if (automaticCycle) {
+    const variableAffliction = combat && (input?.enemy?.affliction > 0 || build.ss14Inputs?.theaEvents?.afflictionRate > 0
+      || netherSum(report.componentProjection.effects,'affliction_per_second') > 0
+      || heroMechanics.some(m=>m.kind==='thea-affliction-gain'));
     const addPersistentRow=(id,row)=>{
       const group=persistentGroups.get(id)??[];
       group.push(row);
@@ -1435,7 +1441,13 @@ export function calculateSeasonDps(build, report, { rules = SS14_DPS_RULES } = {
       if(row.permafrostBreakdown)addPersistentRow(FROST_TERRA_ID,row);
     }
     for (const [id,group] of persistentGroups) {
-      if (group.length < 2 && !group[0].dotWindows) continue;
+      if (group.length === 1 && !group[0].dotWindows) {
+        const {rowIndex} = group[0];
+        const uptime = input?.skills?.[rowIndex]?.dotUptime;
+        if (variableAffliction && uptime > 0 && uptime < 100)
+          addWindowIssue('심화가 변하는 전투에서는 지속 대미지 적용 구간을 입력하세요.',[rowIndex]);
+        continue;
+      }
       if (!combat) {
         blockers.push("자동 은총에서 동일 지속 스킬의 중첩 구간을 계산하려면 복합 계산을 켜세요.");
         continue;

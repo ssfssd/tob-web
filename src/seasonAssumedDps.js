@@ -171,7 +171,9 @@ export function calculateEditorSeasonBuild(build, options = {}) {
   const {mana, reservedManaPercent, sealedManaCompensation, unreservedMana} = scenario.character.values;
   const uptimeInputs=Object.fromEntries(Object.entries(next.ss14Inputs.dps.skills).map(([index,binding])=>[index,
     Object.fromEntries(SEASON_UPTIME_INPUTS.filter(key=>Number.isFinite(binding[key])).map(key=>[key,binding[key]]))]));
-  report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,uptimeInputs,
+  const heroCombatInputs=Object.fromEntries(scenario.componentProjection.rows.flatMap(row=>(row.heroControls??[])
+    .map(key=>[key,next.ss14Inputs.heroCombat?.[key]])));
+  report.assumedDps = {supported:estimate.supported, dps:estimate.dps, blockers:estimate.blockers, scope:estimate.scope, defaults,uptimeInputs,heroCombatInputs,
     dotWindowIssues:estimate.dotWindowIssues, dotWindowConflicts:estimate.dotWindowConflicts, dotWindowBounds:estimate.dotWindowBounds,
     dotWindowSelfOverlap:estimate.dotWindowSelfOverlap,
     dotWindowGroups:estimate.dotWindowGroups,
@@ -189,11 +191,11 @@ export function calculateEditorSeasonBuild(build, options = {}) {
       effect:scenario.theaAverage.numbedEffectAverage, duration:scenario.theaAverage.playerNumbedDuration,
       playerHits:scenario.theaAverage.playerNumbedHits,
     },
-    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,damageByType,measuredManualUses,castCostObservation})=>{
+    rows:estimate.rows.map(({id,rowIndex,supported,values,blockers,conversionTrace,elixirDamageRoutes,elixirDpsStates,manaPerUse,lifePerUse,manualManaPerSecond,manualLifePerSecond,channelCost,reaping,fissure,dotBreakdown,dotDefense,frostDefense,pools,takenMultiplier,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,minionDamageByType,damageByType,executeDps,measuredManualUses,castCostObservation})=>{
       const direct=scenario.coupledSkills.rows.find(row=>row.rowIndex===rowIndex);
       const offense=scenario.offense.rows.find(row=>row.rowIndex===rowIndex);
       return {id,rowIndex,supported,values,blockers,weaponHands,moonStrike,permafrostBreakdown,hitBreakdown,dotDefense,frostDefense,useRate:direct?.offenseBasis?.rate,
-        conversionTrace:conversionTrace??direct?.trace,minionDamageByType,damageByType,
+        conversionTrace:conversionTrace??direct?.trace,elixirDamageRoutes,elixirDpsStates,minionDamageByType,damageByType,executeDps,
         detail:{damageStages:direct?.damageStages, hasHitPools:direct?.offenseBasis?.pools?.some(p=>p.min||p.max),
           critical:offense?.values, pools, takenMultiplier, skillLevel:seasonSkillCalculationLevel(scenario,rowIndex),
           cadence:direct?.offenseBasis?.cadence,

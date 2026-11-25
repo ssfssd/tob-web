@@ -138,12 +138,13 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
   const compareTheaEvents = isThea(left) && isThea(right) && leftReport && rightReport;
   const encounter = build => ({ character:Object.fromEntries(
     Object.entries(build.ss14Inputs.character??{}).filter(([key])=>key!=='observedManaRecovery')), enemy:target(build),
-    blessings:build.ss14Inputs.blessings, heroCombat:build.ss14Inputs.heroCombat,
+    blessings:build.ss14Inputs.blessings,
     theaCycle:build.ss14Inputs.theaCycle, theaEvents:compareTheaEvents ? undefined : Object.fromEntries(
       Object.entries(build.ss14Inputs.theaEvents??{}).filter(([key])=>!independentElixirTiming.includes(key)
         && !(metric==='assumedDps'&&key==='scorchResistance'))),
     conditions:build.conditions, calculation:build.calculation });
   if (stable(encounter(left)) !== stable(encounter(right))) return false;
+  if (seasonHeroEncounterChanges(left,right,leftReport,rightReport,metric).length) return false;
   if (compareTheaEvents && seasonTheaEncounterChanges(left, right, leftReport, rightReport, metric).length) return false;
   const leftBurst=readPeriodicBurstUptime(left.ss14Inputs.dps),rightBurst=readPeriodicBurstUptime(right.ss14Inputs.dps);
   if(metric!=='assumedDps'&&leftBurst!==undefined&&rightBurst!==undefined&&leftBurst!==rightBurst
@@ -179,14 +180,36 @@ export function sameSeasonEncounter(left, right, leftReport, rightReport, metric
   if (exclusiveResourceStates.some(([low,full]) => (leftConditions.get(low)?.has(1) && rightConditions.get(full)?.has(1))
     || (rightConditions.get(low)?.has(1) && leftConditions.get(full)?.has(1)))) return false;
   if (incompatibleNearbyEnemyStates(leftConditions,rightConditions)) return false;
-  for (const [key, a] of Object.entries(left.ss14Inputs.supports ?? {})) {
-    const b = right.ss14Inputs.supports?.[key];
-    if (!b || a.itemId !== b.itemId || a.sourcePageSha256 !== b.sourcePageSha256) continue;
-    for (const [condition, value] of Object.entries(a.conditions ?? {})) {
-      if (Object.hasOwn(b.conditions ?? {}, condition) && value !== b.conditions[condition]) return false;
+  return !seasonSupportEncounterChanges(left,right,leftReport,rightReport).length
+    && !seasonExtensionEncounterChanges(left,right,leftReport,rightReport).length;
+}
+
+export function seasonHeroEncounterChanges(left,right,leftReport,rightReport,metric) {
+  const used=(build,report)=>metric==='assumedDps' && report?.assumedDps?.heroCombatInputs
+    ? report.assumedDps.heroCombatInputs
+    : report ? Object.fromEntries(report.componentProjection.rows.flatMap(row=>(row.heroControls??[])
+      .map(key=>[key,build.ss14Inputs.heroCombat?.[key]]))) : build.ss14Inputs.heroCombat??{};
+  const before=used(left,leftReport), after=used(right,rightReport);
+  return Object.entries(before).flatMap(([key,a])=>Object.hasOwn(after,key)&&a!==after[key]?[{key,a,b:after[key]}]:[]);
+}
+
+export function seasonSupportEncounterChanges(left,right,leftReport,rightReport) {
+  const activeControls=report=>new Map((report?.components??[]).filter(row=>row.category==='supports')
+    .flatMap(row=>(row.calculations??[]).map(entry=>[`${entry.rowIndex}:${entry.supportIndex}`,new Set(
+      (entry.conditionControls??[]).filter(control=>!control.automatic).map(control=>control.key))])));
+  const oldControls=activeControls(leftReport), newControls=activeControls(rightReport);
+  const changes=[];
+  for (const [slot, before] of Object.entries(left.ss14Inputs.supports ?? {})) {
+    const after = right.ss14Inputs.supports?.[slot];
+    if (!after || before.itemId !== after.itemId || before.sourcePageSha256 !== after.sourcePageSha256) continue;
+    const [rowIndex,supportIndex]=slot.split(':').map(Number);
+    for (const [key,a] of Object.entries(before.conditions ?? {})) {
+      if (leftReport&&!oldControls.get(slot)?.has(key) || rightReport&&!newControls.get(slot)?.has(key)) continue;
+      if (Object.hasOwn(after.conditions ?? {}, key) && a !== after.conditions[key])
+        changes.push({rowIndex,supportIndex,key,a,b:after.conditions[key]});
     }
   }
-  return !seasonExtensionEncounterChanges(left,right,leftReport,rightReport).length;
+  return changes;
 }
 export function seasonTimedSkillInputs(report, index, metric) {
   const row=report?.fullDps?.rows?.find(r=>r.rowIndex===index);

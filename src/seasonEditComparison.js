@@ -1,4 +1,4 @@
-import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, seasonExtensionEncounterChanges, seasonSharedSkillInputChanges, seasonSlotObservationChanges, seasonTheaEncounterChanges, seasonTimedSkillInputs, seasonUptimeInputChanges } from './seasonAdvisor.js';
+import { compareSeasonDpsSnapshots, preferredSeasonDpsMetric, seasonExtensionEncounterChanges, seasonHeroEncounterChanges, seasonSharedSkillInputChanges, seasonSlotObservationChanges, seasonSupportEncounterChanges, seasonTheaEncounterChanges, seasonTimedSkillInputs, seasonUptimeInputChanges } from './seasonAdvisor.js';
 import { compareSeasonDamageBreakdown, compareSeasonResourceCosts, compareSeasonSkillLevels } from './seasonGearPicker.js';
 import { ASSUMED_DPS_IGNORED_DEFENSE_FIELDS } from './seasonAssumedDps.js';
 import { SEASON_DPS_ENEMY_FIELDS, SEASON_DPS_SKILL_FIELDS, seasonDpsEnemyFieldDefinition, seasonDpsSkillFieldDefinition, seasonDpsSkillFieldKeys, observedSkillCostFields } from './seasonDps.js';
@@ -12,12 +12,13 @@ import { SEASON_CHARACTER_INPUTS } from './seasonCharacter.js';
 import { SEASON_BLESSINGS, blessingConditionValue, blessingLabel } from './seasonBlessings.js';
 import { boundSeasonConditions, matchingNearbyEnemyCounts, nearbyEnemyCountInput, nearbyEnemyCountLabel, nearbyEnemyGroups } from './seasonEffectConditions.js';
 import { isAuraActivationControl } from './seasonNetherModifiers.js';
+import { SEASON_HERO_COMBAT_FIELDS } from './seasonMechanicInputs.js';
 
 export function encounterInputChanges(before, after, metric) {
   const old=before.document.targetBuild, current=after.document.targetBuild;
   const changes=[];
-  const add=(label,a,b,edit,key,tab,unit='')=>{
-    if (a!==b) changes.push({label,a,b,edit,key,tab,unit});
+  const add=(label,a,b,edit,key,tab,unit='',position={})=>{
+    if (a!==b) changes.push({label,a,b,edit,key,tab,unit,...position});
   };
   const oldInputs=old.ss14Inputs, inputs=current.ss14Inputs;
   for (const [key,{label}] of Object.entries(SEASON_CHARACTER_INPUTS)) {
@@ -27,6 +28,24 @@ export function encounterInputChanges(before, after, metric) {
   if (inputs.theaCycle?.mode!=='automatic') {
     for (const key of SEASON_BLESSINGS)
       add(`${blessingLabel(key)} 중첩`,oldInputs.blessings?.[key],inputs.blessings?.[key],'blessing-input',key);
+  }
+  const heroControls=new Set(after.report.componentProjection.rows.flatMap(row=>row.heroControls??[]));
+  for (const {key,a,b} of seasonHeroEncounterChanges(old,current,before.report,after.report,metric)) {
+    const {label,min,max,integer}=SEASON_HERO_COMBAT_FIELDS[key];
+    const format=value=>value===undefined||min!==0||max!==1||!integer?value:value===1?'적용':'미적용';
+    add(label.replace(/ \(0 또는 1\)$/u,''),format(a),format(b),
+      heroControls.has(key)?'hero-combat':undefined,key);
+  }
+  for (const {rowIndex,supportIndex,key,a,b} of seasonSupportEncounterChanges(old,current,before.report,after.report)) {
+    const component=after.report.components.find(row=>row.category==='supports'&&row.calculations?.some(
+      entry=>entry.rowIndex===rowIndex&&entry.supportIndex===supportIndex));
+    const entry=component?.calculations.find(row=>row.rowIndex===rowIndex&&row.supportIndex===supportIndex);
+    const control=entry?.conditionControls?.find(control=>control.key===key);
+    if (!control) continue;
+    const label=`${rowIndex+1}번 스킬 · ${supportIndex+1}번 보조 · ${control.label}`;
+    const {choices}=control;
+    const format=value=>choices?.find(([id])=>id===value)?.[1]??value;
+    add(label,format(a),format(b),control.automatic?undefined:'support-condition',key,'conditions','',{rowIndex,supportIndex});
   }
   const manualConditions=(report,bindings)=>{
     const groups=new Map();

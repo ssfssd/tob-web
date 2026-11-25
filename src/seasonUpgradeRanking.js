@@ -572,6 +572,11 @@ export function copySeasonUpgrade(document,report,row){
   if(row.manaImpact&&(report[row.metric].manualResources?.manaPerSecond!==row.manaImpact.base
     ||copyReport[row.metric].manualResources?.manaPerSecond!==row.manaImpact.value))
     throw Error('MP 소모 기준이 바뀌었습니다. 추천을 다시 계산하세요.');
+  if(row.resources){
+    const resources=compareSeasonResourceCosts(report,copyReport,row.metric,{allActive:true});
+    if(JSON.stringify(resources)!==JSON.stringify(row.resources))
+      throw Error('MP·HP 비교 수치가 바뀌었습니다. 추천을 다시 계산하세요.');
+  }
   if(row.skillImpact){
     const {index,id,base,value,delta}=row.skillImpact;
     const before=skillDpsRow(report,row.metric,index), after=skillDpsRow(copyReport,row.metric,index);
