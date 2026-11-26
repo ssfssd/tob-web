@@ -187,6 +187,15 @@ const buildSkillInputKeys = new Set([
 ]);
 const skillConditionKeys = binding => Object.keys(binding).filter(key => !buildSkillInputKeys.has(key));
 
+export function hasSeasonSkillConditionOverrides(dps,rowIndex) {
+  return skillConditionKeys(dps?.skills?.[rowIndex]??{}).length>0;
+}
+
+export function clearSeasonSkillConditionOverrides(dps,rowIndex) {
+  const binding=dps?.skills?.[rowIndex];
+  if(binding)for(const key of skillConditionKeys(binding))delete binding[key];
+}
+
 export function hasSeasonDpsConditionOverrides(dps) {
   return !!dps && (Object.keys(dps.enemy).length > 0
     || readPeriodicBurstUptime(dps)!==undefined
@@ -197,9 +206,7 @@ export function clearSeasonDpsConditionOverrides(dps) {
   if (!dps) return;
   dps.enemy = {};
   writePeriodicBurstUptime(dps,'');
-  for (const binding of Object.values(dps.skills)) {
-    for (const key of skillConditionKeys(binding)) delete binding[key];
-  }
+  for(const rowIndex of Object.keys(dps.skills))clearSeasonSkillConditionOverrides(dps,rowIndex);
 }
 
 export function seasonDpsSkillFieldDefinition(id,key,terraChargeMaximum=1) {
@@ -609,10 +616,11 @@ function manualSkillCost(build, report, entry, rowIndex, tags, effects) {
     const basis=JSON.stringify([entry.itemId,entry.level,base,supports.map(s=>[s.supportIndex,slot.supports[s.supportIndex].supportId,s.level]),
       factors,flatReduction,increased,conversions]);
     const stale=binding?.observedSkillCostBasis!==undefined&&binding.observedSkillCostBasis!==basis;
-    if(!stale&&binding&&binding.itemId===slot?.skillId&&binding.sourcePageSha256===SS14_CARDS_EN.records[slot?.skillId]?.sourcePageSha256&&binding.observedSkillCostBasis===basis
-      && observedSkillCostFields.every(field=>validValue(SEASON_DPS_SKILL_FIELDS[field],binding[field])))
+    const bound=!stale&&binding?.itemId===slot?.skillId&&binding?.sourcePageSha256===SS14_CARDS_EN.records[slot?.skillId]?.sourcePageSha256&&binding?.observedSkillCostBasis===basis;
+    const nextField=observedSkillCostFields.find(field=>!bound||!validValue(SEASON_DPS_SKILL_FIELDS[field],binding[field]));
+    if(!nextField)
       return {mana:binding.observedFinalManaCost,life:binding.observedFinalLifeCost,observation:{basis,status:'applied'}};
-    return {observation:{basis,status:stale?'stale':'missing'},reason:stale
+    return {observation:{basis,status:stale?'stale':'missing',nextField},reason:stale
       ? '스킬 소모에 영향을 주는 구성이 바뀌었습니다. 현재 1회 MP·HP 소모를 다시 입력하세요.'
       : '고정 스킬 소모 감소와 소모량 배율·HP 전환의 적용 순서가 미확인입니다.'};
   }
@@ -648,9 +656,14 @@ function coverage(build, report, effects, gearEffects) {
   if(report.character?.values.reservedManaPercent>100)blockers.push('선택한 스킬의 MP 봉인 합이 100%를 초과합니다.');
   const nether=report.componentProjection.rows.some(r=>r.netherTalentId||r.itemId?.startsWith('nether_'));
   const inactiveAuras=new Set(report.componentProjection.rows.filter(buff=>buff.inactiveAura).map(buff=>buff.buffSkill));
+  const activeBoardIndex=build.divinity?.boards?.findIndex(board=>board.boardId===build.divinity.activeBoardId)??-1;
   for (const row of report.componentProjection.rows) blockers.push(...row.blockers.map(b => `${row.name}: ${b.reason}`));
   blockers.push(...report.componentProjection.allocation.issues.map(b => b.reason));
   for (const row of report.components) {
+    if(activeBoardIndex>=0 && row.paths.length && row.paths.every(path=>{
+      const board=/^divinity\.boards\.(\d+)\./u.exec(path);
+      return board && Number(board[1])!==activeBoardIndex;
+    }))continue;
     if (row.category === "skills" && row.calculations?.every(e => e.mechanics?.some(m => m.kind === "utility-skill"))) {
       for (const entry of row.calculations) for (const support of report.components.filter(c => c.category === "supports"))
         for (const linked of support.calculations?.filter(e => e.rowIndex === entry.rowIndex) ?? [])
@@ -692,7 +705,7 @@ function coverage(build, report, effects, gearEffects) {
     }
   }
   // A placed special/empty slate must not disappear because it has no affix row.
-  const board = build.divinity?.boards?.find(b => b.boardId === build.divinity.activeBoardId);
+  const board = build.divinity?.boards?.[activeBoardIndex];
   for (const id of new Set((board?.cells ?? []).map(c => c.slateInstanceId))) {
     const slate = board.slateInventory?.find(s => s.instanceId === id);
     const verifiedSpecial = report.componentProjection.rows.find(r => r.itemId === slate?.slateId && r.slateControls && r.path.endsWith(`.${id}`));
@@ -715,6 +728,13 @@ function coverage(build, report, effects, gearEffects) {
     row.supported && row.offenseBasis && !seasonModuleProfile(row.id) && !seasonMinionProfile(row.id)
     && [row.offenseBasis.pools,row.offenseBasis.dotPools].every(pools=>
       pools?.every(pool=>pool.type!=='lightning'||pool.max===0)));
+  const terraOnlyStats=new Set(['terra_charge_recovery_speed','terra_skill_area']);
+  const noTerra=effects.some(effect=>terraOnlyStats.has(effect.stat)) && rows.length>0 && rows.every(row=>{
+    const card=SS14_CARDS_EN.records[row.id];
+    return row.supported && row.offenseBasis && !seasonModuleProfile(row.id) && !seasonMinionProfile(row.id)
+      && card?.season==='SS14' && Array.isArray(card.tags) && !card.tags.includes('Terra')
+      && !/\bTerra (?:Charge|Skills?)\b/iu.test(card.detail??'');
+  });
   for (const effect of effects) {
     if (isNumbedBaseOverride(effect)) {
       const mayDealLightning=rows.some(row=>seasonModuleProfile(row.id)||seasonMinionProfile(row.id)
@@ -760,6 +780,7 @@ function coverage(build, report, effects, gearEffects) {
         : `조건·대상·수치 미확인: ${effect.sourceText ?? effect.stat}`); continue;
     }
     if(isObservedTerraGearEffect(effect))continue;
+    if(noTerra && terraOnlyStats.has(effect.stat) && effect.operation==='add_percent' && effect.unit==='percent')continue;
     if (Object.hasOwn(SEASON_SKILL_AILMENT_TAGS, effect.stat)) {
       if (!finite(effect.value) || !['add_percent','more'].includes(effect.operation) || effect.operation === 'more' && effect.value < -100)
         blockers.push(`스킬 상태 이상 대미지 연산 미지원: ${effect.sourceText ?? effect.stat}`);

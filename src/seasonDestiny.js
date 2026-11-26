@@ -11,6 +11,9 @@ export const pactNodeActive = (slot, key) => !slot?.inactiveNodes?.includes(key)
 // Installed SS14 config_contractPoint_ChunkA0 (SHA-256 e26801a8faf88689f5e0f2bf1a022b7676b3dc6e51da5ab8992657a281f2af3f).
 // Each area's PrevId chain is identical. The client receives the cross-area choice from the server.
 export const pactRingOrder = ['innerRing1','innerRing2','midRing1','innerRing3','innerRing4','midRing2','innerRing5','innerRing6','midRing3'];
+export function pactDestinyPath(index,key) {
+  return `pact.slots.${index}.`+(/^extra-[0-4]$/u.test(key)?`undeterminedFate.slots.${key.at(-1)}`:`rings.${key}`);
+}
 export function pactAllocationKeys(slot) {
   const keys=[...pactRingOrder,'outer'];
   if (validFateLayout(slot?.undeterminedFate)) keys.push('undetermined',...slot.undeterminedFate.slots.map((_,i)=>'extra-'+i));
@@ -70,7 +73,7 @@ export function seasonDestinyRow(build, index, ring, { data = SS14_DESTINY, extr
   const page = data.pages.en;
   const entry = page.rows.find((r) => r.slug === identity?.slug);
   const ko = data.pages.ko.rows.find((r) => r.slug === identity?.slug);
-  const path = child ? `pact.slots.${index}.undeterminedFate.slots.${extraIndex}` : `pact.slots.${index}.rings.${ring.slotId}`;
+  const path = pactDestinyPath(index,child?'extra-'+extraIndex:ring.slotId);
   const row = { path, item: { id: identity?.catalogId }, page, record: entry?.slug, text: entry?.detail,
     koText: { name: ko?.name, detail: ko?.detail }, destinyRollControls: [], reason: "" };
   const places = build.pact.slots.flatMap(pactDestinyPlaces);

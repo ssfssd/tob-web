@@ -437,12 +437,16 @@ export function supportFitsSocket(id, hostRecord, rowIndex, supportIndex) {
   return !!rules && matchesSupportHostType(rules, supportHostType(hostRecord, rowIndex));
 }
 
+export function seasonSupportGrade(name) {
+  return name?.match(/\((부귀|숭고)\)$/u)?.[1]??'일반';
+}
+
 export function seasonExclusiveSupportSlots(hostRecord, rowIndex) {
   if (!hostRecord) return [];
   const slots = new Map();
   for (const {id,name} of seasonSupportOptions()) {
-    const grade = name.match(/\((부귀|숭고)\)$/u)?.[1];
-    if (!grade) continue;
+    const grade = seasonSupportGrade(name);
+    if (grade==='일반') continue;
     const index = seasonSupportRequiredSlot(SS14_SUPPORTS_EN.records[id]);
     if (index === null || !supportFitsSocket(id,hostRecord,rowIndex,index)) continue;
     const grades = slots.get(index) ?? new Set();

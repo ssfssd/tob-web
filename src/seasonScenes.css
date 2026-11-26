@@ -106,6 +106,8 @@ label[data-elixir-input][hidden] { display: none !important; }
 .hunter-gallery img { width: 100%; height: 80px; object-fit: cover; object-position: 50% 18%; }
 .hunter-gallery button span { display: grid; padding: 5px; }
 .hunter-gallery small { font-size: 11px; color: #c9bd9d; }
+.hunter-preview {margin-bottom:10px;padding:8px 10px;border:1px solid #625744;background:#1c2228}
+.hunter-preview :is(h3,p) {margin:3px 0;overflow-wrap:anywhere}
 .trait-deck { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,155px),1fr)); gap: 10px; }
 .trait-deck article { display: flex; flex-direction: column; min-width: 0; }
 .trait-deck article .trait-choice { flex: 1; width: 100%; }
@@ -374,6 +376,9 @@ label[data-elixir-input][hidden] { display: none !important; }
 .board-workbench:has(> .board-comparison > [data-role="board-change-detail"]:only-child:empty) {grid-template-columns:minmax(0,1fr)}
 .board-option-diff {margin:0;padding:0;overflow:auto;max-height:36dvh;list-style:none}
 .board-option-diff li {padding:6px 0;border-top:1px solid #46515a;overflow-wrap:anywhere}
+.board-slate-shape-diff {display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.board-slate-shape-diff > span {display:inline-flex;align-items:center;gap:4px}
+.board-slate-shape-diff .slate-shape-icon {display:block;width:24px;height:20px;color:#d1ba8e}
 @media(min-width:761px){
   .board-workbench:has(.tree-gallery) {grid-template-columns:minmax(0,1fr)}
   .board-workbench:has(.tree-gallery) .board-comparison {position:static;display:flex;align-items:center;flex-wrap:wrap;gap:10px;border-left:0;border-top:1px solid #504b43;max-height:none}
@@ -386,14 +391,17 @@ label[data-elixir-input][hidden] { display: none !important; }
   .board-option-diff {max-height:20dvh}
 }
 .drawer-dps {display:none}
-:is(.board-drawer,.extension-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps {display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;background:#182129;border-top:1px solid #8c7753}
-:is(.board-drawer,.extension-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps strong {display:block;font-variant-numeric:tabular-nums}
-:is(.board-drawer,.extension-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps button {min-height:44px;flex:none}
+:is(.board-drawer,.extension-workspace,.hero-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps {display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;background:#182129;border-top:1px solid #8c7753}
+:is(.board-drawer,.extension-workspace,.hero-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps strong {display:block;font-variant-numeric:tabular-nums}
+:is(.board-drawer,.extension-workspace,.hero-workspace,.season-native-modal:has(.shelf-toolbar)) > .drawer-dps button {min-height:44px;flex:none}
 .board-dps-actions {display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}
 .board-dps-actions button {white-space:nowrap}
 .season-native .skill-workspace {width:min(1440px,100%);background:#111214}
 .skill-selection-pane,.skill-link-board {min-width:0}
 .skill-header-actions {display:flex;flex-wrap:wrap;gap:4px}
+.skill-swap-preview ul {display:grid;gap:6px;list-style:none;padding:0}
+.skill-swap-preview li {display:grid;gap:3px;padding:7px 10px;background:#1b2024;border:1px solid #49443b;overflow-wrap:anywhere}
+.skill-swap-preview :is(small,span) {color:#c6c5be}
 .season-native .show-skill-links {display:none}
 .skill-overview .equipped-list {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px}
 .skill-overview .equipped-list > :is(h2,p,.skill-chain:first-of-type) {grid-column:1/-1}
@@ -430,17 +438,28 @@ label[data-elixir-input][hidden] { display: none !important; }
 .season-native .skill-board-steps button {min-height:28px;width:22px;padding:0}
 .skill-tag-list {display:flex;flex-wrap:wrap;gap:2px;align-content:start}
 .skill-tag-filter {min-width:0}
+.skill-catalog-filters {display:grid;gap:4px;min-width:0}
+.skill-catalog-filters > label {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.skill-catalog-filters select {width:auto;max-width:100%}
 .skill-tag-filter summary {overflow-wrap:anywhere;cursor:pointer}
 .equipped-skill-identity {display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #343438}
 .equipped-skill-identity img {width:52px;height:52px;object-fit:contain}
 .equipped-skill-identity h3 {margin:3px 0;font-size:18px}
 .equipped-skill-identity small {color:#aaaab2}
+.equipped-skill-identity .equipped-skill-parent {min-height:44px;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.equipped-skill-links {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,156px),1fr));gap:4px;margin-block:8px}
+.season-native .equipped-skill-links > button {display:flex;align-items:center;justify-content:flex-start;gap:6px;min-width:0;min-height:44px;padding:4px 6px;text-align:left}
+.equipped-skill-links img {width:30px;height:30px;flex:none;object-fit:contain}
+.equipped-skill-links span {display:grid;min-width:0;white-space:normal;overflow-wrap:anywhere}
+.equipped-skill-links small {color:#d3c4a8;font-variant-numeric:tabular-nums}
 .season-native .skill-selection-pane :is(input[type=number],select) {background:#202124;border-color:#414145}
 .season-native .skill-tag-list label {display:flex;flex-direction:row;align-items:center;gap:4px;margin:0;padding:4px 6px;cursor:pointer}
 .skill-tag-list input {width:16px;height:16px;min-height:0;margin:0}
 .skill-tag-list label small,.skill-catalog [data-picker-count] {color:#c7c4bc;font-variant-numeric:tabular-nums}
 .skill-catalog [data-picker-count] {font-size:12px;white-space:nowrap}
-.equipment-catalog > div[data-picker-empty]:not([hidden]) {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.native-item-picker > div[data-picker-empty]:not([hidden]) {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+[data-support-search-slots]:not(:empty) {display:flex;flex-wrap:wrap;gap:6px}
+[data-support-search-slots]:empty {display:none}
 .skill-catalog .native-picker-list small {display:block;color:#c6c3be;font-size:11px}
 .skill-catalog .native-picker-list button {min-height:46px}
 .skill-candidate-row {border-radius:5px;background:#232428}
@@ -453,9 +472,11 @@ label[data-elixir-input][hidden] { display: none !important; }
 .skill-candidate-identity {display:flex;align-items:center;gap:8px;margin:0 0 8px}
 .skill-candidate-identity img {width:36px;height:36px;object-fit:contain;flex-shrink:0}
 .skill-candidate-identity h3 {margin:0;font-size:14px}
+.skill-removed-supports {margin-block:8px;padding:6px 8px;border-inline-start:2px solid #ba955c;background:#24211d;color:#f0dec0;overflow-wrap:anywhere}
+.skill-removed-supports ul {margin:4px 0 0;padding-inline-start:1.35em}
 .season-native .show-skill-candidates {display:none}
 @media(max-width:520px) {
-  .season-native .has-skill-candidate > :is(header,.skill-tag-filter,[data-picker-empty]),
+  .season-native .has-skill-candidate > :is(header,.skill-catalog-filters,[data-picker-empty]),
   .season-native .has-skill-candidate .native-picker-list {display:none}
   .season-native .has-skill-candidate .native-picker-columns {grid-template-columns:minmax(0,1fr)}
   .season-native .show-skill-candidates {display:inline-flex;margin-bottom:8px}
@@ -472,7 +493,7 @@ label[data-elixir-input][hidden] { display: none !important; }
   .skill-workspace .skill-catalog {height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto minmax(0,1fr);gap:4px}
   .skill-workspace .skill-catalog > header {grid-row:1;display:flex;align-items:center;gap:6px;margin:0;padding:0;border:0}
   .skill-catalog > header input {flex:1;min-width:0}
-  .skill-catalog .skill-tag-filter {grid-row:2}
+  .skill-catalog .skill-catalog-filters {grid-row:2}
   .skill-catalog .skill-tag-list {max-height:96px;overflow:auto}
   .skill-catalog > [data-picker-empty] {grid-row:3}
   .skill-workspace .skill-catalog .native-picker-columns {grid-row:4;display:flex;flex-direction:column;min-height:0;gap:5px}
@@ -493,6 +514,11 @@ label[data-elixir-input][hidden] { display: none !important; }
 .build-overview .hunter-scene,.build-overview .equipped-list {background:#191a1c}
 .overview-boards,.gear-header-actions,.gear-header-actions .native-slot-actions {display:flex;align-items:center;flex-wrap:wrap;gap:6px}
 .build-overview {container-type:inline-size}
+.overview-loadout {display:grid;gap:16px;align-items:start}
+.overview-loadout > * {min-width:0}
+@container (min-width:1040px) {
+  .overview-loadout {grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)}
+}
 .build-overview .overview-boards {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
 .overview-boards section {min-width:0}
 .overview-boards section:last-child {grid-column:1/-1}
@@ -548,6 +574,11 @@ label[data-elixir-input][hidden] { display: none !important; }
 .shelf-record span {min-width:0;overflow-wrap:anywhere}
 .shelf-candidate {min-width:0;position:sticky;top:0;background:#191d22;padding:12px;scroll-margin-block:12px;outline-offset:-2px}
 .shelf-candidate h3 {margin-top:0;overflow-wrap:anywhere}
+.shelf-candidate :is([data-shelf-gear-target],[data-shelf-name]) {min-width:0;max-width:100%}
+.shelf-slate-layouts {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-block:8px 12px}
+.shelf-slate-layouts figure {min-width:0;margin:0;text-align:center}
+.shelf-slate-layouts figcaption {margin-bottom:5px}
+.season-native .shelf-slate-layouts .slate-board-cell {display:grid;place-items:center;cursor:default;font-size:.8rem}
 .shelf-option-list {padding-left:18px;overflow-wrap:anywhere}
 .shelf-option-list li {margin-block:6px;white-space:pre-line}
 .shelf-no-selection {color:#aaa}
@@ -645,14 +676,19 @@ label[data-elixir-input][hidden] { display: none !important; }
 .craft-families section {min-width:0}
 .craft-families h3 {display:flex;justify-content:space-between;align-items:baseline;margin:8px 0}
 .craft-affix {display:block;width:100%;box-sizing:border-box;margin:4px 0;padding:8px;border:1px solid #414345;background:#191a1c}
-.craft-affix summary {cursor:pointer}
-.craft-affix select {width:100%;min-width:0}
+.season-native .craft-affix-toggle {display:grid;gap:2px;width:100%;text-align:left;white-space:pre-line}
+.craft-affix-header {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:6px}
+.season-native .craft-affix-header select {width:auto;min-width:0;min-height:36px}
+.craft-affix-picker {display:grid;gap:6px;margin-top:6px}
+.craft-affix-picker input {width:100%;min-width:0;box-sizing:border-box}
+.craft-affix-choices {display:grid;gap:3px;overflow:auto;max-height:min(240px,36dvh)}
+.season-native .craft-affix-choices button {text-align:left;white-space:pre-line;overflow-wrap:anywhere}
+.craft-affix-picker [hidden] {display:none!important}
 .craft-roll-pair input[type=range] {width:100%;min-height:24px;accent-color:#e6c078}
 .season-native .craft-option-roll {margin:8px 0;padding:6px 0;border-top:1px solid #333438}
 .season-native .craft-option-roll>label {display:grid;grid-template-columns:minmax(0,1fr) 64px;align-items:center;gap:8px;margin:0;font-size:12px;line-height:1.5}
 .season-native .craft-option-roll input[type=number] {width:100%;min-width:0;padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums}
 .season-native .craft-option-roll input[type=range] {display:block;margin:2px 0 0;padding:0;min-height:24px}
-.season-native .craft-affix>details {margin:6px 0;padding:0;border:0;background:transparent;font-size:12px}
 .season-native .candidate-receipt>.native-option-source {margin:8px 0 0;padding:0;border:0;background:transparent;font-size:12px}
 @media(max-width:760px){
   .season-native .craft-option-roll input[type=number] {min-height:44px}
@@ -705,6 +741,10 @@ label[data-elixir-input][hidden] { display: none !important; }
   .equipment-drawer .equipment-catalog > header input {min-width:0;max-width:100%}
 }
 .upgrade-ranking {padding-inline-start:2em}
+.analysis-filters {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,130px),1fr));align-items:end;gap:8px;margin-bottom:10px}
+.analysis-filters > label {min-width:0;margin:0}
+.analysis-filters > label :is(select,input[type="search"]) {width:100%;min-width:0}
+.analysis-filters > :is(.analysis-roll-toggle,details,button) {grid-column:1 / -1}
 .skill-contributions table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 .skill-contributions :is(th,td) {padding:6px;text-align:right;border-bottom:1px solid #353638}
 .skill-contributions th:first-child {text-align:left}
@@ -797,6 +837,14 @@ label[data-elixir-input][hidden] { display: none !important; }
   .has-candidate-editor > :is(.catalog-rail,header,[data-picker-empty]),
   .has-candidate-editor .native-picker-list {display:none}
   .gear-drawer .has-candidate-editor .native-picker-columns {grid-template: minmax(0,1fr) / minmax(0,1fr)}
+  .season-native .equipment-drawer:has(.has-candidate-editor) > header {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 8px;padding:6px 12px
+  }
+  .equipment-drawer:has(.has-candidate-editor) .gear-header-actions {display:contents}
+  .equipment-drawer:has(.has-candidate-editor) .gear-header-actions .native-slot-actions {grid-column:1 / -1;grid-row:2}
+  .equipment-drawer:has(.has-candidate-editor) .gear-header-actions > button {grid-column:2;grid-row:1;min-height:44px}
+  .gear-drawer .gear-candidate-page > nav {gap:4px}
+  .gear-drawer .gear-candidate-page > nav button {width:auto;min-height:44px;padding-inline:5px}
 }
 .candidate-options,.candidate-receipt {min-width:0;overflow-wrap:anywhere}
 .candidate-options fieldset {min-width:0;margin:0 0 18px;padding:0;border:0}
@@ -810,9 +858,10 @@ label[data-elixir-input][hidden] { display: none !important; }
 .candidate-options .legendary-roll {padding:4px 8px;background:#1d1e20;border-radius:6px}
 .candidate-options .legendary-roll input[type=range] {flex:1;width:auto;accent-color:#f2f2f2}
 .candidate-receipt {padding:14px;background:#202125;color:#f2f2f2;border:1px solid #323337;border-radius:8px}
-.candidate-receipt>header {display:flex;gap:10px;align-items:center}
-.candidate-receipt>header img {width:54px;height:54px;object-fit:contain;background:#151518;border:1px solid #84673e}
-.candidate-receipt h3 {margin:0;font-size:1.1rem}
+.candidate-identity {display:flex;grid-column:1 / -1;gap:10px;align-items:center;min-width:0;overflow-wrap:anywhere}
+.candidate-identity img {width:42px;height:42px;object-fit:contain;background:#151518;border:1px solid #84673e}
+.gear-drawer .candidate-identity h3 {min-height:0;margin:0;font-size:1.1rem}
+.gear-drawer .candidate-identity small {display:block;color:#c6cbd0;font-size:.75rem;font-weight:400}
 .candidate-receipt ul {margin:12px 0;padding:10px 0;border-block:1px solid #38393d;list-style:none}
 .candidate-receipt li {padding:3px 0}
 .season-native .candidate-receipt details {margin-block:2px}

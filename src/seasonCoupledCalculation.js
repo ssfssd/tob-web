@@ -147,8 +147,10 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
     const reasons = [...blockers, ...entry.blockers];
     const record = skills.records?.[row.id];
     const skillInput = build.ss14Inputs?.dps?.skills?.[entry.rowIndex];
-    if (skillInput?.itemId === row.id && skillInput.sourcePageSha256 === record?.sourcePageSha256
-      && manualAddedLightningRange(skillInput) === null) reasons.push(ADDED_LIGHTNING_RANGE_ISSUE);
+    const invalidLightning=skillInput?.itemId===row.id&&skillInput.sourcePageSha256===record?.sourcePageSha256
+      &&manualAddedLightningRange(skillInput)===null;
+    const lightningRepair=invalidLightning?(Number.isFinite(skillInput.addedLightningMin)&&skillInput.addedLightningMin>=0?'addedLightningMax':'addedLightningMin'):null;
+    if (invalidLightning) reasons.push(ADDED_LIGHTNING_RANGE_ISSUE);
     const weaponIssue=seasonWeaponRestrictionIssue(build,record);
     if(weaponIssue)reasons.push(`${row.name}: ${weaponIssue}`);
     const item = findItemById(row.id);
@@ -391,6 +393,7 @@ export function calculateSeasonCoupledSkills(components, skills, componentProjec
           || evaluation.reaping && (!observedReaping || evaluation.reaping.repeatChance !== undefined)
           || evaluation.critical?.conditionalDamageMultiplier),
         criticalEffects: evaluatedEffects.filter((e) => /critical/iu.test(e.stat)) } : null,
+      ...(lightningRepair&&{lightningRepair}),
       blockers: [...new Set(reasons)], receipts: [entry.receipt, ...gear.map((entry) => entry.receipt), ...supportReceipts, ...componentReceipts].filter(Boolean),
       trace: supported && !weaponHands ? evaluation.applied.map(effect => ({ ...effect,
         effectSource: evaluatedEffects[effect.inputIndex]?.effectSource ?? null })) : [] };

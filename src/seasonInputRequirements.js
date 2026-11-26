@@ -25,6 +25,28 @@ const routes = [
   { id: "modules", label: "모듈·소환체 조건", section: "skills", type: "extensions", role: "native-extension-conditions", pattern: /모듈|소환체|오라 범위|처형 대상/u },
   { id: "combat", label: "스킬·대상 전투 조건", section: "combat", role: "season-dps-input", pattern: /전투 입력|시전 시간 배분|대상 적중률|적 아머|적 (?:유효 )?(?:화염|냉기|번개|부식) 저항|지속 대미지 유지율|적 심화 수치|DPS 공식|전체 DPS(?:를)? 산출/u },
 ];
+export function rankTrialInputs(report,dps,reasons=dps?.blockers??[]) {
+  const links=new Map();
+  for(const reason of reasons)for(const link of inputDestinations(report,reason,dps)){
+    if(!link.edit||!link.key)continue;
+    const id=JSON.stringify([link.edit,link.key,link.index,link.supportIndex,link.ring]);
+    if(!links.has(id))links.set(id,link);
+  }
+  return [...links.values()];
+}
+const combatConditionNames={
+  'self-low-life':'위중 상태', 'at Full Life':'최대 HP 상태',
+  'self-low-energy-shield':'낮은 보호막 상태', 'self-full-energy-shield':'최대 보호막 상태',
+  'while moving':'이동 중', 'while standing still':'정지 중', 'while channeling':'채널링 중',
+  'while Barrier is active':'장벽 활성', 'against Cursed enemies':'대상이 저주 상태',
+};
+export function seasonConditionControlLabel(control) {
+  const korean=text=>/[가-힣]/u.test(text??'')&&!/\p{Script=Han}/u.test(text??'');
+  if(korean(control.label))return control.label.replace(' (0: 미충족, 1: 충족)','');
+  const state=Object.hasOwn(combatConditionNames,control.conditionGroup)?combatConditionNames[control.conditionGroup]:null;
+  if(state)return state+(control.inverted?' 아님':'');
+  return korean(control.expression)?control.expression:'';
+}
 export function inputDestinations(report,reason,dps=report?.fullDps) {
   const links=[];
   if (reason===WEAPON_PHYSICAL_BASE_UNVERIFIED)
@@ -56,8 +78,9 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
       return [{section:'pact',index,ring:ring??`extra-${extra}`,edit:'destiny-roll',key:missing.key,label:`정령 ${index+1} · ${label} 수치 입력`}];
     });
   if (/고정 스킬 소모 감소와 소모량 배율|현재 1회 MP·HP 소모를 다시 입력/u.test(reason))
-    return (dps?.rows??[]).filter(row=>row.castCostObservation&&row.blockers?.includes(reason))
-      .map(row=>({section:'combat',tab:'conditions',label:`스킬 ${row.rowIndex+1} 관측 소모 입력`,edit:'dps-input',key:`${row.rowIndex}:observedFinalManaCost`}));
+    return (dps?.rows??[]).filter(row=>row.castCostObservation?.nextField&&row.blockers?.includes(reason))
+      .map(({rowIndex,castCostObservation:{nextField}})=>({section:'combat',tab:'conditions',
+        label:`스킬 ${rowIndex+1} 관측 ${nextField==='observedFinalLifeCost'?'HP':'MP'} 소모 입력`,edit:'dps-input',key:`${rowIndex}:${nextField}`}));
   if(customOptions.pattern.test(reason))return [customOptions];
   if(reason.startsWith('두 영약 동시 활성 시간 비율'))
     return [{section:'combat',label:'영약 동시 활성 비율 입력',edit:'extension-input',key:'elixir:overlap'}];
@@ -75,9 +98,10 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
     });
   if(reason === '간헐적 폭발의 현재 적용 여부를 선택하세요.')
     return [{section:'combat',label:'간헐적 폭발 상태 선택',edit:'dps-input',key:'0:periodicBurstUptime'}];
-  if (reason === ADDED_LIGHTNING_RANGE_ISSUE) return (dps?.rows ?? [])
-    .filter(row => Number.isInteger(row.rowIndex) && row.blockers?.includes(reason))
-    .map(row => ({section:'combat',label:`스킬 ${row.rowIndex+1} 추가 번개 범위 입력`,edit:'dps-input',key:`${row.rowIndex}:addedLightningMin`}));
+  if (reason === ADDED_LIGHTNING_RANGE_ISSUE) return (report?.coupledSkills?.rows??[])
+    .filter(row=>row.lightningRepair&&dps?.rows?.some(result=>result.rowIndex===row.rowIndex&&result.blockers?.includes(reason)))
+    .map(({rowIndex,lightningRepair})=>({section:'combat',tab:'conditions',label:`스킬 ${rowIndex+1} 추가 번개 ${lightningRepair==='addedLightningMin'?'최소':'최대'} 입력`,
+      edit:'dps-input',key:`${rowIndex}:${lightningRepair}`}));
   if(reason.includes('자동 은총과 균열 후속 적중을 함께 계산하려면'))
     return [{section:'combat',label:'복합 발동 설정',edit:'thea-event',key:'combatMode'}];
   if(reason === REVELATION_NUMBED_REQUIRED)
@@ -134,8 +158,11 @@ export function inputDestinations(report,reason,dps=report?.fullDps) {
         if(control.numbedMinimum>0&&!legacyNumbed&&!control.timedNumbed)
           add('combat','마취 중첩 입력','dps-input','enemy:numbedStacks',{tab:'conditions'});
         else if(nearbyEnemyGroups.includes(control.conditionGroup)){
-          if(!links.some(link=>link.key===nearbyEnemyCountInput))add('combat','주변 적 수 선택',nearbyEnemyCountInput,nearbyEnemyCountInput);
-        }else add('combat',control.label??'장비 효과 조건 입력','component-condition',control.key);
+          if(!links.some(link=>link.key===nearbyEnemyCountInput))add('combat','주변 적 수 선택',nearbyEnemyCountInput,nearbyEnemyCountInput,{tab:'conditions'});
+        }else {
+          const label=seasonConditionControlLabel(control);
+          add('combat',label?`${label} 입력`:'장비 효과 조건 입력','component-condition',control.key,{tab:'conditions'});
+        }
       }
   }
   if(reason.includes('같은 상태의 조건·중첩 입력이 서로 충돌합니다')){

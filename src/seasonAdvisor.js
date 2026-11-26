@@ -13,7 +13,7 @@ import { theaElixirTimingKeys } from './seasonTheaEvents.js';
 import { isThea } from './seasonTheaRevelation.js';
 import { observedSkillCostFields } from './seasonDps.js';
 import { usesExtensionInput } from './seasonExtensions.js';
-import { seasonPartialDpsReview } from './seasonCalculationIssues.js';
+import { seasonCalculationIssues, seasonPartialDpsReview } from './seasonCalculationIssues.js';
 
 export const SEASON_ADVISOR_METRICS = {
   fullDps: "동일 전투 조건의 전체 DPS",
@@ -297,7 +297,8 @@ export function compareSeasonDpsSnapshots(before, after, metric = 'fullDps') {
 // An explicitly bounded comparison of saved inputs, never a full-build or cost
 // optimizer. Unknown changes and different combat scenarios cannot be ranked.
 export function recommendSeasonWorkspaces(document, candidates, metric = "life", {
-  baselineReport, describeDpsChange, describeEncounterChanges, confirmationFor = ()=>null,
+  baselineReport, describeDpsChange, describeEncounterChanges, describeLoadoutChanges, confirmationFor = ()=>null,
+  useBaselineEnemy = false,
 } = {}) {
   const partialMetric = metric === 'partialDps';
   if (!partialMetric && !Object.hasOwn(SEASON_ADVISOR_METRICS, metric)) throw new Error("비교할 SS14 지표를 선택하세요.");
@@ -313,6 +314,7 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life",
   const baselinePartial = partialMetric ? confirmedPartial(document,baseline) : null;
   const baselineExclusions = baselinePartial ? stable(baselinePartial.exclusionScope) : null;
   const baseValue = partialMetric ? baselinePartial?.dps ?? null : metricValue(baseline, metric);
+  const baselineIssues=dpsMetric&&!partialMetric&&!Number.isFinite(baseValue)?seasonCalculationIssues(baseline,metric):[];
   const baselineReasons = validationReasons(document, baseline);
   if (!Number.isFinite(baseValue)) baselineReasons.push(partialMetric?'기준 빌드의 제외 항목을 먼저 확인하세요.':"기준 문서의 선택 지표가 미지원입니다.");
   const seen = new Set([document.id]);
@@ -324,7 +326,13 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life",
     let report;
     try {
       exportSeasonWorkspace(candidate);
+      if (metric==='fullDps' && useBaselineEnemy) {
+        const {targetBuild}=candidate, {ss14Inputs}=targetBuild;
+        const enemy=document.targetBuild.ss14Inputs.dps?.enemy;
+        candidate={...candidate,targetBuild:{...targetBuild,ss14Inputs:{...ss14Inputs,dps:{...ss14Inputs.dps,enemy}}}};
+      }
       report = calculate(candidate.targetBuild, { sourceBuild: candidate.sourceBuild });
+      if(describeLoadoutChanges)Object.assign(row,describeLoadoutChanges({document,report:baseline},{document:candidate,report}));
       reasons.push(...validationReasons(candidate, report));
       if (!dpsMetric && stable(document.sourceBuild) !== stable(candidate.sourceBuild)) reasons.push("최초 SS13 원본이 서로 다릅니다.");
       if (dpsMetric ? !sameSeasonEncounter(document.targetBuild,candidate.targetBuild,baseline,report,encounterMetric)
@@ -343,18 +351,23 @@ export function recommendSeasonWorkspaces(document, candidates, metric = "life",
         else if (!reasons.length) row.value=partial.dps;
       } else {
         row.value = metricValue(report, metric);
-        if (!Number.isFinite(row.value)) reasons.push("후보의 선택 지표가 미지원입니다.");
+        if (!Number.isFinite(row.value)) {
+          reasons.push("후보의 선택 지표가 미지원입니다.");
+          if(dpsMetric)row.calculationIssues=seasonCalculationIssues(report,metric);
+        }
       }
     } catch { reasons.push("SS14 후보 문서 형식 검증 실패"); }
     if (!reasons.length) {
       row.delta = row.value - baseValue;
-      if (dpsMetric && !partialMetric && describeDpsChange) row.changes=describeDpsChange(baseline,report,metric);
+      if (dpsMetric && !partialMetric && describeDpsChange) row.changes={
+        ...describeDpsChange(baseline,report,metric),...(row.skillChanges&&{levels:row.skillChanges}),
+      };
     }
     return row;
   });
   const eligible = rows.filter((r) => !r.reasons.length).sort((a, b) => b.value - a.value || a.id.localeCompare(b.id));
   const best = !partialMetric && eligible[0]?.delta > 0 ? eligible.filter((r) => r.value === eligible[0].value).map((r) => r.id) : [];
-  return { metric, baseValue, baselineReasons, rows, best, excluded:baselinePartial?.excluded, fullBuildSupported: false,
+  return { metric, baseValue, baselineReasons, baselineIssues, rows, best, excluded:baselinePartial?.excluded, fullBuildSupported: false,
     scope: "saved-ss14-documents-confirmed-subset", gameProbability: null, expectedGameCost: null,
     limitation: "저장된 후보의 확인된 효과만 비교합니다. 미해석 효과가 같아도 전체 성능 우열을 보장하지 않으며 전체 빌드·최적해·제작 기대비용 추천이 아닙니다." };
 }

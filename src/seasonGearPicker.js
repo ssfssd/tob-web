@@ -6,8 +6,9 @@ import { compareSeasonDpsSnapshots } from './seasonAdvisor.js';
 import { compareSeasonPartialDps } from './seasonCalculationIssues.js';
 import { itemGearKind } from './seasonItemCraft.js';
 import { normalizeBuild } from './engine.js';
-import { SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
+import { getSeasonSelectionOptions, SEASON_GEAR_SLOT_LABELS } from './seasonSelections.js';
 import { summarizeSeasonOptionSources } from './seasonNumericStats.js';
+import { describeSeasonOptionChange } from './seasonNumericStatsView.js';
 import { seasonSkillCalculationLevel, seasonSkillLevelState, seasonSkillSlotCalculation } from './seasonSkillLevels.js';
 import { getSkillEnergyUsage } from './skillRuntimeModel.js';
 import { auraActivationControl } from './seasonNetherModifiers.js';
@@ -59,6 +60,19 @@ function gearOptionsForSlots(report, slots) {
 export function gearOptionComparisons(before, after, slots) {
   const beforeOptions=gearOptionsForSlots(before,slots), afterOptions=gearOptionsForSlots(after,slots);
   return [...new Set([...beforeOptions.keys(),...afterOptions.keys()])].map(key=>({before:beforeOptions.get(key),after:afterOptions.get(key)}));
+}
+
+export function compareSavedGear(before, after) {
+  const left=normalizeBuild(before.document.targetBuild).gear.slots;
+  const right=normalizeBuild(after.document.targetBuild).gear.slots;
+  return SEASON_GEAR_SLOT_LABELS.flatMap((label,index)=>{
+    const from=left[index]?.itemId, to=right[index]?.itemId;
+    if(!from&&!to)return [];
+    const options=gearOptionComparisons(before.report,after.report,[index]).map(describeSeasonOptionChange).filter(Boolean);
+    if(from===to&&!options.length)return [];
+    const name=id=>id?getSeasonSelectionOptions('gear',index).find(item=>item.id===id)?.name??'한국어 이름 미제공':'미장착';
+    return [{label,before:name(from),after:name(to),replaced:from!==to,options}];
+  });
 }
 
 function weaponComparisons(before, after, slots) {
@@ -216,7 +230,8 @@ function numbedStateChanges(before, after, metric) {
 }
 
 function skillSpeedChanges(before, after, metric) {
-  if ([before,after].some(report=>['ss14-observed-elixir-uptime','ss14-thea-joint-combat'].includes(report[metric].scope)
+  const joint=metric==='fullDps'&&[before,after].every(report=>report[metric].scope==='ss14-thea-joint-combat');
+  if (!joint&&[before,after].some(report=>['ss14-observed-elixir-uptime','ss14-thea-joint-combat'].includes(report[metric].scope)
     || (metric==='fullDps'?report.theaAverage?.supported:report.assumedDps.measuredResources))) return [];
   const cadence=(report,row)=>metric==='assumedDps'?row.detail?.cadence
     : report.coupledSkills.rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id)?.offenseBasis?.cadence;
@@ -224,8 +239,10 @@ function skillSpeedChanges(before, after, metric) {
     const old=before[metric].rows.find(entry=>entry.rowIndex===row.rowIndex&&entry.id===row.id);
     if(!row.supported||!old?.supported)return [];
     const a=cadence(before,old), b=cadence(after,row);
+    const fixedManualRate=joint&&row.values.manualRate===old.values.manualRate?row.values.manualRate:null;
     return a&&b&&a.kind===b.kind&&Number.isFinite(a.rate)&&Number.isFinite(b.rate)&&a.rate.toFixed(4)!==b.rate.toFixed(4)
-      ? [{index:row.rowIndex,id:row.id,kind:b.kind,from:a.rate,to:b.rate}] : [];
+      ? [{index:row.rowIndex,id:row.id,kind:b.kind,from:a.rate,to:b.rate,
+        ...(Number.isFinite(fixedManualRate)&&{fixedManualRate})}] : [];
   });
 }
 
@@ -396,6 +413,11 @@ export function compareSeasonResourceCosts(report,after,basis,{allActive=false,r
     elixirManaBalanceChanges:compareElixirManaBalances(report,after,basis)};
 }
 
+export function compareRemovedSkillSupports(before,after) {
+  return before?.supports?.flatMap((support,supportIndex)=>support&&!after?.supports?.[supportIndex]
+    ? [{supportIndex,id:support.supportId,level:support.level}] : [])??[];
+}
+
 export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metric='fullDps'}={}) {
   const next=editSeasonWorkspace(document,edit);
   const after=calculateEditorSeasonBuild(next.targetBuild,{sourceBuild:next.sourceBuild});
@@ -428,14 +450,8 @@ export function previewSlotEdit(document,report,edit,{includeSnapshot=false,metr
     const afterSkills=normalizeBuild(next.targetBuild).skills;
     const beforeEnergy=getSkillEnergyUsage(beforeSkills), afterEnergy=getSkillEnergyUsage(afterSkills);
     const energyChanged=beforeEnergy.used!==afterEnergy.used||beforeEnergy.maximum!==afterEnergy.maximum;
-    const removedSupports = [];
-    if (edit.kind==='skill-selection') {
-      const supports = ({active,passive}) => [...active,...passive][edit.rowIndex]?.supports ?? [];
-      const remaining=supports(afterSkills);
-      supports(beforeSkills).forEach((support,index)=>{
-        if(support&&!remaining[index])removedSupports.push(support.supportId);
-      });
-    }
+    const row=({active,passive})=>[...active,...passive][edit.rowIndex];
+    const removedSupports=edit.kind==='skill-selection'?compareRemovedSkillSupports(row(beforeSkills),row(afterSkills)):[];
     const states=elixirDamageRoutes(afterDps,edit.rowIndex);
     const elixirDpsStates=afterDps.rows.find(row=>row.rowIndex===edit.rowIndex)?.elixirDpsStates;
     const activation=edit.kind==='skill-selection'?auraActivationControl(after.componentProjection,edit.rowIndex):undefined;

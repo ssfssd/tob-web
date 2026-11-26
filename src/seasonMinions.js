@@ -209,14 +209,20 @@ export function calculateSeasonMinion(build, report, entry, profile, effects, va
     const { type, min, max } = pool;
     const resistance=type==='erosion'?fixedErosion??input?.enemy?.erosion:input?.enemy?.[type];
     if (type !== 'physical' && !validValue(enemyFields[type], resistance)) blockers.push(`${enemyFields[type].label} 미입력`);
-    const armorMultiplier = report.beforeDefense ? 1 : 1 - Math.min(.8, armor / (.9 * armor + 30000)) * (type === 'physical' ? 1 : .6) + armorPenetration / 100;
-    const resistanceMultiplier = report.beforeDefense || type === 'physical' ? 1 : 1 - (resistance - scorch - penetration[type]) / 100;
+    const armorReduction=Math.min(.8,armor/(.9*armor+30000))*(type==='physical'?1:.6);
+    const targetResistance=report.beforeDefense||type==='physical'?null:{
+      base:resistance,fixed:type==='erosion'&&fixedErosion!=null,penetration:penetration[type],scorch,
+      effective:resistance-scorch-penetration[type],
+    };
+    const armorMultiplier=report.beforeDefense?1:1-armorReduction+armorPenetration/100;
+    const resistanceMultiplier=targetResistance?1-targetResistance.effective/100:1;
     const numbed=type==='lightning' ? 1 + (targetState?.numbedEffect ?? 0)/100 : 1;
     const received = effects.filter(e => isSeasonTargetDamageTaken(e.stat, type));
     if (received.some(e => e.operation !== 'more' || !Number.isFinite(e.value))) blockers.push("소환체 대상의 받는 대미지 연산을 확인하세요.");
     const takenMultiplier = received.reduce((n, e) => n * (1 + e.value / 100), 1);
     const multiplier = armorMultiplier * resistanceMultiplier * takenMultiplier * numbed;
-    return { type, min: min * multiplier, max: max * multiplier, armorMultiplier, resistanceMultiplier };
+    return { type, min: min * multiplier, max: max * multiplier, armorMultiplier, resistanceMultiplier,
+      ...(!report.beforeDefense&&{defense:{armor,armorReduction,armorPenetration,resistance:targetResistance}}) };
   });
   const levelMultiplier = overlevel ? seasonOverlevelDamageMultiplier(entry.level) : 1;
   const poolMeanSum = pools.reduce((total, pool) => total + (pool.min + pool.max) / 2, 0);

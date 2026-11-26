@@ -40,6 +40,16 @@ export function seasonPrismChoices(slug,rarity) {
     rare:options(m.rareGaugeAffixes),legendary:item&&rarity==="legendary"?options(getPrismLegendaryAffixes(m,slug)):[]};
 }
 const fields={base:"baseAffixModifierId",area:"areaAffixModifierId",rare:"rareRandomAffixModifierId",legendary:"legendaryRandomAffixModifierId"};
+export function describeSeasonPrism(item) {
+  const choices=seasonPrismChoices(item.prismItemSlug,item.rarity);
+  const lines=Object.entries(fields).flatMap(([key,field])=>item[field]
+    ?[choices[key].find(option=>option.id===item[field])?.name??'한국어 원문 미제공']:[]);
+  return {name:choices.item?.name??'제노 프리즘',lines};
+}
+export function savedSeasonPrismNode(tree,placement) {
+  return placement.nodeId??getTalentTreeGrid(talentModel(),tree).cells
+    .find(cell=>cell.x===placement.x&&cell.y===placement.y)?.node?.flatItemId;
+}
 export function editSeasonPrism(build,edit) {
   const talents=build.talents, index=edit.slotIndex, itemId=edit.key, placed=talents?.placedPrism;
   if (!talents || !Number.isInteger(index) || index<1 || index>3 || !talents.boards?.[index]?.treeSlug)

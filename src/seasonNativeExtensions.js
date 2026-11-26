@@ -5,6 +5,7 @@ import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
 import { rebindSeasonSkillInputs } from './seasonSkillInputs.js';
 import { clearTheaElixirTiming } from './seasonTheaEvents.js';
+import { seasonElixirIngredientOptions } from './seasonElixirIngredients.js';
 
 const korean = value => typeof value === "string" && /[가-힣]/u.test(value) && !/\p{Script=Han}/u.test(value) ? value : "한국어 원문 미제공";
 export function nativeElixirOptions() {
@@ -20,6 +21,15 @@ export function nativeModuleForItem(id) {
   const card=SS14_CARDS_EN.records[id];
   return nativeModuleOptions().find(o=>o.itemId===id || o.href===card?.sourceRecordKey
     && SS14_CARDS_EN.records[o.itemId]?.detail.replace(/\s+/gu,' ').trim()===card.detail.replace(/\s+/gu,' ').trim());
+}
+export function activeSkillExtension(build,rowIndex){
+  const row=build.skills?.active?.[rowIndex];
+  if(!row?.skillId)return null;
+  if(row.modularization?.modularizationSkillId)return {kind:'module',index:rowIndex};
+  const elixir=SS14_EXTENSIONS.elixirs.find(option=>option.itemId===row.skillId);
+  if(!elixir)return null;
+  const index=build.skills.elixirs?.findIndex(slot=>slot?.skillId===elixir.id)??-1;
+  return index>=0?{kind:'elixir',index}:null;
 }
 export function nativeModuleAffixes() {
   return SS14_EXTENSIONS.moduleOptions.map(o => {
@@ -81,6 +91,19 @@ export function editNativeExtension(target, edit) {
     clearTheaElixirTiming(target.ss14Inputs,i);
     target.skills.elixirs ??= [];
     target.skills.elixirs[i] = option ? { bottleId: i === 0 ? "base" : "special", skillId: option.id, ingredientIds: [] } : null;
+  } else if (edit.kind === 'elixir-ingredient') {
+    const bottle=target.skills.elixirs?.[i];
+    const ids=[...(bottle?.ingredientIds??[])];
+    const position=Number(edit.key);
+    if(![0,1].includes(i)||!bottle?.skillId||!Number.isInteger(position)||position<0||position>ids.length)
+      throw Error('약재를 넣을 영약과 칸을 확인하세요.');
+    if((ids[position]??'')===edit.value)return true;
+    const otherIds=ids.filter((_,index)=>index!==position);
+    if(edit.value&&!seasonElixirIngredientOptions(target,i,otherIds).some(ingredient=>ingredient.id===edit.value))
+      throw Error('현재 특성과 약병에 맞는 SS14 약재를 선택하세요.');
+    if(edit.value)ids[position]=edit.value;
+    else ids.splice(position,1);
+    bottle.ingredientIds=ids;
   } else if (edit.kind === "module-selection") {
     if (!Number.isInteger(i) || i < 0 || i > 4) throw new Error("모듈 액티브 칸을 확인하세요.");
     const option = nativeModuleOptions().find(o => o.id === edit.value);

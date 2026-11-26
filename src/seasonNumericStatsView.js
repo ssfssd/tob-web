@@ -1,3 +1,5 @@
+import { effectSourceEditor } from './seasonEffectSources.js';
+
 const esc = v => String(v ?? "").replace(/[&<>"']/gu, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const number = v => Number.isFinite(v) ? v.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) : "확인 필요";
 const safeName = v => v && !/\p{Script=Han}/u.test(v) ? v : "한국어 이름 미제공";
@@ -116,7 +118,7 @@ export function describeSeasonOptionChange({before,after}) {
   return from===to?'':`${(after??before).label} · ${from} → ${to}`;
 }
 
-export function renderSeasonNumericStats(report) {
+export function renderSeasonNumericStats(report,{query=''}={}) {
   const stats = report.numericStats;
   if (!stats) return "";
   const c = report.character, unavailable = stats.unresolved.length + stats.excluded.length;
@@ -207,10 +209,14 @@ export function renderSeasonNumericStats(report) {
       ${skill.blockers.length ? `<ul>${skill.blockers.map(reason => `<li>${esc(reason)}</li>`).join("")}</ul>` : ""}</details></article>`;
     }).join("")}</details>` : ''}
     ${stats.options.length ? `<details data-role="numeric-options"><summary>옵션 합계</summary>
-      <label>항목·출처 검색<input type="search" data-numeric-filter aria-label="옵션 합계 검색" /></label>
+      <label>항목·출처 검색<input type="search" data-numeric-filter data-role="numeric-option-filter" aria-label="옵션 합계 검색" value="${esc(query)}" /></label>
       ${stats.options.map(row => `<details class="native-numeric-option" data-numeric-row data-role="numeric-option-${esc(row.key)}"><summary><span>${esc(row.label)}${row.scope !== "global" ? ` · ${esc(row.scopeLabel)}` : ""}</span><strong>${formatSeasonOptionTotals(row)}</strong></summary>
         ${/damage_reflection$/u.test(row.stat) ? "<p>반사 기본 수치 합계입니다. 피격 횟수와 최종 반사 DPS는 포함하지 않습니다.</p>" : ""}
-        <ul>${row.sources.map(source => `<li><span>${esc(source.origin)} · ${esc(safeName(source.name))}</span><b>${sourceValue(source, row.stat)}</b> ${link(source.receipt)}</li>`).join("")}</ul></details>`).join("")}</details>` : ''}
+        <ul>${row.sources.map(source => {
+          const name=`${source.origin} · ${safeName(source.name)}`;
+          const editor=effectSourceEditor(source.path)?` <button type="button" data-ss14-action="edit-effect-source" data-source-path="${esc(source.path)}" aria-label="${esc(name)} 편집">편집</button>`:'';
+          return `<li><span>${esc(name)}</span><b>${sourceValue(source, row.stat)}</b> ${link(source.receipt)}${editor}</li>`;
+        }).join("")}</ul></details>`).join("")}</details>` : ''}
     ${unavailable ? `<details data-role="numeric-unresolved"><summary>효과 확인</summary><ul>${stats.unresolved.map(r => `<li>${esc(r.label ?? "선택 효과")}: ${esc(r.reason)}</li>`).join("")}${stats.excluded.map(r => `<li>${esc(r.origin)} · ${esc(safeName(r.name))}: ${esc(r.reason)}</li>`).join("")}</ul></details>` : ""}
     </details>
   </section>`;

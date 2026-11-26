@@ -42,7 +42,6 @@ export function editItemWorkshop(draft, doc, edit) {
     const memory = doc.targetBuild.hero.memories?.[index];
     if (memory) {
       const set = (document,kind,value) => editSeasonWorkspace(document,{kind,value,slotIndex:index,enhancedBase:true});
-      if (memory.enhancement > quality.maxLevel) doc=set(doc,'memory-enhancement',quality.maxLevel);
       doc=set(doc,'memory-quality',quality.id);
       doc=set(doc,'memory-enhancement',quality.maxLevel);
     }
@@ -58,7 +57,7 @@ export function editItemWorkshop(draft, doc, edit) {
       throw Error('선택한 슬롯과 장비 종류를 확인하세요.');
     return initializeWorkshopRolls(editSeasonWorkspace(emptyDocument(), edit),index);
   }
-  if (['workshop-affix','workshop-remove','workshop-slot'].includes(edit.kind)) {
+  if (['workshop-affix','workshop-remove','workshop-slot','workshop-tier'].includes(edit.kind)) {
     const entry = captureShelf(doc.targetBuild, 'gear', index);
     const pool=craftOptions(entry.item.itemId);
     const crafts = entry.item.crafts ??= {};
@@ -67,10 +66,11 @@ export function editItemWorkshop(draft, doc, edit) {
       ? available.find(o=>o.tier==='1')??available[0] : pool.find(o=>o.key===edit.value);
     if (!option) throw Error('이 장비에 적용할 수 있는 SS14 제작 옵션을 선택하세요.');
     const slots=craftFamilySlots(crafts,option.family);
-    const isSlot=edit.kind==='workshop-slot';
+    const isSlot=edit.kind==='workshop-slot'||edit.kind==='workshop-tier';
     if(isSlot && (edit.family!==option.family||!Number.isInteger(edit.position)||edit.position<0||edit.position>=3))
       throw Error('제작 옵션 칸을 확인하세요.');
     const previous=isSlot?slots[edit.position]:crafts[option.affixId];
+    if(edit.kind==='workshop-tier'&&previous?.affixId!==option.affixId)throw Error('같은 제작 옵션의 등급을 선택하세요.');
     if(isSlot && crafts[option.affixId] && previous?.affixId!==option.affixId)throw Error('이미 선택한 옵션입니다.');
     if(isSlot && previous?.affixId===option.affixId && previous.tierId===option.tierId)return doc;
     slots.forEach((affix,i)=>{if(affix && i<3)affix.position=i;});
@@ -111,7 +111,12 @@ export function openGearWorkshop(index, build, candidate) {
   return draft;
 }
 export function finishedWorkshopItem(draft) {
+  if (draft.kind==='memory'&&workshopMemoryNeedsQuality(draft.document.targetBuild.hero.memories?.[draft.index]))
+    throw Error('추억 희귀도를 선택하세요.');
   const entry = captureShelf(draft.document.targetBuild, draft.kind, draft.index);
   if (draft.name.trim()) entry.name = draft.name.trim();
   return entry;
+}
+export function workshopMemoryNeedsQuality(memory) {
+  return memory?.ss14BaseModel===1&&!memoryQuality(memory.ss14Quality);
 }

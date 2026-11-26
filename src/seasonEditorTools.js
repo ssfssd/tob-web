@@ -5,6 +5,9 @@ import { SS14_CARDS } from './data/ss14Cards.generated.js';
 import { seasonSupportKoreanCard } from './seasonSupport.js';
 import { SEASON_DAMAGE_TYPE_LABELS } from './seasonDps.js';
 import { WEAPON_PHYSICAL_BASE_UNVERIFIED } from './seasonWeaponProfile.js';
+import { miniShape } from './seasonSlateEditor.js';
+
+export const BOARD_TITLES={talents:'재능',pact:'정령',divinity:'신격 석판'};
 
 const fmt=n=>n.toLocaleString('ko-KR',{maximumFractionDigits:2});
 const signed=n=>(n>0?'+':'')+fmt(n);
@@ -30,7 +33,17 @@ const skillName=id=>{
   return card?.season==='SS14'&&card.koreanTextVerified ? card.name : '한국어 이름 미제공';
 };
 const slotName=index=>index===0?'주력':index<5?`액티브 ${index+1}`:`패시브 ${index-4}`;
-export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장착 후',role='skill-level-changes'}={}) {
+export function renderBoardOptionChanges(rows,esc,{label,role,before='적용 전',after='적용 후',renderAction}) {
+  if(!rows.length)return '';
+  return `<details data-role="${esc(role)}" class="board-option-changes"><summary>${esc(label)} ${rows.length}개</summary><ul class="board-option-diff">${rows.map(row=>{
+    const placement=(side,shape,value)=>`<span><span role="img" aria-label="${esc(side)} 모양">${miniShape(shape)}</span>${esc(value)}</span>`;
+    const detail=row.shapeChange?`<div class="board-slate-shape-diff" data-role="slate-shape-change">${placement(before,row.shapeChange.before,row.before)} → ${placement(after,row.shapeChange.after,row.after)}</div>`
+      :`<div>${esc(row.before)} → ${esc(row.after)}</div>`;
+    return `<li><b>${esc(row.title)}</b>${renderAction?.(row)??''}${detail}</li>`;
+  }).join('')}</ul></details>`;
+}
+
+export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장착 후',role='skill-level-changes',label='스킬 레벨'}={}) {
   if(!rows?.length)return '';
   const single=rows.length===1?rows[0]:null;
   const summary=single&&Number.isInteger(single.from)&&Number.isInteger(single.to)&&single.from!==single.to
@@ -46,7 +59,7 @@ export function renderSkillLevelChanges(rows,esc,{before='장착 전',after='장
     const name=oldId&&id&&oldId!==id?`${skillName(oldId)} → ${skillName(id)}`:skillName(id??oldId);
     return `<tr><th scope="row">${esc(`${slotName(rowIndex)}${socket} · ${name}`)}</th><td>${value(oldId,fromBase,from,fromConfirmed,fromGrowth)}</td><td>${value(id,toBase,to,toConfirmed,toGrowth)}</td></tr>`;
   }).join('');
-  return `<details data-role="${esc(role)}"><summary>스킬 레벨${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
+  return `<details data-role="${esc(role)}"><summary>${esc(label)}${summary}</summary><table class="slot-dps-table"><thead><tr><th scope="col">스킬</th><th scope="col">${esc(before)}</th><th scope="col">${esc(after)}</th></tr></thead><tbody>${content}</tbody></table></details>`;
 }
 export function renderSkillDpsChanges(rows,basis,esc,{before='장착 전',after='장착 후'}={}){
   if(!rows.length)return '';
@@ -69,8 +82,8 @@ export function renderDamageBreakdown(p,esc,{before='장착 전',after='장착 �
   const speed=value=>value.toLocaleString('ko-KR',{maximumFractionDigits:4});
   const speeds=p.skillSpeedChanges?.length?`<table class="slot-dps-table" data-role="skill-speed-preview"><caption>스킬 사용 가능 속도 · 회/초${p.dpsBasis==='assumedDps'?' · 방어 전 기준':''}</caption>
     <thead><tr><th scope="col">스킬</th>${headers}</tr></thead>
-    <tbody>${p.skillSpeedChanges.map(({index,id,kind,from,to})=>
-      `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))} <small>${kind==='attack'?'공격':'시전'}</small></th><td>${speed(from)}</td><td>${speed(to)}</td></tr>`).join('')}</tbody></table>`:'';
+    <tbody>${p.skillSpeedChanges.map(({index,id,kind,from,to,fixedManualRate})=>
+      `<tr><th scope="row">${esc(slotName(index)+' · '+skillName(id))} <small>${kind==='attack'?'공격':'시전'}</small></th><td>${speed(from)}</td><td>${speed(to)}${Number.isFinite(fixedManualRate)?` <small>· 입력 ${speed(fixedManualRate)}회/초 유지</small>`:''}</td></tr>`).join('')}</tbody></table>`:'';
   const usageValue=({count,seconds,multistrikes=0},mana,life,showLife,showMultistrikes)=>`${fmt(count)}회 / ${speed(seconds)}초`
     +(showMultistrikes?`<small> · 연속 공격 ${fmt(multistrikes)}회</small>`:'')
     +(Number.isFinite(mana)?`<small> · ${fmt(mana)} MP/초</small>`:'')+(showLife&&Number.isFinite(life)?`<small> · ${fmt(life)} HP/초</small>`:'');

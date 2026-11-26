@@ -7,6 +7,13 @@ const groups = { hero: "히어로·추억", talents: "재능", talent: "재능",
   gear: "장비", skills: "스킬", supports: "보조", elixirs: "영약", modularization: "모듈", blessings: "축복" };
 const safe = text => typeof text === "string" && !/\p{Script=Han}/u.test(text) ? text : "";
 const slotLabel = index => `${index < 5 ? index === 0 ? "주력" : "액티브" : "패시브"} ${index < 5 ? index + 1 : index - 4}`;
+export function effectSourceEditor(path) {
+  const gear=/^gear\.slots\.([0-9])(?:\.|$)/u.exec(path);
+  if(gear)return {type:'gear',index:Number(gear[1])};
+  const skill=/^skills\.rows\.([0-8])(?:\.supports\.([0-4]))?$/u.exec(path);
+  if(skill)return {type:'skills',index:Number(skill[1]),support:skill[2]===undefined?null:Number(skill[2])};
+  return null;
+}
 export function effectSourceLabel(path, group) {
   let match;
   if ((match = path?.match(/^customAffixes\.(\d+)$/u))) return '사용자 옵션 '+(Number(match[1])+1);

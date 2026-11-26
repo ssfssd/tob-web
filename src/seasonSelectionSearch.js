@@ -5,7 +5,7 @@ export function filterSeasonSelection(select, query) {
   const key = searchKey(query);
   let matches = 0;
   for (const option of select.options) {
-    const match = !key || searchKey(option.textContent).includes(key);
+    const match = !key || searchKey(option.dataset?.searchText ?? option.textContent).includes(key);
     if (option.value && match) matches += 1;
     option.hidden = Boolean(option.value) && !option.selected && !match;
     option.disabled = option.hidden;

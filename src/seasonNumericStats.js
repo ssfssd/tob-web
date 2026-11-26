@@ -92,6 +92,10 @@ Object.assign(SEASON_STAT_LABELS,{affliction_per_second:'초당 심화',enemy_hi
   melee_damage:'근접 스킬 대미지',melee_attack_speed:'근접 공격 속도',melee_critical_strike_rating:'근접 크리티컬 수치'});
 Object.assign(SEASON_STAT_LABELS,{slash_strike_ailment_damage:'슬래시 상태 이상 대미지',demolisher_ailment_damage:'파괴 상태 이상 대미지',area_ailment_damage:'범위 상태 이상 대미지',projectile_ailment_damage:'투사체 상태 이상 대미지'});
 
+export function seasonStatLabel(stat,group){
+  return SEASON_STAT_LABELS[stat]??(group==='supports'?supportLabels[stat]:undefined);
+}
+
 const finite = Number.isFinite;
 const round = n => finite(n) ? Math.round(n * 1e8) / 1e8 : null;
 const validEffect = e => finite(e.value) && !e.condition && !e.conditionRequirements && !e.per && !e.target
@@ -115,7 +119,7 @@ export function summarizeSeasonOptionSources(stat, sources) {
 export function calculateSeasonNumericStats(report) {
   const groups = new Map(); const excluded = [];
   const accept = (effect, owner) => {
-    const stat = effect.stat, label = SEASON_STAT_LABELS[stat] ?? (owner.group === "supports" ? supportLabels[stat] : null);
+    const stat = effect.stat, label = seasonStatLabel(stat,owner.group);
     if (!label || !validEffect(effect) || !["add", "add_percent", "more", "more_percent", "set"].includes(effect.operation)) {
       excluded.push({ ...owner, stat, sourceText: effect.sourceText, reason: !label ? "옵션 합산 분류 미지원" : "조건·수치·연산 확인 필요" }); return;
     }

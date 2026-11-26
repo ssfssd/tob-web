@@ -156,9 +156,12 @@ export function editNativeSeasonSelection(target, edit) {
       if (edit.kind === "memory-quality") {
         const quality = memoryQuality(edit.value);
         if (edit.value !== "" && !quality) throw new Error("추억 희귀도를 확인하세요.");
-        if (quality && (memory.enhancement > quality.maxLevel || memory.randomAffixIds.length > quality.randomLimit))
+        if (quality && ((!edit.enhancedBase && memory.enhancement > quality.maxLevel) || memory.randomAffixIds.length > quality.randomLimit))
           throw new Error(`${quality.name} 추억은 강화 ${quality.maxLevel}단계, 랜덤 옵션 ${quality.randomLimit}개까지입니다. 현재 구성을 먼저 조정하세요.`);
-        if (quality) memory.ss14Quality = quality.id; else delete memory.ss14Quality;
+        if (quality) {
+          memory.ss14Quality = quality.id;
+          memory.enhancement = Math.min(memory.enhancement,quality.maxLevel);
+        } else delete memory.ss14Quality;
         capture(target, "hero");
         return true;
       }

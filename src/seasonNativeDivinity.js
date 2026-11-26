@@ -1,5 +1,5 @@
 import { SS14_MECHANICS } from "./data/ss14Mechanics.generated.js";
-import { createDivinityBoard, createSlateInstance, addSlateToInventory, autoPlaceSlate, moveSlate, rotatePlacedSlate, deleteSlateInstance, placeSlate, canPlaceSlate, transformedShape, DIVINITY_SHAPES, divinityCellIsOpen } from "./divinityBoardModel.js";
+import { createDivinityBoard, createSlateInstance, addSlateToInventory, autoPlaceSlate, moveSlate, rotatePlacedSlate, deleteSlateInstance, unplaceSlate, placeSlate, canPlaceSlate, transformedShape, DIVINITY_SHAPES, divinityCellIsOpen } from "./divinityBoardModel.js";
 import { SS14_LOG_SLATES } from './data/ss14LogSlates.generated.js';
 import { captureSeasonConfiguration } from "./seasonConfiguration.js";
 import { pinSeasonComponentReceipts } from "./seasonComponents.js";
@@ -9,11 +9,14 @@ import { regularSlateFamilies } from './seasonDivinity.js';
 
 const types = { corner_of_divinity: "A_Corner_of_Divinity", stars_fall: "Fallen_Starlight", starfire: "Sparks_of_Moth_Fire",
   moth_fire: "When_Sparks_Set_the_Prairie_Ablaze", void_gap: "Space_Rift", residence_of_stars: "Residence_of_Stars", genealogy: "Pedigree_of_Gods" };
+function slateActivationCap(id){
+  return Number(SS14_MECHANICS.pages[`en/${types[id]}`]?.body.match(/Max Active Divinity Slates?: (\d+)/u)?.[1])||null;
+}
 export function nativeSlateOptions() {
   return [...netherSlateOptions(), {id:'six_gods',name:'일반 신격 석판',cap:null}, ...Object.entries(types).flatMap(([id, slug]) => {
     const en = SS14_MECHANICS.pages[`en/${slug}`], ko = SS14_MECHANICS.pages[`ko/${slug}`];
     if (en?.season !== "SS14" || ko?.season !== "SS14" || !/[가-힣]/u.test(ko.title) || /\p{Script=Han}/u.test(ko.title)) return [];
-    return [{ id, name: ko.title, cap: Number(en.body.match(/Max Active Divinity Slates?: (\d+)/u)?.[1]) || null }];
+    return [{ id, name: ko.title, cap: slateActivationCap(id) }];
   })];
 }
 const installedTypes = {starfire:1001, stars_fall:1003, corner_of_divinity:1005, void_gap:1009, genealogy:1010, residence_of_stars:1011, moth_fire:1012};
@@ -31,18 +34,84 @@ export function nativeSlateDraft(type, shapeId, rotation = 0) {
   if (!shape) throw new Error('석판 종류에 맞는 모양을 선택하세요.');
   return createSlateInstance({instanceId:'slate-preview',slateId:type,shapeId:'custom',shape:shape.shape,rotation:shape.fixed?0:rotation});
 }
-export function canPlaceNativeSlate(board, slate, anchor) {
-  if (!Number.isInteger(anchor?.x) || !Number.isInteger(anchor?.y)) return false;
+export function nativeSlatePlacementIssue(board, slate, anchor) {
+  if (!Number.isInteger(anchor?.x) || !Number.isInteger(anchor?.y)) return '배치 좌표를 확인하세요.';
+  const fixed=slate.layout?.anchor;
+  if(fixed&&(anchor.x!==fixed.x||anchor.y!==fixed.y))return '명왕은 지정된 위치에만 배치할 수 있습니다.';
+  const cap=slateActivationCap(slate.slateId);
+  if(cap){
+    const placed=new Set(board.cells.map(cell=>cell.slateInstanceId));
+    if(board.slateInventory.filter(item=>item.slateId===slate.slateId&&item.instanceId!==slate.instanceId&&placed.has(item.instanceId)).length>=cap)
+      return '이 석판의 배치 개수 한도에 도달했습니다.';
+  }
+  const cells=transformedShape(slate.shape,slate.rotation,slate.flippedH,slate.flippedV)
+    .map(({x,y})=>({x:anchor.x+x,y:anchor.y+y}));
+  if(cells.some(({x,y})=>x<0||x>=board.width||y<0||y>=board.height||!divinityCellIsOpen(board,x,y)))
+    return '석판 일부가 보드 밖입니다.';
+  if(cells.some(({x,y})=>board.cells.some(cell=>cell.slateInstanceId!==slate.instanceId&&cell.x===x&&cell.y===y)))
+    return '다른 석판과 겹치는 위치입니다.';
   const candidate = {...board,slateInventory:[...board.slateInventory.filter(s=>s.instanceId!==slate.instanceId),slate]};
-  return canPlaceSlate(candidate,slate.instanceId,anchor) && transformedShape(slate.shape,slate.rotation,slate.flippedH,slate.flippedV)
-    .every(p=>divinityCellIsOpen(board,anchor.x+p.x,anchor.y+p.y));
+  return canPlaceSlate(candidate,slate.instanceId,anchor)?'':'이 석판은 이 위치에 배치할 수 없습니다.';
+}
+export function canPlaceNativeSlate(board,slate,anchor) {
+  return nativeSlatePlacementIssue(board,slate,anchor)==='';
 }
 function placeNativeSlate(board, slate, anchor) {
-  if (!canPlaceNativeSlate(board,slate,anchor)) throw new Error('다른 석판과 겹치거나 보드 밖입니다. 빈 위치를 선택하세요.');
+  const issue=nativeSlatePlacementIssue(board,slate,anchor);
+  if(issue)throw new Error(issue);
   return placeSlate(board,slate.instanceId,anchor);
 }
+function bindDivinityConfiguration(target) {
+  target.ss14Inputs.configurations ??= {};
+  target.ss14Inputs.configurations.divinity = captureSeasonConfiguration(target, "divinity");
+  target.ss14Inputs.mechanicReceipts = seasonMechanicPins();
+  target.ss14Inputs.componentReceipts = { ...target.ss14Inputs.componentReceipts, ...pinSeasonComponentReceipts(target, ["divinity"]) };
+  return true;
+}
+function duplicateSlatePage(current, newBoardId, inputs) {
+  const copy=structuredClone(current);
+  copy.boardId=newBoardId;
+  const ids=new Map();
+  const conditions=Object.entries(inputs.componentConditions??{});
+  for(const slate of copy.slateInventory){
+    const oldId=slate.instanceId, newId=globalThis.crypto.randomUUID();
+    if(ids.has(oldId))throw Error('석판 식별자가 중복되었습니다.');
+    ids.set(oldId,newId);
+    slate.instanceId=newId;
+    if(Object.hasOwn(inputs.slateSelections??{},oldId))inputs.slateSelections[newId]=structuredClone(inputs.slateSelections[oldId]);
+    const source=`divinity.${current.boardId}.${oldId}`;
+    const destination=`divinity.${newBoardId}.${newId}`;
+    for(const [key,binding] of conditions)if(key.startsWith(source+'.')||key.startsWith(source+':'))
+      inputs.componentConditions[destination+key.slice(source.length)]=structuredClone(binding);
+  }
+  for(const cell of copy.cells){
+    const newId=ids.get(cell.slateInstanceId);
+    if(!newId)throw Error('배치와 연결된 석판을 확인하세요.');
+    cell.slateInstanceId=newId;
+  }
+  return copy;
+}
 export function editNativeDivinity(target, edit) {
-  if (!["slate-add", "slate-remove", "slate-shape", "slate-rotate", "slate-move", "slate-x", "slate-y", "nether-layout", "nether-quality", "nether-banishment"].includes(edit.kind)) return false;
+  if(['slate-page','slate-page-add','slate-page-duplicate'].includes(edit.kind)){
+    target.divinity??={boards:[]};
+    const {boards,activeBoardId}=target.divinity;
+    if(edit.kind==='slate-page'){
+      if(boards.filter(board=>board.boardId===edit.value).length!==1)throw Error('신격 석판 페이지를 확인하세요.');
+      target.divinity.activeBoardId=edit.value;
+    }else{
+      const current=boards.find(board=>board.boardId===activeBoardId);
+      const boardId=globalThis.crypto.randomUUID();
+      const duplicate=edit.kind==='slate-page-duplicate';
+      if(duplicate&&!current?.slateInventory.length)throw Error('복제할 석판 페이지를 선택하세요.');
+      const board=duplicate?duplicateSlatePage(current,boardId,target.ss14Inputs)
+        :createDivinityBoard({boardId,width:current?.width,height:current?.height});
+      if(!duplicate&&current)board.mask=current.mask.map(column=>[...column]);
+      boards.push(board);
+      target.divinity.activeBoardId=board.boardId;
+    }
+    return bindDivinityConfiguration(target);
+  }
+  if (!["slate-add", "slate-remove", "slate-unplace", "slate-shape", "slate-rotate", "slate-move", "slate-x", "slate-y", "nether-layout", "nether-quality", "nether-banishment"].includes(edit.kind)) return false;
   target.divinity ??= { boards: [] };
   let board = target.divinity.boards.find(b => b.boardId === target.divinity.activeBoardId);
   if (!board) {
@@ -77,6 +146,8 @@ export function editNativeDivinity(target, edit) {
     if (edit.kind === "slate-remove") {
       board = deleteSlateInstance(board, edit.key);
       if (target.ss14Inputs.slateSelections) delete target.ss14Inputs.slateSelections[edit.key];
+    } else if(edit.kind==='slate-unplace') {
+      board=unplaceSlate(board,edit.key);
     } else if(edit.kind==='nether-layout') {
       const layout=netherLayouts(slate.slateId).find(l=>l.id===edit.value);
       if(!layout)throw new Error('현재 자료에 있는 명왕 배치를 선택하세요.');
@@ -113,9 +184,5 @@ export function editNativeDivinity(target, edit) {
     }
   }
   target.divinity.boards = target.divinity.boards.map(b => b.boardId === board.boardId ? board : b);
-  target.ss14Inputs.configurations ??= {};
-  target.ss14Inputs.configurations.divinity = captureSeasonConfiguration(target, "divinity");
-  target.ss14Inputs.mechanicReceipts = seasonMechanicPins();
-  target.ss14Inputs.componentReceipts = { ...target.ss14Inputs.componentReceipts, ...pinSeasonComponentReceipts(target, ["divinity"]) };
-  return true;
+  return bindDivinityConfiguration(target);
 }

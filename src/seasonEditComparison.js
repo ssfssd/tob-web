@@ -154,7 +154,7 @@ export function compactSeasonEditDelta(comparison) {
 
 // The comparison baseline lives only in this editor session. Document versions,
 // persisted builds and the undo stack remain owned by their existing modules.
-export function createSeasonEditComparison(document, report) {
+export function createSeasonEditComparison(document, report, describeLoadoutChanges) {
   const capture = (document, report) => ({document: structuredClone(document), report});
   let baseline = capture(document, report), current = baseline, previous = null;
   let changed = false;
@@ -200,7 +200,21 @@ export function createSeasonEditComparison(document, report) {
           ...(previousCompared?.encounterMatches===false && {previousEncounterChanges:encounterInputChanges(previous,current,metric)})};
       };
       const assumed=preferredSeasonDpsMetric(current.report)==='assumedDps'?compare('assumedDps'):null;
-      return {changed,...compare('fullDps'),assumed};
+      const from=baseline,to=current;
+      const last=previous&&content(previous.document)!==content(from.document)?previous:null;
+      const hasLoadout=changed&&describeLoadoutChanges;
+      let loadout;
+      return {changed,...compare('fullDps'),assumed,
+        get loadoutChanges(){
+          if(!hasLoadout)return null;
+          if(!loadout){
+            const baseline=describeLoadoutChanges(from,to);
+            const previous=last?describeLoadoutChanges(last,to):null;
+            loadout={baseline,previous:JSON.stringify(previous)===JSON.stringify(baseline)?null:previous};
+          }
+          return loadout;
+        },
+      };
     },
   };
 }

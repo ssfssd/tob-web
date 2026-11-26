@@ -1,4 +1,4 @@
-import {seasonPrismChoices} from './seasonPrismPlacement.js';
+import {describeSeasonPrism,seasonPrismChoices} from './seasonPrismPlacement.js';
 
 export function prismForm(input={}) {
   const items=seasonPrismChoices().items;
@@ -24,10 +24,7 @@ export function renderPrismEditor(s,index,active,{esc,button}) {
   const {draft,options}=catalog;
   const selected=inventory.find(i=>(i.instanceId??i.id)===form.selected)??inventory.find(i=>(i.instanceId??i.id)===placed?.instanceId)??inventory[0];
   const instance=selected?.instanceId??selected?.id;
-  const selectedOptions=selected&&seasonPrismChoices(selected.prismItemSlug,selected.rarity);
-  const details=selectedOptions?[[selectedOptions.base,selected.baseAffixModifierId],[selectedOptions.area,selected.areaAffixModifierId],
-    [selectedOptions.rare,selected.rareRandomAffixModifierId],[selectedOptions.legendary,selected.legendaryRandomAffixModifierId]]
-    .filter(([,id])=>id).map(([list,id])=>list.find(o=>o.id===id)?.name??'한국어 원문 미제공'):[];
+  const details=selected?describeSeasonPrism(selected).lines:[];
   const itemLabel=(item,n)=>`${options.items.find(i=>i.slug===item.prismItemSlug)?.name??'제노 프리즘'} · ${item.rarity==='legendary'?'레전드':'레어'} #${n+1}`;
   const placedIndex=inventory.findIndex(item=>(item.instanceId??item.id)===placed?.instanceId);
   const placedLabel=equipped&&placed?.instanceId!==instance&&placedIndex>=0?itemLabel(inventory[placedIndex],placedIndex)+' · ':'';

@@ -28,11 +28,12 @@
 .native-numeric-option li span,.native-numeric-option li b {display:block}
 .native-numeric-stats [hidden] {display:none!important}
 .upgrade-resource-list {list-style:none;padding:0;font-size:.85em}
-.upgrade-resource-list li {display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid #36363a}
+.upgrade-resource-list li {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid #36363a}
+.upgrade-resource-list li > span {flex:1 1 10rem}
 .upgrade-resource-list b {white-space:nowrap;font-variant-numeric:tabular-nums}
 .season-native .native-result-panel .analysis-roll-toggle {display:flex;flex-direction:row;align-items:center;gap:8px}
 .analysis-roll-toggle input[type=checkbox] {width:16px;min-height:16px}
-.upgrade-combination {display:grid;gap:6px;border-top:1px solid #52515b;padding-top:10px}
+.upgrade-combination {display:grid;gap:6px;border-bottom:1px solid #52515b;padding-bottom:10px}
 .dock-effect-condition {display:grid;grid-template-columns:minmax(0,1fr) minmax(74px,30%);gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #36363a}
 .dock-effect-condition strong,.dock-effect-condition small {display:block;overflow-wrap:anywhere}
 .dock-effect-condition output {text-align:right;font-size:12px}

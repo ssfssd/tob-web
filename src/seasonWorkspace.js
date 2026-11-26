@@ -28,7 +28,7 @@ import { seasonMemoryRows, validSeasonMemoryBases, validSeasonMemoryRolls } from
 import { validMemoryRollValue } from "./seasonMemoryRolls.js";
 import { validSeasonDestinyRolls } from "./seasonDestiny.js";
 import { validSeasonExtensionInputs, validExtensionValue } from "./seasonExtensions.js";
-import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, observedSkillCostFields, seasonDotWindowAssignment } from "./seasonDps.js";
+import { validSeasonDpsInputs, editSeasonDpsInput, clearSeasonDpsConditionOverrides, clearSeasonSkillConditionOverrides, observedSkillCostFields, seasonDotWindowAssignment } from "./seasonDps.js";
 import { trainingDummyDefenseFields, trainingDummyLevels } from "./seasonTrainingDummy.js";
 import { validMemoryQuality } from './seasonMemoryQuality.js';
 import { validHeroCombatInputs, SEASON_HERO_COMBAT_FIELDS, validCombatValue, seasonMechanicPins } from "./seasonMechanicInputs.js";
@@ -70,20 +70,30 @@ function targetFor(source, id, name, levels, inputs) {
   return applySeasonHeroSelection(applySeasonSlateSelections(applySeasonSupportSelections(applySeasonSelections(target, inputs.selections, levels, inputs.selectionMode === "isolated-v1"), inputs.supportSelections), inputs.slateSelections), inputs);
 }
 
-function swapSeasonSkillRows(target,from,to) {
+export function seasonSkillSwapIssue(skills,from,to) {
   if(![from,to].every(index=>Number.isInteger(index)&&index>=0&&index<9)||from===to||(from<5)!==(to<5))
-    throw Error('같은 종류의 다른 스킬 슬롯을 선택하세요.');
-  const normalized=normalizeBuild(target), active=from<5, start=active?0:5;
-  const group=active?'active':'passive', rows=normalized.skills[group];
-  if(!rows[from-start]?.skillId)throw Error('옮길 스킬을 먼저 장착하세요.');
+    return {message:'같은 종류의 다른 스킬 슬롯을 선택하세요.'};
+  const active=from<5, start=active?0:5;
+  const rows=active?skills.active:skills.passive;
+  if(!rows[from-start]?.skillId)return {message:'옮길 스킬을 먼저 장착하세요.'};
+  const message='이 칸에 장착할 수 없는 스킬 또는 보조가 있습니다.';
   for(const [source,destination] of [[from,to],[to,from]]){
     const row=rows[source-start];
     if(!row.skillId)continue;
     const card=getSeasonSelectionRecord('skills',row.skillId);
-    if(!card||!getSeasonSelectionOptions('skills',destination).some(option=>option.id===row.skillId)
-      ||row.supports.some((support,index)=>support&&!supportFitsSocket(support.supportId,card,destination,index)))
-      throw Error('이 칸에 장착할 수 없는 스킬 또는 보조가 있습니다.');
+    if(!card||!getSeasonSelectionOptions('skills',destination).some(option=>option.id===row.skillId))
+      return {message,id:row.skillId};
+    const incompatible=row.supports.find((support,index)=>support&&!supportFitsSocket(support.supportId,card,destination,index));
+    if(incompatible)return {message,id:incompatible.supportId};
   }
+  return null;
+}
+
+function swapSeasonSkillRows(target,from,to) {
+  const normalized=normalizeBuild(target), active=from<5, start=active?0:5;
+  const issue=seasonSkillSwapIssue(normalized.skills,from,to);
+  if(issue)throw Error(issue.message);
+  const group=active?'active':'passive', rows=normalized.skills[group];
   const move=index=>index===from?to:index===to?from:index;
   const remap=(entries,pattern,offset=0)=>entries&&Object.fromEntries(Object.entries(entries).map(([key,value])=>
     [key.replace(pattern,(_,prefix,index)=>prefix+(move(Number(index)+offset)-offset)),value]));
@@ -115,6 +125,39 @@ function swapSeasonSkillRows(target,from,to) {
   inputs.selections.skills[from]=ids[from];
   inputs.selections.skills[to]=ids[to];
   (inputs.configurations??={}).skills=captureSeasonConfiguration(target,'skills');
+}
+
+export function seasonSupportSwapAllowed(row,rowIndex,from,to) {
+  if(!row?.skillId||!Number.isInteger(rowIndex)||rowIndex<0||rowIndex>8||from===to
+    ||![from,to].every(index=>Number.isInteger(index)&&index>=0&&index<row.unlockedSupportCount)
+    ||!row.supports[from]?.supportId) return false;
+  const card=getSeasonSelectionRecord('skills',row.skillId);
+  return [[from,to],[to,from]].every(([source,destination])=>!row.supports[source]
+    ||Object.keys(row.supports[source]).every(key=>key==='supportId'||key==='level')
+      &&supportFitsSocket(row.supports[source].supportId,card,rowIndex,destination));
+}
+
+function swapSeasonSupports(target,rowIndex,from,to) {
+  const {active,passive}=normalizeBuild(target).skills;
+  const row=rowIndex<5?active[rowIndex]:passive[rowIndex-5];
+  if(!seasonSupportSwapAllowed(row,rowIndex,from,to))throw Error('두 보조를 장착할 수 있는 열린 칸을 선택하세요.');
+  const inputs=target.ss14Inputs;
+  const selections=inputs.supportSelections??={};
+  const bindings=inputs.supports??={};
+  const a=`${rowIndex}:${from}`, b=`${rowIndex}:${to}`;
+  selections[a]=row.supports[to]??null;
+  selections[b]=row.supports[from];
+  const first=bindings[a], second=bindings[b];
+  if(second)bindings[a]=second;else delete bindings[a];
+  if(first)bindings[b]=first;else delete bindings[b];
+  if(inputs.componentConditions){
+    const prefix=`skills.rows.${rowIndex}.supports.`;
+    inputs.componentConditions=Object.fromEntries(Object.entries(inputs.componentConditions).map(([key,value])=>{
+      const match=key.startsWith(prefix)&&/^([0-4])(?=[:.]|$)/u.exec(key.slice(prefix.length));
+      const slot=match?Number(match[1]):null;
+      return slot===from||slot===to?[prefix+(slot===from?to:from)+key.slice(prefix.length+1),value]:[key,value];
+    }));
+  }
 }
 
 function swapSeasonRings(target) {
@@ -339,6 +382,20 @@ export function resetSeasonWorkspace(document) {
 
 export function editSeasonWorkspace(document, edit) {
   if (!validDocument(document)) throw new Error("SS14 편집 문서 형식을 확인할 수 없습니다.");
+  if(edit.kind==='support-selection'&&(edit.supportTier!==undefined||edit.supportRolls!==undefined||edit.supportConditions!==undefined)){
+    const {supportTier,supportRolls={},supportConditions={},...selection}=edit;
+    if(!object(supportRolls)||!object(supportConditions)||!selection.value)throw Error('보조 옵션과 조건을 확인하세요.');
+    const {rowIndex,supportIndex}=selection;
+    let selected=editSeasonWorkspace(document,selection);
+    if(supportTier!==undefined)
+      selected=editSeasonWorkspace(selected,{kind:'support-tier',rowIndex,supportIndex,value:supportTier});
+    selected=Object.entries(supportRolls).reduce((next,[key,value])=>editSeasonWorkspace(next,{
+      kind:'support-roll',rowIndex,supportIndex,key,value,
+    }),selected);
+    return Object.entries(supportConditions).reduce((next,[key,value])=>editSeasonWorkspace(next,{
+      kind:'support-condition',rowIndex,supportIndex,key,value,
+    }),selected);
+  }
   if (edit.kind==='skill-selection' && edit.auraActive!==undefined) {
     const {auraActive,...selection}=edit;
     const selected=editSeasonWorkspace(document,selection);
@@ -392,7 +449,7 @@ export function editSeasonWorkspace(document, edit) {
     if (gearId && normalizeBuild(target).gear.slots[edit.slotIndex]?.itemId !== gearId)
       for (const key of Object.keys(target.ss14Inputs.componentConditions ?? {}))
         if (key.startsWith(`gear.slots.${edit.slotIndex}.`)) delete target.ss14Inputs.componentConditions[key];
-    applyShelf(target,edit.value,edit.slotIndex);
+    applyShelf(target,edit.value,edit.slotIndex,{newSlatePage:edit.newSlatePage===true});
   } else if (edit.kind === "log-review-reset") {
     target.ss14Inputs.logReview = Object.fromEntries(Object.keys(LOG_REVIEW_GROUPS).filter(k => k !== 'divinity' || edit.value !== 1).map(k => [k, null]));
   } else if (edit.kind === "log-review") {
@@ -463,6 +520,8 @@ export function editSeasonWorkspace(document, edit) {
     target.ss14Inputs.componentReceipts = { ...target.ss14Inputs.componentReceipts, ...pinSeasonComponentReceipts(target, ["talents"]) };
   } else if (edit.kind === "skill-swap") {
     swapSeasonSkillRows(target,edit.rowIndex,edit.value);
+  } else if (edit.kind === "support-swap") {
+    swapSeasonSupports(target,edit.rowIndex,edit.supportIndex,edit.value);
   } else if (edit.kind === "skill-level") {
     if (!Number.isInteger(edit.rowIndex) || !normalizeBuild(target).selections.skills[edit.rowIndex]
       || !Number.isInteger(edit.value) || edit.value < 1 || edit.value > 100) throw new Error("선택한 스킬의 레벨을 1~100 사이 정수로 입력하세요.");
@@ -624,7 +683,7 @@ export function editSeasonWorkspace(document, edit) {
     target.ss14Inputs.mechanicReceipts = seasonMechanicPins();
     target.ss14Inputs.componentReceipts = { ...target.ss14Inputs.componentReceipts, ...pinSeasonComponentReceipts(target, ["divinity"]) };
   } else if (edit.kind === "slate-affix") {
-    const row = seasonSlateTemplates(target, { requireBindings: false }).find(r => r.controls.some(c => c.key === edit.key));
+    const row = seasonSlateTemplates(target, { requireBindings: false, includeUnplaced: true }).find(r => r.controls.some(c => c.key === edit.key));
     const control = row?.controls.find(c => c.key === edit.key);
     if (!control || edit.value !== "" && !seasonSlateOptions(control.type).some(o => o.id === edit.value)) throw new Error("SS14 석판 슬롯에 허용된 재능을 선택하세요.");
     const choices = Object.fromEntries(row.controls.map(c=>[c.slot,c===control ? edit.value : c.value]));
@@ -732,6 +791,10 @@ export function editSeasonWorkspace(document, edit) {
     else target.ss14Inputs.character[edit.key] = edit.value;
     if (remeasure) delete target.ss14Inputs.observedManaRecoveryBasis;
     target.ss14Inputs.ruleReceipts = seasonRulePins();
+  } else if (edit.kind === "clear-skill-conditions") {
+    if(!Number.isInteger(edit.rowIndex)||edit.rowIndex<0||edit.rowIndex>=5||!target.skills.active[edit.rowIndex]?.skillId)
+      throw new Error('조건을 초기화할 액티브 스킬을 선택하세요.');
+    clearSeasonSkillConditionOverrides(target.ss14Inputs.dps,edit.rowIndex);
   } else if (edit.kind === "clear-effect-conditions" || edit.kind === "clear-combat-conditions") {
     if (edit.kind === "clear-combat-conditions") clearSeasonDpsConditionOverrides(target.ss14Inputs.dps);
     delete target.ss14Inputs.componentConditions;
@@ -814,7 +877,7 @@ export function editSeasonWorkspace(document, edit) {
   if (gearId) inheritGearResourceStates(document.targetBuild, next.targetBuild, edit.slotIndex);
   if(edit.kind==='shelf-apply'&&!validDocument(next))throw Error('보관 항목의 SS14 수치 연결을 확인할 수 없습니다.');
   if(edit.kind==='swap-rings'&&!validDocument(next))throw Error('교환할 반지의 SS14 옵션 연결을 확인하세요.');
-  if(edit.kind==='skill-swap'&&!validDocument(next))throw Error('이동할 스킬과 연결된 입력을 확인하세요.');
+  if(['skill-swap','support-swap'].includes(edit.kind)&&!validDocument(next))throw Error('이동할 스킬과 연결된 입력을 확인하세요.');
   return next;
 }
 

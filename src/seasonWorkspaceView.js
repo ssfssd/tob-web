@@ -217,17 +217,20 @@ function destinyControls(report, formValues) {
     }).join("")}`).join("")}</fieldset>`;
 }
 
-function extensionControls(report, formValues) {
+function extensionControls(report, formValues, {onlyElixirsAndModules=false}={}) {
   const controls = report.componentProjection.rows.flatMap(row=>(row.extensionControls??[]).map(control=>({row,control})))
+    .filter(({control})=>!onlyElixirsAndModules||/^(elixir|ingredient|module):/u.test(control.key))
     .filter(({control}, i, all) => all.findIndex(entry => entry.control.key === control.key) === i);
   if (!controls.length) return "";
-  return `<fieldset><legend>영약·모듈·제작 조건</legend><details><summary>영약 계산 기준</summary><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 관측 유지율을 입력하면 해당 비율을 사용합니다. 자동 은총에서 중간 가동률을 적용하려면 복합 발동의 영약 시간표를 입력하세요.</p></details>${controls.map(({row,control:c}) => {
+  const hasElixir=controls.some(({control})=>control.key.startsWith('elixir:'));
+  return `<fieldset><legend>${onlyElixirsAndModules?'효과 적용 조건':'영약·모듈·제작 조건'}</legend>${hasElixir?'<details><summary>영약 계산 기준</summary><p id="season-extension-scope">효과 배율 1은 기본 효과입니다. 관측 유지율을 입력하면 해당 비율을 사용합니다. 자동 은총에서 중간 가동률을 적용하려면 복합 발동의 영약 시간표를 입력하세요.</p></details>':''}${controls.map(({row,control:c}) => {
     const value = formValues[`extension-input:${c.key}`] ?? c.value;
     const label = `SS14 ${c.label}`;
     const range=c.observedRange??c;
     const modeField = row.elixirState ? ` data-elixir-input="${escape(c.key)}"${usesExtensionInput(report,row,c.key)?'':' hidden'}` : '';
-    return c.kind === "boolean" ? `<label${modeField}>${escape(c.label)}<select data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope">${[["", "확인 필요"], [0, "아니요"], [1, "예"]].map(([v, t]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
-      : `<label${modeField}>${escape(c.label)} (${number(range.min)}~${number(range.max)})<input type="number" min="${range.min}" max="${range.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}" aria-describedby="season-extension-scope" value="${escape(value)}" /></label>`;
+    const description=c.key.startsWith('elixir:')?' aria-describedby="season-extension-scope"':'';
+    return c.kind === "boolean" ? `<label${modeField}>${escape(c.label)}<select data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}"${description}>${[["", "확인 필요"], [0, "아니요"], [1, "예"]].map(([v, t]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
+      : `<label${modeField}>${escape(c.label)} (${number(range.min)}~${number(range.max)})<input type="number" min="${range.min}" max="${range.max}" step="any" data-season-edit="extension-input" data-key="${c.key}" aria-label="${escape(label)}"${description} value="${escape(value)}" /></label>`;
   }).join("")}</fieldset>`;
 }
 
@@ -459,15 +462,32 @@ export function renderFixedNumbedField(build,report,value) {
     && !relevantDps)return '';
   return renderSeasonDpsField('enemy:numbedStacks',SEASON_DPS_ENEMY_FIELDS.numbedStacks,value??'','전투 조건');
 }
-function dpsControls(document, report, formValues, showDummy = false) {
+function dpsControls(document, report, formValues, showDummy = false, {skillRows}={}) {
   const build = document.targetBuild;
   const input = document.targetBuild.ss14Inputs.dps;
   const field = (key, definition, value, limits) => renderSeasonDpsField(key, definition,
     formValues[`dps-input:${key}`] ?? value ?? "", "SS14 DPS", limits);
+  const targetInputs=`<fieldset><legend>대상</legend>${Object.keys(SEASON_DPS_ENEMY_FIELDS).filter(key=>key!=='numbedStacks').map(key => field(`enemy:${key}`, seasonDpsEnemyFieldDefinition(build,key), input?.enemy?.[key])).join("")}
+    ${renderFixedNumbedField(build,report,formValues['dps-input:enemy:numbedStacks']??input?.enemy?.numbedStacks)}</fieldset>`;
+  const skillInputs=report.coupledSkills.rows.filter(row=>!skillRows||skillRows.includes(row.rowIndex)).map(r=>{
+    const entry=report.components.filter(c=>c.category==='skills').flatMap(c=>c.calculations??[]).find(c=>c.rowIndex===r.rowIndex);
+    const dpsRow=report.fullDps.rows.find(row=>row.rowIndex===r.rowIndex);
+    const minionMaximum=dpsRow?.minionMaximum;
+    const sharedCommand=report.fullDps.observedCommandRow===r.rowIndex;
+    const fields=seasonDpsSkillFieldKeys(entry,r.id,build).flatMap(key=>{
+      const def=seasonDpsSkillFieldDefinition(r.id,key,r.terraChargeMaximum);
+      return def?[field(`${r.rowIndex}:${key}`,def,input?.skills?.[r.rowIndex]?.[key],
+        {minionMaximum,sharedCommand,fixedValue:key==='reapingOverlap'&&dpsRow?.reapingOverlapFixed?'100% 자동':undefined})]:[];
+    }).join('');
+    const limitations=entry?.mechanics?.filter(m=>m.limitation)??[];
+    if(skillRows&&!fields&&!limitations.length)return '';
+    return `<fieldset><legend>${escape(name(r.id))} · 스킬 칸 ${r.rowIndex+1}</legend>${fields}
+      ${limitations.length?`<details><summary>효과 상세·입력 기준</summary>${limitations.map(m=>`<p>${escape(m.limitation)}${m.kind==='ice-ring-on-kill'?' 단일 보스에게 재발동 적중이 없으면 0을 입력하세요.':''} ${sourceLink(m)}</p>`).join('')}</details>`:''}</fieldset>`;
+  }).join('');
+  if(skillRows)return skillInputs?`${skillInputs}<details data-role="extension-target-defense"><summary>대상 방어</summary>${renderTrainingDummyPicker(input?.enemy)}${targetInputs}</details>`:'';
   return `${showDummy ? renderTrainingDummyPicker(input?.enemy) : ""}<details data-role="season-dps-input"><summary>${showDummy ? "대상 방어·스킬 상세 조건" : "대상·스킬 조건"}</summary>
     ${logReviewRows(build).length ? `<fieldset><legend>로그에 없는 구성 확인</legend><details><summary>구성 확인 기준</summary><p>각 메뉴에서 실제 구성으로 편집한 뒤 확인하세요. 비어 있는 구성도 직접 확인해야 합니다. 구성을 바꾸면 다시 확인합니다.</p></details>${logReviewRows(build).map(r => `<label>${escape(r.label)}<select data-season-edit="log-review" data-key="${r.key}" aria-label="${escape(r.label)} 구성 확인"><option value="0"${!r.confirmed ? " selected" : ""}>확인 필요</option><option value="1"${r.confirmed ? " selected" : ""}>현재 구성 확인</option></select><button type="button" data-action="advisor-open-section" data-section="${r.key}">편집</button></label>`).join("")}</fieldset>` : ""}
-    <fieldset><legend>대상</legend>${Object.keys(SEASON_DPS_ENEMY_FIELDS).filter(key=>key!=='numbedStacks').map(key => field(`enemy:${key}`, seasonDpsEnemyFieldDefinition(build,key), input?.enemy?.[key])).join("")}
-      ${renderFixedNumbedField(build,report,formValues['dps-input:enemy:numbedStacks']??input?.enemy?.numbedStacks)}</fieldset>
+    ${targetInputs}
     ${hasPeriodicBurstSupport(report.components)?field(PERIODIC_BURST_INPUT,SEASON_DPS_SKILL_FIELDS.periodicBurstUptime,readPeriodicBurstUptime(input)):''}
     ${report.componentProjection.rows.filter(r => r.slateControls?.length).map(r => `<fieldset><legend>${escape(r.name)} · SS14 석판 옵션</legend>
       ${r.slateControls.map(c => `<label>${c.index + 1}번째 옵션<select data-season-edit="slate-affix" data-key="${escape(c.key)}" aria-label="SS14 ${escape(r.name)} 옵션 ${c.index + 1}"><option value="">옵션 선택 필요</option>
@@ -486,16 +506,7 @@ function dpsControls(document, report, formValues, showDummy = false) {
         return `<label>${escape(d.label)}${control}</label>`;
       }).join("")}</fieldset>` : ""}
     ${report.coupledSkills.rows.some(r => getSeasonSelectionRecord('skills', r.id)?.tags?.includes('Attack')) ? weaponSummary(build) : ''}
-    ${report.coupledSkills.rows.map(r => {
-      const entry = report.components.filter(c => c.category === "skills").flatMap(c => c.calculations ?? []).find(c => c.rowIndex === r.rowIndex);
-      const dpsRow = report.fullDps.rows.find(row => row.rowIndex === r.rowIndex);
-      const minionMaximum = dpsRow?.minionMaximum;
-      const sharedCommand = report.fullDps.observedCommandRow === r.rowIndex;
-      return `<fieldset><legend>${escape(name(r.id))} · 스킬 칸 ${r.rowIndex + 1}</legend>${seasonDpsSkillFieldKeys(entry, r.id, build)
-        .flatMap(key => { const def = seasonDpsSkillFieldDefinition(r.id,key,r.terraChargeMaximum); return def ? [field(`${r.rowIndex}:${key}`, def, input?.skills?.[r.rowIndex]?.[key],
-          {minionMaximum,sharedCommand,fixedValue:key==='reapingOverlap'&&dpsRow?.reapingOverlapFixed?'100% 자동':undefined})] : []; }).join("")}
-        ${entry?.mechanics?.some(m => m.limitation) ? `<details><summary>효과 상세·입력 기준</summary>${entry.mechanics.filter(m => m.limitation).map(m => `<p>${escape(m.limitation)}${m.kind === "ice-ring-on-kill" ? " 단일 보스에게 재발동 적중이 없으면 0을 입력하세요." : ""} ${sourceLink(m)}</p>`).join("")}</details>` : ""}</fieldset>`;
-    }).join("")}
+    ${skillInputs}
     <details data-role="combat-input-help"><summary>전투 입력 기준</summary><p>적 한 명을 기준으로 입력하세요. 적 저항은 상한 적용 후의 값을 입력하면 관통과 저항 감소가 계산에 반영됩니다. 쓰이지 않는 대미지 유형의 저항은 비워둘 수 있습니다. 시전 시간 배분 합계는 100% 이하이며, 비어 있는 값을 0으로 계산하지 않습니다.</p>
     <p>적중률과 시전 시간 배분은 자원 소모·이동을 고려한 입력입니다. 복합 계산은 첫 매직 버스트 충전도 포함합니다. ${seasonWeaponProfile(build).enabled ? '무기 수치는 선택한 장비에서 자동 반영합니다.' : '무기 대미지는 무기 자체 수치로 입력하세요.'} 추가 번개는 스킬 계수 적용 전 수치입니다. 점화와 기본 마취 확률은 주력 스킬에 적용하며, 마취된 대상의 추가 중첩은 각 번개 적중에서 계산합니다.</p></details>
   </details>`;

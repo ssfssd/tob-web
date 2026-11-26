@@ -89,6 +89,8 @@
 .season-native .tree-map .tree-point {position:relative;display:grid;place-items:center;width:clamp(24px,5cqw,43px);aspect-ratio:1;min-height:0;padding:1px;border:1px solid #a69c86;border-radius:50%;background:#332f2f;z-index:1}
 .tree-map .tree-point img {height:100%;width:100%;object-fit:contain;filter:grayscale(.85)}.tree-map .tree-point.allocated img,.tree-map .tree-point[aria-pressed=true] img {filter:none}
 .tree-point small {font:600 10px sans-serif;color:#fff;background:#16191a;white-space:nowrap}.tree-map .tree-point small {position:absolute;bottom:-5px;right:-4px}
+.tree-point-delta {padding:1px 3px;border-radius:3px;background:#d6ebf8;color:#142c3d;font:700 10px/1.2 sans-serif;white-space:nowrap}
+.tree-map .tree-point-delta {position:absolute;top:-4px;left:-3px;pointer-events:none}
 .tree-core,.tree-extra {display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}.tree-core h3 {width:100%;margin:2px 0;color:#e7c981;font-size:13px}
 .season-native :is(.tree-core,.tree-extra) .tree-point {padding:3px 5px;display:flex;align-items:center;gap:4px;background:#27231e;border:1px solid #655a47;font-size:12px}
 .tree-core img,.tree-extra img {width:23px;height:23px;object-fit:contain}
@@ -156,8 +158,12 @@
 .season-native .pact-board-actions [data-role="pact-ring-selector"][open] {flex-basis:100%}
 .season-native :is(.pact-slot-list,.pact-ring-list) button {display:grid;align-content:center;gap:2px;min-height:44px;min-width:0;padding:6px 9px;text-align:left;background:#182934ed;border-color:#566b77}
 .pact-slot-list small,.pact-ring-list small {font-size:12px;color:#c6d7de}
-.pact-rolls {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(104px,100%),1fr));gap:8px;margin-bottom:8px}
+.pact-rolls {display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-bottom:8px}
 .pact-rolls label {align-content:end;margin:0}
+.pact-roll label {display:grid;grid-template-columns:minmax(0,1fr) minmax(54px,auto);gap:3px 8px;align-items:center}
+.pact-roll input[type=number] {grid-column:2;grid-row:1 / span 2;width:64px;max-width:100%;min-width:0;text-align:right}
+.pact-roll input[type=range] {width:100%;min-height:24px;accent-color:#e6c078}
+@media(max-width:760px){.pact-roll input[type=range]{min-height:32px}.pact-roll input[type=number]{min-height:44px}}
 .pact-extra-list,.pact-extra-actions {display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 .pact-extra-list button {display:grid;min-width:0;text-align:start;gap:3px}
 .pact-extra-list button[aria-pressed=true] {outline:2px solid #ebc47e}

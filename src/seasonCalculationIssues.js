@@ -12,6 +12,7 @@ export function seasonIssueCause(value) {
   if (/^unsupported-nonnumeric-mechanic-or-flavor$|호환 조건·효과 해석 미완료/u.test(reason)) return 'unresolved';
   if (/^range-value-requires-selected-roll$|^attack-base-damage-unavailable$/u.test(reason)) return 'input';
   if (reason === '추가 번개 대미지의 최소·최대 값을 모두 확인하세요.') return 'input';
+  if (/^고정 스킬 소모 감소와 소모량 배율·HP 전환의 적용 순서가 미확인입니다\.$|현재 1회 MP·HP 소모를 다시 입력하세요\.$/u.test(reason)) return 'input';
   if (/^동일 지속 스킬의 중첩 구간을 한 번씩만 센 유지율 합계|^같은 지속 스킬의 수확 겹침 비율 합계|^자동 은총에서 (?:동일 지속 스킬의 중첩|동토의 적용 구간).*복합 계산을 켜세요/u.test(reason)) return 'input';
   if (reason === 'added-damage-effectiveness-unavailable' || /이 레벨의 추가 대미지 효율을 확인할 수 없습니다/u.test(reason)) return 'source';
   if (/^spell-base-damage-unavailable$|^level-formula-pattern-unsupported$/u.test(reason)) return 'source';
@@ -23,9 +24,9 @@ export function seasonIssueCause(value) {
   if (/unsupported|unmapped|unresolved|미지원|미완료|미연결|연결되지 않은 효과|연산 미확인|분리.*필요|별도 계산.*필요/u.test(reason)) return 'model';
   return 'unresolved';
 }
-export function seasonCalculationIssues(report) {
+export function seasonCalculationIssues(report,metric='fullDps') {
   const groups=new Map();
-  for(const reason of new Set(report?.fullDps?.blockers??[])) {
+  for(const reason of new Set(report?.[metric]?.blockers??[])) {
     const cause=seasonIssueCause(reason);
     if(!groups.has(cause))groups.set(cause,{cause,label:SEASON_ISSUE_LABELS[cause],reasons:[]});
     groups.get(cause).reasons.push(reason);
@@ -68,11 +69,13 @@ export function seasonPartialDpsReview(document, report) {
   return {...partial,confirmation,exclusionScope};
 }
 
-export function compareSeasonPartialDps(before, after, fullComparison) {
+export function compareSeasonPartialDps(before, after, fullComparison, {compareCopy=false}={}) {
   if (fullComparison.encounterMatches !== true) return null;
   const baseline=seasonPartialDpsReview(before.document,before.report);
   const candidate=seasonPartialDpsReview(after.document,after.report);
-  if (!baseline || baseline.confirmation !== candidate?.confirmation) return null;
+  if (!baseline || !candidate) return null;
+  if (compareCopy ? JSON.stringify(baseline.exclusionScope)!==JSON.stringify(candidate.exclusionScope)
+    : baseline.confirmation!==candidate.confirmation) return null;
   const excludedReasons=new Set([
     ...before.report.fullDps.blockers.map(reason=>`기준: ${reason}`),
     ...after.report.fullDps.blockers.map(reason=>`현재: ${reason}`),

@@ -81,6 +81,9 @@
 .slate-option-list { max-height:340px;overflow:auto;display:grid;gap:5px; }
 .season-native .slate-option-list button { text-align:left;background:#142633;display:flex;flex-direction:column;gap:5px;padding:10px; }
 .slate-option-list small { color:#b8c9d3; }.slate-option-list span { font-size:13px;line-height:1.6;white-space:pre-line; }
+.slate-option-group {background:#142633;border:1px solid #496170;padding:8px;display:grid;gap:5px}
+.slate-option-group > div {display:flex;flex-wrap:wrap;gap:5px}
+.season-native .slate-option-group button {padding:5px 7px;font-size:12px}
 .slate-option-list [hidden],.slate-option-picker [hidden] { display:none!important; }
 .slate-shapes { display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;max-height:220px;overflow:auto; }
 .season-native .slate-shapes button { display:flex;align-items:center;gap:8px;font-size:12px;padding:8px; }
@@ -149,6 +152,7 @@
   padding:8px 0;
 }
 .season-native .ss14-saved-build-row[hidden] { display:none; }
+.season-native .ss14-saved-build-row > div { display:flex;flex-wrap:wrap;gap:4px; }
 .season-native .ss14-saved-build-row .saved-build-open {
   text-align:start;
   min-width:0;

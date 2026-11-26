@@ -6,6 +6,7 @@ import { transformedShape } from "./divinityBoardModel.js";
 import { SS14_CURRENT_DATABASE } from "./data/ss14CurrentDatabase.generated.js";
 import { isSeasonNether, netherTemplate, netherTalent, netherTalentOptions } from './seasonNether.js';
 import { TALENT_SUBTREE_SLUGS_BY_GOD } from './talentBoardModel.js';
+import { RUNTIME_CATALOG } from './data/runtimeCatalog.generated.js';
 
 const templates = { corner_of_divinity: "A_Corner_of_Divinity", stars_fall: "Fallen_Starlight", starfire: "Sparks_of_Moth_Fire",
   moth_fire: "When_Sparks_Set_the_Prairie_Ablaze", void_gap: "Space_Rift", residence_of_stars: "Residence_of_Stars", genealogy: "Pedigree_of_Gods" };
@@ -19,6 +20,22 @@ const itemById = new Map(items.map(item => [item.id, item]));
 const entryByKey = new Map(entries.map(entry => [entryKey(entry.section,entry.id), entry]));
 const koreanByKey = new Map(koEntries.map(entry => [entryKey(entry.section,entry.id), entry]));
 const talentPage = (locale, slug) => SS14_COMPONENTS.pages[`https://tlidb.com/${locale}/${slug}`];
+const sourceTrees = new Map(RUNTIME_CATALOG.datasets.talent_catalog.trees.flatMap(tree => {
+  const page = talentPage('en',tree.slug);
+  return page?.season==='SS14' ? [[page.parsed.name,{tree,ids:new Set(page.parsed.entries.map(entry=>entry.id))}]] : [];
+}));
+function slateOptionSource(entry, ko) {
+  const affiliation = ko.affiliation;
+  if (!affiliation || safeKo(affiliation)!==affiliation) return '';
+  const source = sourceTrees.get(entry.affiliation);
+  const node = source?.ids.has(entry.id) && source.tree.nodes.find(node=>node.dataId===entry.id);
+  return node ? `${affiliation} · ${node.x+1}열 ${node.y+1}행` : affiliation;
+}
+export function seasonSlateOptionSource(id) {
+  const entry=seasonSlateEntry(id);
+  const ko=entry&&koreanByKey.get(entryKey(entry.section,entry.id));
+  return ko ? slateOptionSource(entry,ko) : '';
+}
 export const regularSlateFamilies = Object.entries(TALENT_SUBTREE_SLUGS_BY_GOD).map(([id, subtrees]) => ({
   id, name:safeKo(talentPage('ko',id)?.parsed.name),
   affiliations:[id,...subtrees].map(slug => talentPage('en',slug)?.parsed.name).filter(Boolean)
@@ -63,17 +80,24 @@ export function seasonSlateOptions(label) {
   const result = items.flatMap(item => {
     const entry = seasonSlateEntry(item.id);
     const ko = netherTalent(entry?.id)?.ko ?? (entry && koreanByKey.get(entryKey(entry.section,entry.id)));
-    return entry && allowed(label, entry) && ko ? [{ id: item.id, name: safeKo(ko.name), detail: safeKo(ko.detail) }] : [];
+    return entry && allowed(label, entry) && ko ? [{ id: item.id, name: safeKo(ko.name), detail: safeKo(ko.detail), source:slateOptionSource(entry,ko) }] : [];
   });
   if (label === 'Ultimate Nether King Talent Node') for (const option of netherTalentOptions(label)) {
     if (!result.some(r=>seasonSlateEntry(r.id)?.id===netherTalent(option.id)?.id)) result.push(option);
   }
   return result;
 }
-export function seasonSlateTemplates(build, { requireBindings = true } = {}) {
-  const board = build.divinity?.boards?.find(b => b.boardId === build.divinity.activeBoardId);
+export function season91SlateExportIssue(build){
+  const boards=build.divinity?.boards??[];
+  if(boards.length>1)return '91TOB 파일은 석판 페이지 하나만 저장할 수 있습니다.';
+  if(boards[0]?.slateInventory.some(slate=>!slate.anchor))return '91TOB 파일에는 미배치 석판이 빠집니다.';
+  return '';
+}
+
+export function seasonSlateTemplates(build, { requireBindings = true, includeUnplaced = false,
+  board = build.divinity?.boards?.find(b => b.boardId === build.divinity.activeBoardId) } = {}) {
   const placed = new Set(board?.cells.map(c => c.slateInstanceId));
-  return (board?.slateInventory ?? []).filter(s => placed.has(s.instanceId) && (templates[s.slateId] || s.slateId === "six_gods" || isSeasonNether(s.slateId))).map(slate => {
+  return (board?.slateInventory ?? []).filter(s => (includeUnplaced||placed.has(s.instanceId)) && (templates[s.slateId] || s.slateId === "six_gods" || isSeasonNether(s.slateId))).map(slate => {
     if (isSeasonNether(slate.slateId)) return netherTemplate(slate, board);
     if (slate.slateId === "six_gods") {
       const page = SS14_COMPONENTS.pages["https://tlidb.com/en/Divinity_Slate"];
@@ -130,8 +154,13 @@ export function validSeasonSlateSelections(build) {
   const selections = build.ss14Inputs?.slateSelections;
   if (selections === undefined) return true;
   if (!selections || typeof selections !== "object" || Array.isArray(selections)) return false;
+  const rows=new Map();
+  for(const board of build.divinity?.boards??[])for(const row of seasonSlateTemplates(build,{requireBindings:false,includeUnplaced:true,board})){
+    if(rows.has(row.slate.instanceId))return false;
+    rows.set(row.slate.instanceId,row);
+  }
   return Object.entries(selections).every(([instanceId, binding]) => {
-    const row = seasonSlateTemplates(build, { requireBindings: false }).find(r => r.slate.instanceId === instanceId);
+    const row = rows.get(instanceId);
     return row && binding && binding.templateId === row.slate.slateId && /^[a-f0-9]{64}$/u.test(binding.sourcePageSha256)
       && binding.slots && typeof binding.slots === "object" && !Array.isArray(binding.slots)
       && !hasDuplicatePedigreeCore(binding.templateId,binding.slots)
